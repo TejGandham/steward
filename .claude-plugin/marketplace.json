@@ -1,0 +1,14 @@
+{
+  "name": "steward",
+  "owner": {
+    "name": "Tej Gandham"
+  },
+  "description": "Steward: a delegation edict for Claude Code with pinned subagent profiles, plain-language prose rules, and enforcing hooks.",
+  "plugins": [
+    {
+      "name": "steward",
+      "description": "Delegation edict: pinned subagent profiles, plain-language prose, enforcing hooks.",
+      "source": "./"
+    }
+  ]
+}
