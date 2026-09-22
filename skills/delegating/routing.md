@@ -1,6 +1,6 @@
 # Routing knowledge base
 
-Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch and the drop of Haiku 4.5 and Opus 5 from the matrix.
+Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium.
 
 ## Cost ranking (per MTok, input / output / cache read), cheapest to dearest (cited: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-09-22)
 | Model | Input | Output | Cache read |
@@ -24,6 +24,17 @@ Prices and model ids are as of 2026-09-22; the profiles use aliases (sonnet, opu
 
 Effort: Opus 5.5 accepts low, medium, high, xhigh, max. Anthropic's pre-launch Opus 5.5 migration guide (bundled inside Claude Code's `claude-api` skill, cached 2026-06-24; not a public web page, so treat as unconfirmed on the web) says the API default effort is `medium` (Opus 5's was `high`), thinking cannot be disabled, and at a given level Opus 5.5 thinks more per turn than Opus 5, especially at xhigh and max, so turns run longer. Steward profiles set effort explicitly, so the default does not affect them; the longer-turn point is why steward:deep-reasoner-opus-xhigh stays at xhigh only for the hardest work.
 
+### Coder on Opus 5.5 (2026-09-22)
+The earlier "Sonnet 5 xhigh for pure coding" preference was a Sonnet-versus-Haiku choice made 2026-09-03, before Opus 5.5 existed. It was never a preference against Opus 5.5, so Opus 5.5's launch supersedes it rather than overriding it.
+
+Anthropic's pre-launch Opus 5.5 migration guide (same source as above: bundled in Claude Code's `claude-api` skill, cached 2026-06-24, not a public web page, unconfirmed on the web) states that at its default `medium` effort, Opus 5.5 "matched or beat Claude Opus 5's high-effort results" on multistep work in a real codebase, carrying a change through a large repository until its tests pass, "in fewer steps and with about half the tokens." It adds that "on several coding evaluations `low` comes close to it at much lower cost," and recommends: "Start at medium and test the neighboring levels; reserve xhigh and max for work where you have measured a quality gain." That workload, carrying a spec-and-tests change through a repository to green, is exactly the coder profile's job. `steward:coder-opus-medium` is set at `medium` on that basis.
+
+Cost per token is 2x Sonnet 5 on input and output ($4/$20 versus $2/$10, see "Cost ranking" above), but cache reads tie at $0.20, and Anthropic's launch page says cache reads "make up the majority of agentic and coding work costs" (anthropic.com/claude-opus-5-5, 2026-09-22). Fewer steps and fewer tokens per task, per the migration guide's claim above, narrow the per-token gap further. What matters is cost per completed task, not cost per token, and nobody has measured that for this profile yet; say so plainly rather than implying a saving that has not been checked.
+
+If a `steward:coder-opus-medium` run misses its gate, escalate in one step: rerun the same profile (its frontmatter effort stands; do not invent a per-invocation effort override, since a bare `Agent(model=...)` call cannot set effort) and flag the miss to the deep-reasoner, or hand the task to `steward:deep-reasoner-opus-xhigh` directly.
+
+Sonnet 5 stays pinned for everyday review, research, writing, and mechanical work. Its price is the point there, and the high-stakes path already runs on Opus.
+
 ## Dropped models (2026-09-22)
 - **Haiku 4.5** ($1/$5/$0.10): dropped. Nearest retirement floor of any model in the matrix (tentative, not sooner than 2026-10-15, three weeks out at drop time; platform.claude.com/docs/en/about-claude/model-deprecations, fetched 2026-09-22), 200K context versus 1M for the rest, no effort dial, and Sonnet 5 at `low` effort now covers the same rote work with an explicit effort setting. Cost for that rote work doubles per token, $1/$5 to $2/$10.
 - **Opus 5** ($5/$25/$0.50): dropped. Superseded by Opus 5.5 at a 20% lower input/output price, 60% lower cache reads, and Fable-level quality on most work (anthropic.com/claude-opus-5-5, quoted above). The `opus` alias already resolves to Opus 5.5 on the installed Claude Code 2.1.280 binary here; see the alias-lag caveat below. Deprecation page: Active, tentative retirement not sooner than 2027-07-24.
@@ -31,7 +42,7 @@ Effort: Opus 5.5 accepts low, medium, high, xhigh, max. Anthropic's pre-launch O
 Other matrix models' tentative retirement floors, same deprecations page: Sonnet 5 2027-06-30, Fable 5.1 2027-09-01. Opus 5.5 is not yet listed there.
 
 ## Pinned profiles (in the steward plugin `agents/` directory), delegate by subagent_type
-- **steward:coder-sonnet-xhigh** (sonnet, xhigh): pure implementation with spec and tests (TDD), well-defined bug fixes, approved plans. Honors the operator's stated preference of Sonnet 5 xhigh for pure coding.
+- **steward:coder-opus-medium** (opus, medium): pure implementation with spec and tests (TDD), well-defined bug fixes, approved plans. See "Coder on Opus 5.5" above for why it moved off Sonnet 5 xhigh.
 - **steward:deep-reasoner-opus-xhigh** (opus, xhigh): architecture, ambiguous design, cross-repo synthesis/plans, security review, high-stakes/subtle code review. Escalate to the main thread only if it falls short.
 - **steward:reviewer-sonnet-high** (sonnet, high): everyday code review of a diff/PR.
 - **steward:researcher-sonnet-low** (sonnet, low): thorough read-only investigation/search, plan inputs, findings docs.
@@ -42,8 +53,8 @@ Other matrix models' tentative retirement floors, same deprecations page: Sonnet
 ## Rubric (task to profile)
 | Task | Profile |
 |-|-|
-| Pure coding, spec+tests (TDD) | steward:coder-sonnet-xhigh (steward:mechanic-sonnet-low if single trivial file) |
-| Refactor / simplify | steward:coder-sonnet-xhigh (steward:mechanic-sonnet-low for small rote refactors) |
+| Pure coding, spec+tests (TDD) | steward:coder-opus-medium (steward:mechanic-sonnet-low if single trivial file) |
+| Refactor / simplify | steward:coder-opus-medium (steward:mechanic-sonnet-low for small rote refactors) |
 | Deep architecture / ambiguous design | steward:deep-reasoner-opus-xhigh, escalate to main thread if short |
 | Cross-repo synthesis / plan writing | steward:deep-reasoner-opus-xhigh (or a coordinator plus sonnet workers if huge and splittable) |
 | Read-only investigation / search | steward:researcher-sonnet-low (steward:mechanic-sonnet-low for one targeted lookup) |
@@ -75,7 +86,7 @@ Same YAML block:
 Minimal example:
 ```markdown
 ---
-name: coder-sonnet-xhigh
+name: example-profile-name
 description: <when to use>
 model: claude-sonnet-5
 effort: xhigh

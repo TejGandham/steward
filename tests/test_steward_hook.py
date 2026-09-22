@@ -275,7 +275,7 @@ class GateCounterTests(StewardTestCase):
         self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PreToolUse")
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("#2", out["hookSpecificOutput"]["permissionDecisionReason"])
-        self.assertIn("steward:coder-sonnet-xhigh", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertIn("steward:coder-opus-medium", out["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_soft_mode_returns_context_without_permission_decision(self):
         # An "allow" skips the permission prompt entirely; soft mode is a

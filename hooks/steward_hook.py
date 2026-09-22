@@ -632,7 +632,7 @@ def gate_message(count, config_dir):
     return (
         "steward delegation gate: this is direct edit #{n} on the main "
         "thread with no subagent call in between. The edict says every "
-        "non-trivial task runs in a subagent (steward:coder-sonnet-xhigh "
+        "non-trivial task runs in a subagent (steward:coder-opus-medium "
         "for code, steward:mechanic-sonnet-low for rote edits). Delegate it, or "
         "ask the operator to set the gate to soft or off by writing that "
         "word to {gate_path} (takes effect immediately; STEWARD_GATE only "

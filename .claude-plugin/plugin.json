@@ -1,7 +1,7 @@
 {
   "name": "steward",
   "description": "Delegation edict for Claude Code: pinned subagent profiles chosen by task complexity, plain-language prose, and hooks that enforce both.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": {
     "name": "Tej Gandham"
   },
