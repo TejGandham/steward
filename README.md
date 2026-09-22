@@ -34,7 +34,7 @@ Steward expects two things to already be installed, and does not ship them:
 
 | Profile | Model | Effort | Use for |
 |---|---|---|---|
-| `steward:coder-sonnet-xhigh` | Sonnet | xhigh | Implementation with a spec and tests (TDD) |
+| `steward:coder-opus-medium` | Opus | medium | Implementation with a spec and tests (TDD) |
 | `steward:deep-reasoner-opus-xhigh` | Opus | xhigh | Architecture, ambiguous design, security review |
 | `steward:reviewer-sonnet-high` | Sonnet | high | Everyday PR and diff review |
 | `steward:researcher-sonnet-low` | Sonnet | low | Read-only investigation and search |
@@ -42,7 +42,7 @@ Steward expects two things to already be installed, and does not ship them:
 | `steward:mechanic-sonnet-low` | Sonnet | low | Single lookups, rote edits, running known commands |
 | `steward:reviewer-fable-xhigh` | Fable | xhigh | Highest-stakes gap review, only on explicit request (Opus 5.5 covers most of this now) |
 
-As of 0.2.0 the profiles run on three models, Sonnet 5, Opus 5.5, and Fable 5.1; Haiku 4.5 and Opus 5 were dropped, and `routing.md` says why.
+As of 0.3.0 the profiles run on three models, Sonnet 5, Opus 5.5, and Fable 5.1; pure coding runs on Opus 5.5 at medium effort; Haiku 4.5 and Opus 5 were dropped, and `routing.md` says why.
 
 The full routing table and the reasoning behind it live in `skills/delegating/routing.md`.
 
