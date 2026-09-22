@@ -39,8 +39,10 @@ Steward expects two things to already be installed, and does not ship them:
 | `steward:reviewer-sonnet-high` | Sonnet | high | Everyday PR and diff review |
 | `steward:researcher-sonnet-low` | Sonnet | low | Read-only investigation and search |
 | `steward:writer-sonnet-medium` | Sonnet | medium | Docs, PR bodies, plain-language rewrites |
-| `steward:mechanic-haiku` | Haiku | none | Single lookups, rote edits, running known commands |
-| `steward:reviewer-fable-xhigh` | Fable | xhigh | Highest-stakes gap review, only on explicit request |
+| `steward:mechanic-sonnet-low` | Sonnet | low | Single lookups, rote edits, running known commands |
+| `steward:reviewer-fable-xhigh` | Fable | xhigh | Highest-stakes gap review, only on explicit request (Opus 5.5 covers most of this now) |
+
+As of 0.2.0 the profiles run on three models, Sonnet 5, Opus 5.5, and Fable 5.1; Haiku 4.5 and Opus 5 were dropped, and `routing.md` says why.
 
 The full routing table and the reasoning behind it live in `skills/delegating/routing.md`.
 

@@ -1,16 +1,34 @@
 # Routing knowledge base
 
-Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search.
+Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch and the drop of Haiku 4.5 and Opus 5 from the matrix.
 
-## Cost ranking (per MTok input/output), cheapest to dearest (cited: platform.claude.com pricing, 2026-09-03)
-- Haiku 4.5: $1 / $5
-- Sonnet 5: $2 / $10
-- Opus 5: $5 / $25
-- Fable 5.1 = Mythos 5.1: $10 / $50 (the main/orchestrator thread; also 4x cheaper cache reads)
+## Cost ranking (per MTok, input / output / cache read), cheapest to dearest (cited: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-09-22)
+| Model | Input | Output | Cache read |
+|-|-|-|-|
+| Sonnet 5 | $2 | $10 | $0.20 |
+| Opus 5.5 | $4 | $20 | $0.20 |
+| Fable 5.1 = Mythos 5.1 | $10 | $50 | $0.25 |
 
-So Sonnet is about 5x cheaper than Fable, Opus about 2x cheaper. Any correct delegation off the main thread saves tokens.
+The pricing page states the $2/$10 Sonnet 5 price, originally introductory, is now standard; the planned 2026-09-01 increase to $3/$15 did not happen. Opus 5.5's price comes from anthropic.com/claude-opus-5-5, not yet on the pricing page at fetch time.
 
-Prices and model ids are as of 2026-09-03; the profiles use aliases (sonnet, opus, haiku, fable) so they track each machine's current model, which means this table can drift. Re-check before quoting a number.
+Sonnet is 5x cheaper than Fable and 2x cheaper than Opus 5.5; Opus 5.5 is 2.5x cheaper than Fable. Cache reads: Sonnet 5 and Opus 5.5 tie at $0.20, Fable 5.1 is $0.25. Any correct delegation off the main thread saves tokens.
+
+Prices and model ids are as of 2026-09-22; the profiles use aliases (sonnet, opus, fable) so they track each machine's current model, which means this table can drift. Re-check before quoting a number.
+
+## Opus 5.5 (launched 2026-09-22, cited: anthropic.com/claude-opus-5-5)
+- "It performs at the level of Claude Fable 5.1 on most work and costs 40% less to run than Opus 5."
+- "Input and output tokens are $4 and $20 per million, 20% less than Opus 5. Cache reads (which make up the majority of agentic and coding work costs) are $0.20 per million tokens, 60% less than Opus 5."
+- "Opus 5.5 also generates output more than 30% faster than Opus 5."
+- "much less likely than recent models to take hard-to-reverse actions or act outside the boundaries it's been given, and it's more resistant than Opus 5 to prompt injection."
+- "Because Opus 5.5 is comparable to Claude Mythos 5.1 in biology and cybersecurity, we're deploying it with safeguards similar to those on Claude Fable 5.1."
+
+Effort: Opus 5.5 accepts low, medium, high, xhigh, max. Anthropic's pre-launch Opus 5.5 migration guide (bundled inside Claude Code's `claude-api` skill, cached 2026-06-24; not a public web page, so treat as unconfirmed on the web) says the API default effort is `medium` (Opus 5's was `high`), thinking cannot be disabled, and at a given level Opus 5.5 thinks more per turn than Opus 5, especially at xhigh and max, so turns run longer. Steward profiles set effort explicitly, so the default does not affect them; the longer-turn point is why steward:deep-reasoner-opus-xhigh stays at xhigh only for the hardest work.
+
+## Dropped models (2026-09-22)
+- **Haiku 4.5** ($1/$5/$0.10): dropped. Nearest retirement floor of any model in the matrix (tentative, not sooner than 2026-10-15, three weeks out at drop time; platform.claude.com/docs/en/about-claude/model-deprecations, fetched 2026-09-22), 200K context versus 1M for the rest, no effort dial, and Sonnet 5 at `low` effort now covers the same rote work with an explicit effort setting. Cost for that rote work doubles per token, $1/$5 to $2/$10.
+- **Opus 5** ($5/$25/$0.50): dropped. Superseded by Opus 5.5 at a 20% lower input/output price, 60% lower cache reads, and Fable-level quality on most work (anthropic.com/claude-opus-5-5, quoted above). The `opus` alias already resolves to Opus 5.5 on the installed Claude Code 2.1.280 binary here; see the alias-lag caveat below. Deprecation page: Active, tentative retirement not sooner than 2027-07-24.
+
+Other matrix models' tentative retirement floors, same deprecations page: Sonnet 5 2027-06-30, Fable 5.1 2027-09-01. Opus 5.5 is not yet listed there.
 
 ## Pinned profiles (in the steward plugin `agents/` directory), delegate by subagent_type
 - **steward:coder-sonnet-xhigh** (sonnet, xhigh): pure implementation with spec and tests (TDD), well-defined bug fixes, approved plans. Honors the operator's stated preference of Sonnet 5 xhigh for pure coding.
@@ -18,34 +36,32 @@ Prices and model ids are as of 2026-09-03; the profiles use aliases (sonnet, opu
 - **steward:reviewer-sonnet-high** (sonnet, high): everyday code review of a diff/PR.
 - **steward:researcher-sonnet-low** (sonnet, low): thorough read-only investigation/search, plan inputs, findings docs.
 - **steward:writer-sonnet-medium** (sonnet, medium): docs, README sections, substantive PR bodies, plain-language rewrites.
-- **steward:mechanic-haiku** (haiku, no effort dial): single lookups, rote edits, file ops, running known commands, status collation, trivial PR one-liners.
-- **steward:reviewer-fable-xhigh** (fable, xhigh): highest-stakes gap reviews of plans/specs; reserve for explicit operator requests or when steward:deep-reasoner-opus-xhigh falls short (cost: highest).
+- **steward:mechanic-sonnet-low** (sonnet, low): single lookups, rote edits, file ops, running known commands, status collation, trivial PR one-liners. Replaces the mechanic-haiku profile as of 0.2.0, when Haiku 4.5 was dropped from the matrix; see "Dropped models" above.
+- **steward:reviewer-fable-xhigh** (fable, xhigh): highest-stakes gap reviews of plans/specs; reserve for explicit operator requests, since Opus 5.5 is at Fable 5.1 level on most work for 40% of the price (cost: highest).
 
 ## Rubric (task to profile)
 | Task | Profile |
-|---|---|
-| Pure coding, spec+tests (TDD) | steward:coder-sonnet-xhigh (steward:mechanic-haiku if single trivial file) |
-| Refactor / simplify | steward:coder-sonnet-xhigh (steward:mechanic-haiku for small rote refactors) |
+|-|-|
+| Pure coding, spec+tests (TDD) | steward:coder-sonnet-xhigh (steward:mechanic-sonnet-low if single trivial file) |
+| Refactor / simplify | steward:coder-sonnet-xhigh (steward:mechanic-sonnet-low for small rote refactors) |
 | Deep architecture / ambiguous design | steward:deep-reasoner-opus-xhigh, escalate to main thread if short |
 | Cross-repo synthesis / plan writing | steward:deep-reasoner-opus-xhigh (or a coordinator plus sonnet workers if huge and splittable) |
-| Read-only investigation / search | steward:researcher-sonnet-low (steward:mechanic-haiku for one targeted lookup) |
+| Read-only investigation / search | steward:researcher-sonnet-low (steward:mechanic-sonnet-low for one targeted lookup) |
 | Code review | steward:reviewer-sonnet-high (steward:deep-reasoner-opus-xhigh for high-stakes/complex) |
 | Security review | steward:deep-reasoner-opus-xhigh |
-| Mechanical edits / file ops | steward:mechanic-haiku |
-| Docs / prose | steward:writer-sonnet-medium (steward:mechanic-haiku for short) |
-| PR-body drafting | steward:writer-sonnet-medium (steward:mechanic-haiku for trivial diffs) |
-| Status / collation | steward:mechanic-haiku (steward:researcher-sonnet-low if reconciling conflicting reports) |
+| Mechanical edits / file ops | steward:mechanic-sonnet-low |
+| Docs / prose | steward:writer-sonnet-medium (steward:mechanic-sonnet-low for short) |
+| PR-body drafting | steward:writer-sonnet-medium (steward:mechanic-sonnet-low for trivial diffs) |
+| Status / collation | steward:mechanic-sonnet-low (steward:researcher-sonnet-low if reconciling conflicting reports) |
 
 ## Keep it inline on the main thread when
 one dependent chain fits a single context with no splittable pieces; every step needs frontier judgment; the context is already resident in the orchestrator thread; it is the final synthesis/arbitration the orchestrator owns; or there is no cheap way to verify a delegate's output.
 
 ## Caveats to remember (do not overclaim)
-- Haiku has no reasoning-effort dial: its profile omits `effort`; effort settings do not apply to it.
-- "Mythos-class, tier above Opus" is cited: anthropic.com/claude/fable says "Claude Fable 5.1 is a Mythos-level model." Primary-source validation on 2026-09-03 confirmed every other cited fact too (prices, 0.025x vs 0.1x cache reads, cost ranking, all four model ids, no "Haiku 5", Haiku 4.5 has no effort dial, 1M/1M/1M/200K context windows, the Opus-at-half-price quote, the 47-55% savings figure). The knowledge base is validated; refresh if Anthropic changes pricing.
-- Multi-model cost-savings percentages are Anthropic's own "directional" benchmarks, not guaranteed on any particular workload; measure before trusting a specific number.
+- "Mythos-class, tier above Opus" is cited: anthropic.com/claude/fable says "Claude Fable 5.1 is a Mythos-level model." Primary-source validation on 2026-09-03 confirmed every other cited fact too (prices, 0.025x vs 0.1x cache reads, cost ranking, all four model ids then in the matrix, 1M/1M/1M/200K context windows, the Opus-at-half-price quote, the 47-55% savings figure). The 2026-09-22 revision re-verified pricing and deprecations against primary sources; see "Cost ranking", "Opus 5.5", and "Dropped models" above for those citations.
+- Multi-model cost-savings percentages (the 40%, 20%, 60%, 30% figures above) are Anthropic's own comparisons against Opus 5, not guaranteed on any particular workload; measure before trusting a specific number.
 - A bare `Agent(model=...)` call cannot set effort; to get a profile's effort you must delegate by subagent_type (see "Model and effort mechanics" below).
-
-**2026-09-10 addition:** seventh pinned profile `steward:reviewer-fable-xhigh` (fable, xhigh) for highest-stakes gap reviews of plans/specs; reserve for explicit operator requests or when steward:deep-reasoner-opus-xhigh falls short (cost: highest).
+- Alias lag: code.claude.com/docs/en/model-config, as crawled 2026-09-22, still says `opus` resolves to Opus 4.8 and `sonnet` to Sonnet 4.6, both behind the current launches. The installed Claude Code 2.1.280 binary on this machine labels its Opus picker entry "Opus 5.5 - best for everyday, complex tasks" and its default-model string names Opus 5.5, so `opus` means Opus 5.5 here; check the binary, not just the docs page, before trusting an alias. The env vars `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` override what an alias resolves to, and a full id in agent frontmatter overrides the alias too.
 
 # Model and effort mechanics
 
@@ -53,7 +69,7 @@ Operational reference for choosing and setting a subagent's model and reasoning 
 
 ## Frontmatter keys (agent file in the steward plugin `agents/` directory)
 Same YAML block:
-- `model`: alias `sonnet` | `opus` | `haiku` | `fable`, OR a full id (for example `claude-sonnet-5`), OR `inherit`.
+- `model`: alias `sonnet` | `opus` | `haiku` | `fable`, OR a full id (for example `claude-sonnet-5`), OR `inherit`. `haiku` remains a valid alias, but no profile has used it since 0.2.0, when Haiku 4.5 was dropped from the matrix.
 - `effort`: `low` | `medium` | `high` | `xhigh` | `max` (which levels are valid is model-dependent).
 
 Minimal example:
@@ -68,7 +84,7 @@ tools: <optional; omit to inherit all>
 <system prompt>
 ```
 
-## The load-bearing rule for routing
+## The rule that decides routing
 **Effort is definition-only for subagents.** The Agent/Task tool exposes a per-invocation `model` param but no effort param. So:
 - To run a subagent at a chosen effort you must delegate via `subagent_type` to an agent file whose frontmatter sets `effort:`. A bare `Agent` call that only overrides `model` runs at the inherited/default effort, not a chosen one.
 - `model` can still be overridden per-invocation (Agent tool `model`), and that override sits at the top of the model-resolution order. But it does not carry an effort.
