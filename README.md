@@ -55,7 +55,7 @@ The hooks call `python3`; on Windows you will need a `python3` launcher on PATH.
 - **Session start**: injects the `delegating` skill into context and checks that `plainlanguage` and `update-pr-summary` are installed, and that the orchestration registry file exists (creating it if not).
 - **Delegation gate**: on a direct `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, or a write-shaped Bash command, on the main thread. A write-shaped Bash command is one that changes something on disk or upstream: a redirect to a file, `tee`, `sed -i`, `git commit` or `git push`, `gh pr create` or `gh pr edit`, `mv`/`cp`/`rm`/`mkdir`/`touch`, a package install, or a Python heredoc that writes a file. Read-only commands pass through. The edict allows one such edit; a second in a row is denied (or flagged, in soft mode) until you make an Agent call in between. This only exempts work done inside a subagent; a session started with `--agent` is still gated.
 - **Prose gate**: on stop, checks your last reply for em-dashes or common AI-writing tells. If it finds any, it blocks the stop and asks you to revise with the plainlanguage skill.
-- **PR-body gate**: on `gh pr create` or `gh pr edit`, denies the command if the PR text contains an em-dash.
+- **PR-body gate**: on `gh pr create` or `gh pr edit`, denies the command if the PR text contains an em-dash or two or more AI-writing tells.
 
 Control the delegation gate by writing `off`, `soft`, or `hard` to the file `~/.claude/steward/gate` (or `$CLAUDE_CONFIG_DIR/steward/gate`):
 ```
