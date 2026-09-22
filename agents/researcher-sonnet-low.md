@@ -1,6 +1,6 @@
 ---
 name: researcher-sonnet-low
-description: Thorough read-only investigation across a codebase or the web, trace how a feature works, find every use of a pattern, gather facts to brief a later task, draft plan inputs. Use when the deliverable is findings, not code changes. For a single targeted lookup, use mechanic-haiku instead.
+description: Thorough read-only investigation across a codebase or the web, trace how a feature works, find every use of a pattern, gather facts to brief a later task, draft plan inputs. Use when the deliverable is findings, not code changes. For a single targeted lookup, use mechanic-sonnet-low instead.
 model: sonnet
 effort: low
 ---
