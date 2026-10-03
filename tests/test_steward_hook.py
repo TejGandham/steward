@@ -85,7 +85,8 @@ class StewardTestCase(unittest.TestCase):
     def make_env(self, **extra):
         env = os.environ.copy()
         for key in ("STEWARD_GATE", "XDG_STATE_HOME", "CLAUDE_CONFIG_DIR",
-                    "STEWARD_ORCHESTRATION_DIR", "STEWARD_PLUGIN_ROOT", "HOME"):
+                    "STEWARD_ORCHESTRATION_DIR", "STEWARD_PLUGIN_ROOT", "HOME",
+                    "STEWARD_HARNESS", "PI_CODING_AGENT_DIR"):
             env.pop(key, None)
         env["HOME"] = self.home
         env["XDG_STATE_HOME"] = self.state

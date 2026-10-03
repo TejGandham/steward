@@ -1,6 +1,6 @@
 # steward
 
-A Claude Code plugin that packages a delegation edict: the main session hands off every non-trivial task to a pinned subagent chosen by task complexity, and all user-facing prose passes a plain-language check.
+A Claude Code plugin that packages a delegation edict: the main session hands off every non-trivial task to a pinned subagent chosen by task complexity, and all user-facing prose passes a plain-language check. It also installs as a pi package; see [Pi](#pi).
 
 It gives you three things:
 - Seven pinned agent profiles, each fixed to a model and reasoning effort for a specific kind of task.
@@ -66,11 +66,114 @@ This file is read on every call, so you can change the mode without restarting C
 - `soft`: allows it, but adds a reminder.
 - `off`: turns the gate off entirely.
 
+## Pi
+
+Steward also runs on [pi](https://pi.dev). On pi you get the same edict, the same seven profiles, and the same three gates. The primary and secondary roles (the `orchestrating` skill and its registry) are Claude Code only for now.
+
+Pi has no subagents of its own. Steward uses the community [pi-subagents](https://github.com/nicobailon/pi-subagents) extension for them, so you install both.
+
+### What you need
+
+- pi 1.0 or newer (`pi --version`).
+- `python3` on your PATH. The pi gates run the same `hooks/steward_hook.py` as Claude Code.
+- The `plainlanguage` skill, in `~/.agents/skills/plainlanguage/` or `~/.pi/agent/skills/plainlanguage/`.
+- An `update-pr-summary` prompt template at `~/.pi/agent/prompts/update-pr-summary.md`.
+
+Steward checks the last two when a session starts and tells the model if either is missing. It also warns when pi-subagents is not loaded.
+
+### Install
+
+```
+pi install npm:pi-subagents@0.75.0
+pi install git:github.com/tejgandham/steward
+```
+
+Then restart pi, or run `/reload` in a running session. Both commands write to `~/.pi/agent/settings.json`; add `-l` to install for the current project only.
+
+pi-subagents ships new versions every few days, so the command above pins the version steward was tested with. Move the pin when you choose to upgrade.
+
+To check the install, ask pi to "list the available subagents". You should see seven agents whose names start with `steward.`.
+
+### How it works on pi
+
+The pi package has three parts:
+- `pi/skills/steward-delegating/`: the edict, written for pi. A pi extension adds it to the system prompt of every main session.
+- `pi/agents/`: the seven profiles. pi-subagents loads them as `steward.<name>`, for example `steward.coder-opus-medium`.
+- `pi/extensions/steward/`: the extension that adds the edict and runs the gates. It passes each pi event to `hooks/steward_hook.py`, so both harnesses share one set of rules and tests.
+
+The model delegates with pi-subagents' `subagent` tool, for example `subagent({ agent: "steward.mechanic-sonnet-low", task: "...", async: false })`.
+
+### Profiles on pi
+
+Each profile pins a full model ID and a thinking level:
+
+| Profile | Model | Thinking |
+|-|-|-|
+| `steward.coder-opus-medium` | `anthropic/claude-opus-5-5` | medium |
+| `steward.deep-reasoner-opus-xhigh` | `anthropic/claude-opus-5-5` | xhigh |
+| `steward.reviewer-sonnet-high` | `anthropic/claude-sonnet-5` | high |
+| `steward.researcher-sonnet-low` | `anthropic/claude-sonnet-5` | low |
+| `steward.writer-sonnet-medium` | `anthropic/claude-sonnet-5` | medium |
+| `steward.mechanic-sonnet-low` | `anthropic/claude-sonnet-5` | low |
+| `steward.reviewer-fable-xhigh` | `anthropic/claude-fable-5-1` | xhigh |
+
+If you reach Claude through another provider, override the model in `~/.pi/agent/settings.json`. The thinking level stays as the profile sets it unless you override that too:
+
+```json
+{
+  "subagents": {
+    "agentOverrides": {
+      "steward.coder-opus-medium": { "model": "openrouter/anthropic/claude-opus-5.5" }
+    }
+  }
+}
+```
+
+Subagents see your `AGENTS.md` files and your skills catalog. A foreground subagent does not load your pi extensions; a background one does. Steward's gates never apply inside a subagent.
+
+### Gates on pi
+
+The gates behave as described in [What the hooks do](#what-the-hooks-do), with these differences:
+- The delegation gate watches pi's `edit` and `write` tools and write-shaped `bash` commands. A `subagent` call resets it once pi-subagents accepts the launch. A call that fails, or one such as `subagent({ action: "list" })` that starts no work, does not.
+- If pi-subagents is not loaded, the model has no way to delegate, so the delegation gate reminds instead of blocking. The PR gate still blocks.
+- Edits to `AGENTS.md` and to anything under a `.pi/` directory are exempt, as `CLAUDE.md` and `.claude/` are on Claude Code.
+- The prose gate sends the reply back once, with a message saying what to fix. A revised reply is not sent back a second time.
+- The gate mode file is `~/.pi/agent/steward/gate` (or `$PI_CODING_AGENT_DIR/steward/gate`):
+
+```
+mkdir -p ~/.pi/agent/steward && echo soft > ~/.pi/agent/steward/gate
+```
+
+If `python3` is missing, steward shows a warning and lets everything through.
+
+Some turns start without a prompt from you, for example when a background subagent finishes. Pi builds those turns without the usual system prompt additions, so steward adds the edict to that turn's messages instead. Nothing extra is saved in the session.
+
+### Optional: show the subagent tool from the start
+
+On some models pi-subagents first offers a small `subagents_enable` tool and adds `subagent` only after the model calls it. The edict tells the model to do that. To skip the step, create `~/.pi/agent/extensions/subagent/config.json` with:
+
+```json
+{ "toolActivation": "eager" }
+```
+
+### Developing steward for pi
+
+Load your checkout instead of the published package:
+
+```
+pi install /path/to/steward
+```
+
+A local path install reads the files in place, so edits apply on the next pi start or `/reload`.
+
 ## Local development and tests
 
 ```
 python3 -m unittest discover -s tests
+node --test 'tests/pi/*.test.mjs'
 ```
+
+The Python tests cover the hook script for both harnesses and check that the pi profiles stay in step with the Claude Code ones. The node tests run the pi extension's handlers against the real hook script. Node 22.18 or newer runs the TypeScript extension without a build step.
 
 ## If you already have these rules in CLAUDE.md
 

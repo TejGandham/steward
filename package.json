@@ -1,0 +1,38 @@
+{
+  "name": "steward",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Delegation edict for Claude Code and pi: pinned subagent profiles chosen by task complexity, plain-language prose, and gates that enforce both.",
+  "keywords": [
+    "pi-package",
+    "delegation",
+    "subagents",
+    "plain-language"
+  ],
+  "author": "Tej Gandham",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tejgandham/steward.git"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "python3 -m unittest discover -s tests && node --test 'tests/pi/*.test.mjs'"
+  },
+  "pi": {
+    "extensions": [
+      "./pi/extensions/steward/index.ts"
+    ],
+    "skills": [
+      "./pi/skills"
+    ],
+    "subagents": {
+      "agents": [
+        "./pi/agents"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

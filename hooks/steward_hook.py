@@ -29,12 +29,26 @@ except ImportError:
 EM_DASH = chr(0x2014)  # the character itself is never written literally here
 
 
+def get_harness(env):
+    """Which agent harness is calling. The pi extension sets
+    STEWARD_HARNESS=pi; anything else is Claude Code."""
+    if (env.get("STEWARD_HARNESS") or "").strip().lower() == "pi":
+        return "pi"
+    return "claude"
+
+
 def get_config_dir(env):
-    """Where plugin.json-adjacent config lives: $CLAUDE_CONFIG_DIR or ~/.claude."""
+    """Where the harness keeps its config. Claude Code: $CLAUDE_CONFIG_DIR
+    or ~/.claude. pi: $PI_CODING_AGENT_DIR or ~/.pi/agent."""
+    home = env.get("HOME") or os.path.expanduser("~")
+    if get_harness(env) == "pi":
+        value = env.get("PI_CODING_AGENT_DIR")
+        if value:
+            return _expand_user(value, env)
+        return os.path.join(home, ".pi", "agent")
     value = env.get("CLAUDE_CONFIG_DIR")
     if value:
         return value
-    home = env.get("HOME") or os.path.expanduser("~")
     return os.path.join(home, ".claude")
 
 
@@ -144,35 +158,88 @@ def _dependency_warnings(config_dir):
     return warnings
 
 
+def _pi_dependency_warnings(config_dir, env, cwd=None):
+    """pi finds skills under its own config dir and under ~/.agents/skills,
+    and prompt templates (pi's slash commands) under <config>/prompts or a
+    project's .pi/prompts."""
+    warnings = []
+    home = env.get("HOME") or os.path.expanduser("~")
+    plainlanguage_paths = [
+        os.path.join(config_dir, "skills", "plainlanguage", "SKILL.md"),
+        os.path.join(home, ".agents", "skills", "plainlanguage", "SKILL.md"),
+    ]
+    if not any(os.path.isfile(p) for p in plainlanguage_paths):
+        warnings.append(
+            "STEWARD WARNING: the plainlanguage skill is not installed at "
+            + " or ".join(plainlanguage_paths)
+            + ". The edict requires it for every reply and PR body. Tell "
+            "the operator before writing prose."
+        )
+    pr_summary_path = os.path.join(config_dir, "prompts", "update-pr-summary.md")
+    pr_summary_paths = [pr_summary_path]
+    if cwd:
+        pr_summary_paths.append(os.path.join(cwd, ".pi", "prompts", "update-pr-summary.md"))
+    if not any(os.path.isfile(p) for p in pr_summary_paths):
+        warnings.append(
+            "STEWARD WARNING: the update-pr-summary prompt template is not "
+            "installed at " + pr_summary_path + ". The edict requires it for "
+            "every PR body. Tell the operator before writing a PR body."
+        )
+    return warnings
+
+
 def cmd_session_start(payload, env):
+    harness = get_harness(env)
     plugin_root = get_plugin_root(env)
-    skill_path = os.path.join(plugin_root, "skills", "delegating", "SKILL.md")
+    if harness == "pi":
+        skill_path = os.path.join(
+            plugin_root, "pi", "skills", "steward-delegating", "SKILL.md")
+    else:
+        skill_path = os.path.join(plugin_root, "skills", "delegating", "SKILL.md")
     with open(skill_path, "r", encoding="utf-8") as f:
         raw = f.read()
     skill_body = strip_frontmatter(raw).strip("\n")
 
     config_dir = get_config_dir(env)
-    warnings = _dependency_warnings(config_dir)
 
-    header = (
-        "<STEWARD>\n"
-        "You run under the steward delegation edict. The full text of the "
-        "steward:delegating skill follows; read it as standing "
-        "instructions.\n\n"
-    )
-    parts = [header]
-    if warnings:
-        parts.append("\n".join(warnings) + "\n")
-    parts.append(skill_body)
-    parts.append("\n</STEWARD>")
-    text = "".join(parts)
+    if harness == "pi":
+        # pi wraps the text in a <steward> system-prompt section itself, so
+        # no tags here. The orchestration registry is not created: the
+        # primary/secondary roles are not part of the pi port.
+        cwd = payload.get("cwd")
+        if not isinstance(cwd, str) or not cwd:
+            cwd = None
+        warnings = _pi_dependency_warnings(config_dir, env, cwd)
+        parts = [
+            "You run under the steward delegation edict. The full text of "
+            "the steward-delegating skill follows; read it as standing "
+            "instructions.\n\n"
+        ]
+        if warnings:
+            parts.append("\n".join(warnings) + "\n\n")
+        parts.append(skill_body)
+        text = "".join(parts)
+    else:
+        warnings = _dependency_warnings(config_dir)
+        header = (
+            "<STEWARD>\n"
+            "You run under the steward delegation edict. The full text of the "
+            "steward:delegating skill follows; read it as standing "
+            "instructions.\n\n"
+        )
+        parts = [header]
+        if warnings:
+            parts.append("\n".join(warnings) + "\n")
+        parts.append(skill_body)
+        parts.append("\n</STEWARD>")
+        text = "".join(parts)
 
-    # The registry write is best-effort. An unwritable orchestration dir
-    # must never cost us the session-start injection built above.
-    try:
-        _ensure_registry(env)
-    except OSError:
-        pass
+        # The registry write is best-effort. An unwritable orchestration dir
+        # must never cost us the session-start injection built above.
+        try:
+            _ensure_registry(env)
+        except OSError:
+            pass
 
     return json.dumps({
         "hookSpecificOutput": {
@@ -394,7 +461,11 @@ def classify_bash_command(command):
 def default_allowlist_globs(env):
     config_dir = get_config_dir(env)
     home = env.get("HOME") or os.path.expanduser("~")
-    return [
+    pi_globs = []
+    if get_harness(env) == "pi":
+        # pi's counterparts of CLAUDE.md and a project's .claude directory.
+        pi_globs = ["**/AGENTS.md", "**/.pi/**"]
+    return pi_globs + [
         os.path.join(config_dir, "**"),
         os.path.join(home, ".claude", "**"),
         os.path.join(home, ".claude-profiles", "**"),
@@ -469,10 +540,21 @@ def bash_command_allowlisted(command, env, cwd=None):
 # gate: tool classification and state
 # ---------------------------------------------------------------------------
 
-_DIRECT_EDIT_TOOLS = ("Edit", "Write", "NotebookEdit", "MultiEdit")
+# pi's built-in edit and write tools take the target in "path".
+_PI_EDIT_TOOLS = ("edit", "write")
+
+# Claude Code names first, then pi's.
+_DIRECT_EDIT_TOOLS = ("Edit", "Write", "NotebookEdit", "MultiEdit") + _PI_EDIT_TOOLS
+
+# Claude Code calls its shell tool Bash; pi calls it bash.
+_BASH_TOOLS = ("Bash", "bash")
 
 
 def direct_edit_file_path(tool_name, tool_input):
+    # Read only the field the tool actually writes to, so an extra argument
+    # naming an allowlisted path cannot exempt a real write.
+    if tool_name in _PI_EDIT_TOOLS:
+        return tool_input.get("path")
     path = tool_input.get("file_path")
     if path:
         return path
@@ -494,7 +576,7 @@ def classify_tool_call(tool_name, tool_input, env, cwd=None):
         if not path:
             return True, False
         return True, is_allowlisted(path, env, cwd)
-    if tool_name == "Bash":
+    if tool_name in _BASH_TOOLS:
         command = tool_input.get("command")
         if not isinstance(command, str):
             command = ""
@@ -627,8 +709,19 @@ def get_gate_mode(env):
     return "hard"
 
 
-def gate_message(count, config_dir):
+def gate_message(count, config_dir, harness="claude"):
     gate_path = os.path.join(config_dir, "steward", "gate")
+    if harness == "pi":
+        return (
+            "steward delegation gate: this is direct edit #{n} on the main "
+            "thread with no subagent call in between. The edict says every "
+            "non-trivial task runs in a subagent. Delegate it with the "
+            "subagent tool (agent steward.coder-opus-medium for code, "
+            "steward.mechanic-sonnet-low for rote edits), or ask the operator "
+            "to set the gate to soft or off by writing that word to "
+            "{gate_path} (takes effect immediately; STEWARD_GATE only "
+            "applies at next start)."
+        ).format(n=count, gate_path=gate_path)
     return (
         "steward delegation gate: this is direct edit #{n} on the main "
         "thread with no subagent call in between. The edict says every "
@@ -756,7 +849,7 @@ def cmd_gate(payload, env):
     if not isinstance(cwd, str) or not cwd:
         cwd = None
 
-    if tool_name == "Bash":
+    if tool_name in _BASH_TOOLS:
         command = tool_input.get("command")
         if not isinstance(command, str):
             command = ""
@@ -783,7 +876,7 @@ def cmd_gate(payload, env):
         return None
 
     config_dir = get_config_dir(env)
-    msg = gate_message(count, config_dir)
+    msg = gate_message(count, config_dir, get_harness(env))
     if mode == "hard":
         return json.dumps({
             "hookSpecificOutput": {
