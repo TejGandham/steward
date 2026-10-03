@@ -149,7 +149,7 @@ Subagents see your `AGENTS.md` files and your skills catalog. A foreground subag
 
 The gates behave as described in [What the hooks do](#what-the-hooks-do), with these differences:
 - The delegation gate watches pi's `edit` and `write` tools and write-shaped `bash` commands. A `subagent` call resets it once pi-subagents accepts the launch. A call that fails, or one such as `subagent({ action: "list" })` that starts no work, does not.
-- If pi-subagents is not loaded, the model has no way to delegate, so the delegation gate reminds instead of blocking. The PR gate still blocks.
+- If pi-subagents is not loaded, or it is loaded but neither `subagent` nor `subagents_enable` is active in the current session, the model has no way to delegate, so the delegation gate reminds instead of blocking. The note it adds says which case applies. The PR gate still blocks.
 - Edits to `AGENTS.md` and to anything under a `.pi/` directory are exempt, as `CLAUDE.md` and `.claude/` are on Claude Code.
 - The prose gate sends the reply back once, with a message saying what to fix. A revised reply is not sent back a second time.
 - The gate mode file is `~/.pi/agent/steward/gate` (or `$PI_CODING_AGENT_DIR/steward/gate`):
@@ -169,6 +169,8 @@ On some models pi-subagents first offers a small `subagents_enable` tool and add
 ```json
 { "toolActivation": "eager" }
 ```
+
+Eager mode plus `/reload` is also how a conversation that started before pi-subagents was installed gets the tool. Pi restores a conversation's recorded tools when it resumes, so restarting pi and resuming that conversation does not add it; starting a new session does.
 
 ### Developing steward for pi
 

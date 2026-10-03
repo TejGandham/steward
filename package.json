@@ -1,6 +1,6 @@
 {
   "name": "steward",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "description": "Delegation edict for Claude Code and pi: pinned subagent profiles chosen by task complexity, plain-language prose, and gates that enforce both.",
   "keywords": [

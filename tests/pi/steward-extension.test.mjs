@@ -37,7 +37,9 @@ afterEach(() => {
 	rmSync(tmp, { recursive: true, force: true });
 });
 
-function load({ tools = ["read", "bash", "edit", "write", "subagent"] } = {}) {
+// `active`: the names getActiveTools returns (default: every registered tool), a function to run
+// instead, or null for a host without getActiveTools.
+function load({ tools = ["read", "bash", "edit", "write", "subagent"], active = tools } = {}) {
 	const handlers = {};
 	const notices = [];
 	const pi = {
@@ -46,6 +48,8 @@ function load({ tools = ["read", "bash", "edit", "write", "subagent"] } = {}) {
 		},
 		getAllTools: () => tools.map((name) => ({ name })),
 	};
+	if (typeof active === "function") pi.getActiveTools = active;
+	else if (active !== null) pi.getActiveTools = () => [...active];
 	steward(pi);
 	const id = `t${++sessionCounter}`;
 	const ctx = {
@@ -160,6 +164,86 @@ test("without pi-subagents the delegation gate only reminds, the PR gate still b
 	assert.match(result.content[1].text, /STEWARD WARNING: the pi-subagents extension is not loaded/);
 	const pr = await fire("tool_call", call("bash", { command: `gh pr edit --body "a ${EM_DASH} b"` }));
 	assert.equal(pr.block, true);
+});
+
+const NOT_AVAILABLE_NOTE = /subagent tool is not available in this session/;
+
+async function secondWriteNote(fire) {
+	await fire("tool_call", write());
+	const second = write();
+	assert.equal(await fire("tool_call", second), undefined);
+	const result = await fire("tool_result", {
+		type: "tool_result",
+		toolCallId: second.toolCallId,
+		toolName: "write",
+		input: second.input,
+		content: [{ type: "text", text: "wrote it" }],
+		isError: false,
+	});
+	return result.content[1].text;
+}
+
+test("subagent registered but not active: the delegation gate only reminds, the PR gate still blocks", async () => {
+	const { fire } = load({ active: ["read", "bash", "edit", "write"] });
+	const note = await secondWriteNote(fire);
+	assert.match(note, /direct edit #2/);
+	assert.match(note, NOT_AVAILABLE_NOTE);
+	assert.match(note, /"toolActivation": "eager"/);
+	assert.match(note, /\/reload/);
+	assert.doesNotMatch(note, /STEWARD WARNING: the pi-subagents extension is not loaded/);
+	assert.ok(!note.includes(EM_DASH));
+	const pr = await fire("tool_call", call("bash", { command: `gh pr edit --body "a ${EM_DASH} b"` }));
+	assert.equal(pr.block, true);
+});
+
+test("subagent registered but not active: no missing-extension warning in the edict", async () => {
+	const { fire } = load({ active: ["read", "bash", "edit", "write"] });
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	const event = promptEvent();
+	await fire("before_agent_start", event);
+	assert.doesNotMatch(event.systemPromptOptions.sections.steward, /STEWARD WARNING: the pi-subagents extension is not loaded/);
+});
+
+test("only the subagents_enable loader active: second write is blocked", async () => {
+	const { fire } = load({ active: ["read", "bash", "edit", "write", "subagents_enable"] });
+	await fire("tool_call", write());
+	assert.equal((await fire("tool_call", write())).block, true);
+});
+
+test("subagent active: second write is blocked", async () => {
+	const { fire } = load({ active: ["read", "write", "subagent"] });
+	await fire("tool_call", write());
+	assert.equal((await fire("tool_call", write())).block, true);
+});
+
+test("host without getActiveTools falls back to the registered tools", async () => {
+	const blocking = load({ active: null });
+	await blocking.fire("tool_call", write());
+	assert.equal((await blocking.fire("tool_call", write())).block, true);
+
+	const missing = load({ tools: ["read", "bash", "edit", "write"], active: null });
+	const note = await secondWriteNote(missing.fire);
+	assert.match(note, /STEWARD WARNING: the pi-subagents extension is not loaded/);
+});
+
+test("getActiveTools throwing makes the delegation gate remind, not block", async () => {
+	const { fire } = load({
+		active: () => {
+			throw new Error("boom");
+		},
+	});
+	const note = await secondWriteNote(fire);
+	assert.match(note, /direct edit #2/);
+	assert.match(note, NOT_AVAILABLE_NOTE);
+});
+
+test("soft mode adds the not-available note when no delegation tool is active", async () => {
+	mkdirSync(join(tmp, "config", "steward"));
+	writeFileSync(join(tmp, "config", "steward", "gate"), "soft\n");
+	const { fire } = load({ active: ["read", "bash", "edit", "write"] });
+	const note = await secondWriteNote(fire);
+	assert.match(note, /direct edit #2/);
+	assert.match(note, NOT_AVAILABLE_NOTE);
 });
 
 test("runs that skip before_agent_start get the edict in their messages", async () => {

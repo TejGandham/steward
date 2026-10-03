@@ -148,6 +148,13 @@ const MISSING_SUBAGENTS_WARNING =
 	"the delegation gate only reminds instead of blocking. Tell the operator before starting " +
 	"non-trivial work.";
 
+const SUBAGENT_NOT_ACTIVE_WARNING =
+	"STEWARD WARNING: the pi-subagents extension is installed, but the subagent tool is not available " +
+	"in this session, so the delegation gate only reminds instead of blocking. Tell the operator: " +
+	'setting `"toolActivation": "eager"` in ~/.pi/agent/extensions/subagent/config.json and running ' +
+	"/reload, or starting a new session, makes it available. Restarting pi and resuming this " +
+	"conversation does not, because pi restores the conversation's recorded tools on resume.";
+
 export default function steward(pi: ExtensionAPI): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 
@@ -157,13 +164,37 @@ export default function steward(pi: ExtensionAPI): void {
 	let edictInPrompt = false;
 	const softNotes = new Map<string, string>();
 
-	function canDelegate(): boolean {
+	function hasDelegationTool(names: readonly string[]): boolean {
+		return names.includes(SUBAGENT_TOOL) || names.includes(SUBAGENT_LOADER_TOOL);
+	}
+
+	/** pi-subagents is registered. On error, assume it is, so no false warning is shown. */
+	function subagentsInstalled(): boolean {
 		try {
-			const names = pi.getAllTools().map((tool) => tool.name);
-			return names.includes(SUBAGENT_TOOL) || names.includes(SUBAGENT_LOADER_TOOL);
+			return hasDelegationTool(pi.getAllTools().map((tool) => tool.name));
 		} catch {
 			return true;
 		}
+	}
+
+	/**
+	 * The model can call a delegation tool right now. pi-subagents can leave `subagent` registered
+	 * but inactive (a resumed conversation recorded before it was installed), so check the active
+	 * tools. On error, return false: the gate then reminds instead of blocking.
+	 */
+	function canDelegateNow(): boolean {
+		try {
+			const getActiveTools = (pi as Partial<ExtensionAPI>).getActiveTools;
+			if (typeof getActiveTools !== "function") return subagentsInstalled();
+			return hasDelegationTool(getActiveTools.call(pi));
+		} catch {
+			return false;
+		}
+	}
+
+	/** Why the model cannot delegate in this session. */
+	function cannotDelegateNote(): string {
+		return subagentsInstalled() ? SUBAGENT_NOT_ACTIVE_WARNING : MISSING_SUBAGENTS_WARNING;
 	}
 
 	async function loadEdict(ctx: ExtensionContext): Promise<string | undefined> {
@@ -175,7 +206,7 @@ export default function steward(pi: ExtensionAPI): void {
 		const text = output?.hookSpecificOutput?.additionalContext;
 		// undefined, not "", so the next prompt tries again
 		if (typeof text !== "string" || !text) return undefined;
-		return canDelegate() ? text : `${MISSING_SUBAGENTS_WARNING}\n\n${text}`;
+		return subagentsInstalled() ? text : `${MISSING_SUBAGENTS_WARNING}\n\n${text}`;
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -242,17 +273,20 @@ export default function steward(pi: ExtensionAPI): void {
 			const decision = output?.hookSpecificOutput;
 			if (decision?.permissionDecision === "deny") {
 				const reason = String(decision.permissionDecisionReason ?? "steward gate");
-				// Without pi-subagents the model cannot delegate, so a delegation-gate denial could
-				// never be cleared. Downgrade it to a reminder. The PR gate still blocks.
-				if (reason.startsWith(DELEGATION_GATE_PREFIX) && !canDelegate()) {
-					softNotes.set(event.toolCallId, `${reason}\n\n${MISSING_SUBAGENTS_WARNING}`);
+				// Without a delegation tool the model cannot delegate, so a delegation-gate denial
+				// could never be cleared. Downgrade it to a reminder. The PR gate still blocks.
+				if (reason.startsWith(DELEGATION_GATE_PREFIX) && !canDelegateNow()) {
+					softNotes.set(event.toolCallId, `${reason}\n\n${cannotDelegateNote()}`);
 					return undefined;
 				}
 				return { block: true, reason };
 			}
 			if (typeof decision?.additionalContext === "string") {
 				// Soft mode: let the call run and attach the reminder to its result.
-				softNotes.set(event.toolCallId, decision.additionalContext);
+				const note = canDelegateNow()
+					? decision.additionalContext
+					: `${decision.additionalContext}\n\n${cannotDelegateNote()}`;
+				softNotes.set(event.toolCallId, note);
 			}
 		} catch {
 			// fail open: pi blocks a tool when its handler throws
