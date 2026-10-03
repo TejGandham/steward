@@ -1173,6 +1173,13 @@ class OperatorPatternTests(StewardTestCase):
     def test_code_is_not_prose(self):
         self.assertIsNone(self.prose("The rule bans `load-bearing`.\n```\nlandmine = 1\n```"))
 
+    def test_reason_never_lists_an_empty_kind(self):
+        os.remove(os.path.join(self.config, "steward", "prose-patterns"))
+        out = self.prose("Done " + EM_DASH + " and shipped.")
+        self.assertIn("1 em-dash(es)", out["reason"])
+        self.assertNotIn("AI tells", out["reason"])
+        self.assertNotIn("operator bans", out["reason"])
+
     def test_reason_lists_everything_found(self):
         out = self.prose("A landmine " + EM_DASH + " crucial and pivotal.")
         self.assertIn("phrases the operator bans: landmine", out["reason"])

@@ -1054,14 +1054,6 @@ def _extract_last_assistant_text(transcript_path):
     return "".join(texts)
 
 
-PROSE_MSG_TEMPLATE = (
-    "steward prose gate: your last reply has {n} em-dash(es) and these AI "
-    "tells: {markers}. The operator's rule is zero em-dashes and plain "
-    "language. Revise the reply with the plainlanguage skill and send it "
-    "again."
-)
-
-
 PROSE_OPERATOR_MSG_TEMPLATE = (
     "steward prose gate: your last reply has {found}. The operator's rule "
     "is plain language with zero em-dashes. Revise the reply with the "
@@ -1096,15 +1088,15 @@ def cmd_prose_gate(payload, env):
     if em_dash_count <= 0 and len(names) < 2 and not phrases:
         return None
 
-    if not phrases:
-        reason = PROSE_MSG_TEMPLATE.format(n=em_dash_count, markers=", ".join(names))
-    else:
-        found = ["phrases the operator bans: " + ", ".join(phrases)]
-        if em_dash_count > 0:
-            found.append("{n} em-dash(es)".format(n=em_dash_count))
-        if names:
-            found.append("these AI tells: " + ", ".join(names))
-        reason = PROSE_OPERATOR_MSG_TEMPLATE.format(found="; ".join(found))
+    # Name only what was found, so the message never lists an empty kind.
+    found = []
+    if phrases:
+        found.append("phrases the operator bans: " + ", ".join(phrases))
+    if em_dash_count > 0:
+        found.append("{n} em-dash(es)".format(n=em_dash_count))
+    if names:
+        found.append("these AI tells: " + ", ".join(names))
+    reason = PROSE_OPERATOR_MSG_TEMPLATE.format(found="; ".join(found))
     return json.dumps({"decision": "block", "reason": reason})
 
 
