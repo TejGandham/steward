@@ -137,7 +137,6 @@ class SessionStartTests(StewardTestCase):
 
     def test_warning_when_plainlanguage_missing(self):
         env = self.make_env()
-        self.write_dep("commands/update-pr-summary.md")
         result = run_hook("session-start", {"session_id": "s1"}, env)
         out = json.loads(result.stdout)
         text = out["hookSpecificOutput"]["additionalContext"]
@@ -146,22 +145,19 @@ class SessionStartTests(StewardTestCase):
         expected_path = os.path.join(self.config, "skills", "plainlanguage", "SKILL.md")
         self.assertIn(expected_path, text)
 
-    def test_warning_when_update_pr_summary_missing(self):
+    def test_update_pr_summary_is_optional(self):
+        # No command file at all, and no warning about it.
         env = self.make_env()
         self.write_dep("skills/plainlanguage/SKILL.md")
         result = run_hook("session-start", {"session_id": "s1"}, env)
         out = json.loads(result.stdout)
         text = out["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("STEWARD WARNING", text)
-        self.assertIn("update-pr-summary", text)
-        self.assertIn("PR body", text)
-        expected_path = os.path.join(self.config, "commands", "update-pr-summary.md")
-        self.assertIn(expected_path, text)
+        self.assertNotIn("STEWARD WARNING", text)
+        self.assertNotIn("update-pr-summary", text)
 
     def test_no_warning_when_deps_present(self):
         env = self.make_env()
         self.write_dep("skills/plainlanguage/SKILL.md")
-        self.write_dep("commands/update-pr-summary.md")
         result = run_hook("session-start", {"session_id": "s1"}, env)
         out = json.loads(result.stdout)
         text = out["hookSpecificOutput"]["additionalContext"]

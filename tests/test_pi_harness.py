@@ -83,32 +83,23 @@ class PiSessionStartTests(PiHarnessCase):
         text = self.context(self.pi_env())
         self.assertIn(os.path.join(self.config, "skills", "plainlanguage", "SKILL.md"), text)
         self.assertIn(os.path.join(self.home, ".agents", "skills", "plainlanguage", "SKILL.md"), text)
-        self.assertIn(os.path.join(self.config, "prompts", "update-pr-summary.md"), text)
-        self.assertNotIn(os.path.join("commands", "update-pr-summary.md"), text)
+
+    def test_update_pr_summary_is_optional(self):
+        self.write_dep("skills/plainlanguage/SKILL.md")
+        text = self.context(self.pi_env())
+        self.assertNotIn("STEWARD WARNING", text)
+        self.assertNotIn("update-pr-summary", text)
 
     def test_plainlanguage_in_agents_skills_dir_is_enough(self):
         path = os.path.join(self.home, ".agents", "skills", "plainlanguage", "SKILL.md")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write("stub\n")
-        self.write_dep("prompts/update-pr-summary.md")
         text = self.context(self.pi_env())
-        self.assertNotIn("STEWARD WARNING", text)
-
-    def test_project_prompt_template_is_enough(self):
-        self.write_dep("skills/plainlanguage/SKILL.md")
-        project = os.path.join(self.tmp, "project")
-        path = os.path.join(project, ".pi", "prompts", "update-pr-summary.md")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("stub\n")
-        result = run_hook("session-start", {"session_id": "pi-s2", "cwd": project}, self.pi_env())
-        text = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
         self.assertNotIn("STEWARD WARNING", text)
 
     def test_plainlanguage_in_pi_skills_dir_is_enough(self):
         self.write_dep("skills/plainlanguage/SKILL.md")
-        self.write_dep("prompts/update-pr-summary.md")
         self.assertNotIn("STEWARD WARNING", self.context(self.pi_env()))
 
 
@@ -176,6 +167,7 @@ class PiGateTests(PiHarnessCase):
         out = json.loads(run_hook("gate", payload, env).stdout)
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertIn("PR gate", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertNotIn("update-pr-summary", out["hookSpecificOutput"]["permissionDecisionReason"])
 
     def test_gate_mode_file_read_from_pi_config_dir(self):
         self.write_dep("steward/gate", "off\n")

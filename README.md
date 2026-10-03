@@ -24,11 +24,11 @@ claude --plugin-dir /path/to/steward
 
 ## Dependencies
 
-Steward expects two things to already be installed, and does not ship them:
-- The `plainlanguage` skill, at `<config dir>/skills/plainlanguage/SKILL.md`.
-- The `update-pr-summary` command, at `<config dir>/commands/update-pr-summary.md`.
+Steward expects the `plainlanguage` skill to already be installed at `<config dir>/skills/plainlanguage/SKILL.md`, and does not ship it. The session-start hook warns you if it is missing.
 
-`<config dir>` is `$CLAUDE_CONFIG_DIR` if you have set it, otherwise `~/.claude`. The session-start hook checks both paths and warns you if either is missing.
+An `update-pr-summary` command at `<config dir>/commands/update-pr-summary.md` is optional. If you have one, the edict uses it to draft PR bodies; if not, PR bodies are drafted from the branch's diff against its base. Steward does not check for it.
+
+`<config dir>` is `$CLAUDE_CONFIG_DIR` if you have set it, otherwise `~/.claude`.
 
 ## The subagent profiles
 
@@ -52,7 +52,7 @@ Steward runs four hooks. Each fails open: if a hook errors or its dependencies a
 
 The hooks call `python3`; on Windows you will need a `python3` launcher on PATH.
 
-- **Session start**: injects the `delegating` skill into context and checks that `plainlanguage` and `update-pr-summary` are installed, and that the orchestration registry file exists (creating it if not).
+- **Session start**: injects the `delegating` skill into context and checks that `plainlanguage` is installed, and that the orchestration registry file exists (creating it if not).
 - **Delegation gate**: on a direct `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, or a write-shaped Bash command, on the main thread. A write-shaped Bash command is one that changes something on disk or upstream: a redirect to a file, `tee`, `sed -i`, `git commit` or `git push`, `gh pr create` or `gh pr edit`, `mv`/`cp`/`rm`/`mkdir`/`touch`, a package install, or a Python heredoc that writes a file. Read-only commands pass through. The edict allows one such edit; a second in a row is denied (or flagged, in soft mode) until you make an Agent call in between. This only exempts work done inside a subagent; a session started with `--agent` is still gated.
 - **Prose gate**: on stop, checks your last reply for em-dashes or common AI-writing tells. If it finds any, it blocks the stop and asks you to revise with the plainlanguage skill.
 - **PR-body gate**: on `gh pr create` or `gh pr edit`, denies the command if the PR text contains an em-dash or two or more AI-writing tells.
@@ -77,9 +77,9 @@ Pi has no subagents of its own. Steward uses the community [pi-subagents](https:
 - pi 1.0 or newer (`pi --version`).
 - `python3` on your PATH. The pi gates run the same `hooks/steward_hook.py` as Claude Code.
 - The `plainlanguage` skill, in `~/.agents/skills/plainlanguage/` or `~/.pi/agent/skills/plainlanguage/`.
-- An `update-pr-summary` prompt template at `~/.pi/agent/prompts/update-pr-summary.md`.
+- Optional: an `update-pr-summary` prompt template at `~/.pi/agent/prompts/update-pr-summary.md`. If it is there, the edict uses it to draft PR bodies.
 
-Steward checks the last two when a session starts and tells the model if either is missing. It also warns when pi-subagents is not loaded.
+When a session starts, steward tells the model if the plainlanguage skill is missing or pi-subagents is not loaded.
 
 ### Install
 

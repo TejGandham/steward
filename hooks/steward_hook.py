@@ -148,20 +148,14 @@ def _dependency_warnings(config_dir):
             + ". The edict requires it for every reply, PR body and code "
             "comment. Tell the operator before writing prose."
         )
-    pr_summary_path = os.path.join(config_dir, "commands", "update-pr-summary.md")
-    if not os.path.isfile(pr_summary_path):
-        warnings.append(
-            "STEWARD WARNING: the update-pr-summary command is not installed "
-            "at " + pr_summary_path + ". The edict requires it for every PR "
-            "body. Tell the operator before writing a PR body."
-        )
+    # update-pr-summary is optional: the edict uses it when it is installed
+    # and drafts PR bodies from the diff otherwise, so its absence is not
+    # worth a warning.
     return warnings
 
 
-def _pi_dependency_warnings(config_dir, env, cwd=None):
-    """pi finds skills under its own config dir and under ~/.agents/skills,
-    and prompt templates (pi's slash commands) under <config>/prompts or a
-    project's .pi/prompts."""
+def _pi_dependency_warnings(config_dir, env):
+    """pi finds skills under its own config dir and under ~/.agents/skills."""
     warnings = []
     home = env.get("HOME") or os.path.expanduser("~")
     plainlanguage_paths = [
@@ -174,16 +168,6 @@ def _pi_dependency_warnings(config_dir, env, cwd=None):
             + " or ".join(plainlanguage_paths)
             + ". The edict requires it for every reply and PR body. Tell "
             "the operator before writing prose."
-        )
-    pr_summary_path = os.path.join(config_dir, "prompts", "update-pr-summary.md")
-    pr_summary_paths = [pr_summary_path]
-    if cwd:
-        pr_summary_paths.append(os.path.join(cwd, ".pi", "prompts", "update-pr-summary.md"))
-    if not any(os.path.isfile(p) for p in pr_summary_paths):
-        warnings.append(
-            "STEWARD WARNING: the update-pr-summary prompt template is not "
-            "installed at " + pr_summary_path + ". The edict requires it for "
-            "every PR body. Tell the operator before writing a PR body."
         )
     return warnings
 
@@ -206,10 +190,7 @@ def cmd_session_start(payload, env):
         # pi wraps the text in a <steward> system-prompt section itself, so
         # no tags here. The orchestration registry is not created: the
         # primary/secondary roles are not part of the pi port.
-        cwd = payload.get("cwd")
-        if not isinstance(cwd, str) or not cwd:
-            cwd = None
-        warnings = _pi_dependency_warnings(config_dir, env, cwd)
+        warnings = _pi_dependency_warnings(config_dir, env)
         parts = [
             "You run under the steward delegation edict. The full text of "
             "the steward-delegating skill follows; read it as standing "
@@ -783,14 +764,14 @@ _BODY_FILE_RE = re.compile(r"(?:--body-file|-F)\s+(\S+)")
 
 PR_EMDASH_MSG = (
     "steward PR gate: the PR body contains an em-dash. The operator's rule "
-    "is zero em-dashes. Redraft with the update-pr-summary command and the "
+    "is zero em-dashes. Redraft it from the branch's diff with the "
     "plainlanguage skill, show the operator, then retry."
 )
 
 PR_MARKER_MSG_TEMPLATE = (
     "steward PR gate: the PR body contains these AI tells: {markers}. "
-    "Redraft with the update-pr-summary command and the plainlanguage "
-    "skill, show the operator, then retry."
+    "Redraft it from the branch's diff with the plainlanguage skill, show "
+    "the operator, then retry."
 )
 
 

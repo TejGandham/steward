@@ -167,10 +167,7 @@ export default function steward(pi: ExtensionAPI): void {
 	}
 
 	async function loadEdict(ctx: ExtensionContext): Promise<string | undefined> {
-		const { output, missingPython } = await runHook("session-start", {
-			session_id: sessionId(ctx),
-			cwd: ctx.cwd,
-		});
+		const { output, missingPython } = await runHook("session-start", { session_id: sessionId(ctx) });
 		if (missingPython && ctx.hasUI && !warnedMissingPython) {
 			warnedMissingPython = true;
 			ctx.ui.notify("steward: python3 was not found, so the edict and its gates are off.", "warning");
