@@ -4,7 +4,7 @@ A Claude Code plugin that packages a delegation edict: the main session hands of
 
 It gives you three things:
 - Seven pinned agent profiles, each fixed to a model and reasoning effort for a specific kind of task.
-- Two skills that carry the rules: `delegating` (the edict and routing table, loaded automatically at session start) and `orchestrating` (roles for multi-session work).
+- Two skills that carry the rules: `delegating` (the edict and routing table, loaded automatically at session start) and `orchestrating` (roles for multi-session work). Orchestration is planned to move into its own plugin; see [docs/roadmap/orchestration-split.md](docs/roadmap/orchestration-split.md).
 - Hooks that enforce the edict: a delegation gate, a prose gate, and a PR-body gate.
 
 ## Install
@@ -68,7 +68,7 @@ This file is read on every call, so you can change the mode without restarting C
 
 ## Pi
 
-Steward also runs on [pi](https://pi.dev). On pi you get the same edict, the same seven profiles, and the same three gates. The primary and secondary roles (the `orchestrating` skill and its registry) are Claude Code only for now.
+Steward also runs on [pi](https://pi.dev). On pi you get the same edict, the same seven profiles, and the same three gates. The primary and secondary roles (the `orchestrating` skill and its registry) are Claude Code only for now; [docs/roadmap/orchestration-split.md](docs/roadmap/orchestration-split.md) describes how they could reach pi.
 
 Pi has no subagents of its own. Steward uses the community [pi-subagents](https://github.com/nicobailon/pi-subagents) extension for them, so you install both.
 
