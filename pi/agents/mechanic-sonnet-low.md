@@ -2,7 +2,7 @@
 name: mechanic-sonnet-low
 package: steward
 description: Cheap, mechanical, low-judgment work, a single targeted file/symbol lookup, a rote edit, file moves/renames, running a known command and reporting output, status collation, trivial PR-body one-liners. Use when the task is well-defined and needs little open-ended reasoning. Anything requiring design judgment or subtle correctness goes to a coder, reviewer, or deep-reasoner profile instead.
-model: anthropic/claude-sonnet-5
+model: anthropic/claude-sonnet-5-5
 thinking: low
 systemPromptMode: append
 inheritProjectContext: true

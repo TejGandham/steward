@@ -2,7 +2,7 @@
 name: reviewer-sonnet-high
 package: steward
 description: Standard code review of a diff or PR, correctness, naming, control flow, test coverage of success/failure/edge cases. Use for everyday PR review. For security-sensitive or high-stakes/complex diffs, use steward.deep-reasoner-opus-xhigh instead.
-model: anthropic/claude-sonnet-5
+model: anthropic/claude-sonnet-5-5
 thinking: high
 systemPromptMode: append
 inheritProjectContext: true

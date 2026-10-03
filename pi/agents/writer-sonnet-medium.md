@@ -2,7 +2,7 @@
 name: writer-sonnet-medium
 package: steward
 description: Prose of substance, documentation, README sections, PR bodies for non-trivial diffs, plain-language rewrites. Use when wording quality matters and the content is more than a line or two. For a trivial PR body or a one-line note, use steward.mechanic-sonnet-low.
-model: anthropic/claude-sonnet-5
+model: anthropic/claude-sonnet-5-5
 thinking: medium
 systemPromptMode: append
 inheritProjectContext: true

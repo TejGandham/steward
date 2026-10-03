@@ -743,6 +743,42 @@ def _compile_marker(marker):
 _MARKER_PATTERNS = [(m, _compile_marker(m)) for m in MARKERS]
 
 
+def load_operator_patterns(config_dir):
+    """The operator's own banned phrases, from <config>/steward/prose-patterns:
+    one case-insensitive regular expression per line, # starts a comment,
+    blank lines are skipped, and a line that does not compile is ignored.
+    ^ and $ match at line boundaries. A missing file means no patterns."""
+    path = os.path.join(config_dir, "steward", "prose-patterns")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return []
+    patterns = []
+    for line in lines:
+        source = line.strip()
+        if not source or source.startswith("#"):
+            continue
+        try:
+            patterns.append(re.compile(source, re.IGNORECASE | re.MULTILINE))
+        except re.error:
+            continue
+    return patterns
+
+
+def find_operator_hits(text, patterns):
+    """The matched text of every operator pattern that hits, in file order.
+    Unlike the built-in markers, a single hit is enough to block."""
+    hits = []
+    for pattern in patterns:
+        m = pattern.search(text)
+        if m:
+            found = " ".join(m.group(0).split()) or pattern.pattern
+            if found not in hits:
+                hits.append(found)
+    return hits
+
+
 def find_markers(text):
     """Returns (total hit count, list of distinct markers that hit)."""
     hits = 0
@@ -768,6 +804,12 @@ PR_EMDASH_MSG = (
     "plainlanguage skill, show the operator, then retry."
 )
 
+PR_OPERATOR_MSG_TEMPLATE = (
+    "steward PR gate: the PR body contains phrases the operator bans: "
+    "{phrases}. Redraft it from the branch's diff with the plainlanguage "
+    "skill, show the operator, then retry."
+)
+
 PR_MARKER_MSG_TEMPLATE = (
     "steward PR gate: the PR body contains these AI tells: {markers}. "
     "Redraft it from the branch's diff with the plainlanguage skill, show "
@@ -790,7 +832,7 @@ def _read_text_file(path):
         return ""
 
 
-def pr_gate_violation(command, cwd=None):
+def pr_gate_violation(command, cwd=None, operator_patterns=()):
     """None if fine, else the deny reason string. When the command passes
     the PR body as a file (--body-file or -F), that file's text is
     checked too, not just the command line itself."""
@@ -807,6 +849,9 @@ def pr_gate_violation(command, cwd=None):
     _hits, names = find_markers(cleaned)
     if len(names) >= 2:
         return PR_MARKER_MSG_TEMPLATE.format(markers=", ".join(names))
+    phrases = find_operator_hits(cleaned, operator_patterns)
+    if phrases:
+        return PR_OPERATOR_MSG_TEMPLATE.format(phrases=", ".join(phrases))
     return None
 
 
@@ -834,7 +879,8 @@ def cmd_gate(payload, env):
         command = tool_input.get("command")
         if not isinstance(command, str):
             command = ""
-        violation = pr_gate_violation(command, cwd)
+        violation = pr_gate_violation(
+            command, cwd, load_operator_patterns(get_config_dir(env)))
         if violation:
             return json.dumps({
                 "hookSpecificOutput": {
@@ -1016,6 +1062,13 @@ PROSE_MSG_TEMPLATE = (
 )
 
 
+PROSE_OPERATOR_MSG_TEMPLATE = (
+    "steward prose gate: your last reply has {found}. The operator's rule "
+    "is plain language with zero em-dashes. Revise the reply with the "
+    "plainlanguage skill and send it again."
+)
+
+
 def cmd_prose_gate(payload, env):
     if payload.get("stop_hook_active") is True:
         return None
@@ -1035,13 +1088,23 @@ def cmd_prose_gate(payload, env):
     cleaned = _clean_text(text)
     em_dash_count = cleaned.count(EM_DASH)
     _hits, names = find_markers(cleaned)
+    phrases = find_operator_hits(cleaned, load_operator_patterns(get_config_dir(env)))
 
     # The threshold counts distinct markers, not raw occurrences: the
-    # same marker twice is still only one kind of tell.
-    if em_dash_count <= 0 and len(names) < 2:
+    # same marker twice is still only one kind of tell. An operator
+    # phrase blocks on its own.
+    if em_dash_count <= 0 and len(names) < 2 and not phrases:
         return None
 
-    reason = PROSE_MSG_TEMPLATE.format(n=em_dash_count, markers=", ".join(names))
+    if not phrases:
+        reason = PROSE_MSG_TEMPLATE.format(n=em_dash_count, markers=", ".join(names))
+    else:
+        found = ["phrases the operator bans: " + ", ".join(phrases)]
+        if em_dash_count > 0:
+            found.append("{n} em-dash(es)".format(n=em_dash_count))
+        if names:
+            found.append("these AI tells: " + ", ".join(names))
+        reason = PROSE_OPERATOR_MSG_TEMPLATE.format(found="; ".join(found))
     return json.dumps({"decision": "block", "reason": reason})
 
 

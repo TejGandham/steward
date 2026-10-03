@@ -144,7 +144,7 @@ function sessionId(ctx: ExtensionContext): string {
 
 const MISSING_SUBAGENTS_WARNING =
 	"STEWARD WARNING: the pi-subagents extension is not loaded, so there is no subagent tool and " +
-	"the edict cannot be followed. Install it with `pi install npm:pi-subagents@0.75.0`. Until then " +
+	"the edict cannot be followed. Install it with `pi install npm:pi-subagents`. Until then " +
 	"the delegation gate only reminds instead of blocking. Tell the operator before starting " +
 	"non-trivial work.";
 

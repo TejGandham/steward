@@ -1129,5 +1129,84 @@ class CounterAtomicityTests(StewardTestCase):
         self.assertEqual(data["count"], 2)
 
 
+# ---------------------------------------------------------------------------
+# operator prose patterns (<config>/steward/prose-patterns)
+# ---------------------------------------------------------------------------
+
+class OperatorPatternTests(StewardTestCase):
+    PATTERNS = (
+        "# the operator's own bans\n"
+        "\n"
+        "load[- ]?bearing\n"
+        "\\blandmines?\\b\n"
+        "^\\s*(let me|now i'?ll)\\b\n"
+        "[unclosed\n"
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.write_dep("steward/prose-patterns", self.PATTERNS)
+
+    def prose(self, text, **extra):
+        result = run_hook("prose-gate", {"last_assistant_message": text}, self.make_env(**extra))
+        return json.loads(result.stdout) if result.stdout.strip() else None
+
+    def test_missing_file_means_no_patterns(self):
+        os.remove(os.path.join(self.config, "steward", "prose-patterns"))
+        self.assertIsNone(self.prose("This is a load-bearing wall."))
+
+    def test_comments_blanks_and_bad_regex_skipped(self):
+        patterns = hook.load_operator_patterns(self.config)
+        self.assertEqual(len(patterns), 3)
+
+    def test_single_operator_phrase_blocks(self):
+        out = self.prose("This is a load-bearing wall.")
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("phrases the operator bans: load-bearing", out["reason"])
+        self.assertNotIn("AI tells", out["reason"])
+        self.assertNotIn("em-dash(es)", out["reason"])
+
+    def test_line_anchored_pattern(self):
+        self.assertEqual(self.prose("Done.\nLet me check the logs.")["decision"], "block")
+        self.assertIsNone(self.prose("Tell me if you want more and I will let me know."))
+
+    def test_code_is_not_prose(self):
+        self.assertIsNone(self.prose("The rule bans `load-bearing`.\n```\nlandmine = 1\n```"))
+
+    def test_reason_lists_everything_found(self):
+        out = self.prose("A landmine " + EM_DASH + " crucial and pivotal.")
+        self.assertIn("phrases the operator bans: landmine", out["reason"])
+        self.assertIn("1 em-dash(es)", out["reason"])
+        self.assertIn("crucial", out["reason"])
+
+    def test_revision_is_not_blocked_again(self):
+        result = run_hook(
+            "prose-gate",
+            {"last_assistant_message": "Still load-bearing.", "stop_hook_active": True},
+            self.make_env(),
+        )
+        self.assertEqual(result.stdout, "")
+
+    def test_pr_gate_uses_operator_patterns(self):
+        payload = {
+            "session_id": "op1", "tool_name": "Bash",
+            "tool_input": {"command": 'gh pr create --title t --body "Removes a landmine."'},
+        }
+        out = json.loads(run_hook("gate", payload, self.make_env()).stdout)
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("landmine", out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_pi_reads_patterns_from_pi_config_dir(self):
+        pi_dir = os.path.join(self.tmp, "pi-agent")
+        env = self.make_env(STEWARD_HARNESS="pi", PI_CODING_AGENT_DIR=pi_dir)
+        result = run_hook("prose-gate", {"last_assistant_message": "A load-bearing wall."}, env)
+        self.assertEqual(result.stdout, "")
+        os.makedirs(os.path.join(pi_dir, "steward"))
+        with open(os.path.join(pi_dir, "steward", "prose-patterns"), "w", encoding="utf-8") as f:
+            f.write("load-bearing\n")
+        result = run_hook("prose-gate", {"last_assistant_message": "A load-bearing wall."}, env)
+        self.assertEqual(json.loads(result.stdout)["decision"], "block")
+
+
 if __name__ == "__main__":
     unittest.main()

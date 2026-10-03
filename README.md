@@ -42,7 +42,7 @@ An `update-pr-summary` command at `<config dir>/commands/update-pr-summary.md` i
 | `steward:mechanic-sonnet-low` | Sonnet | low | Single lookups, rote edits, running known commands |
 | `steward:reviewer-fable-xhigh` | Fable | xhigh | Highest-stakes gap review, only on explicit request (Opus 5.5 covers most of this now) |
 
-As of 0.3.0 the profiles run on three models, Sonnet 5, Opus 5.5, and Fable 5.1; pure coding runs on Opus 5.5 at medium effort; Haiku 4.5 and Opus 5 were dropped, and `routing.md` says why.
+As of 0.5.0 the profiles run on three models, Sonnet 5.5, Opus 5.5, and Fable 5.1; pure coding runs on Opus 5.5 at medium effort; Haiku 4.5 and Opus 5 were dropped, and `routing.md` says why. On Claude Code the profiles use the `sonnet`, `opus` and `fable` aliases, which resolve to those three models on Claude Code 2.1.288.
 
 The full routing table and the reasoning behind it live in `skills/delegating/routing.md`.
 
@@ -54,8 +54,22 @@ The hooks call `python3`; on Windows you will need a `python3` launcher on PATH.
 
 - **Session start**: injects the `delegating` skill into context and checks that `plainlanguage` is installed, and that the orchestration registry file exists (creating it if not).
 - **Delegation gate**: on a direct `Edit`, `Write`, `MultiEdit`, `NotebookEdit`, or a write-shaped Bash command, on the main thread. A write-shaped Bash command is one that changes something on disk or upstream: a redirect to a file, `tee`, `sed -i`, `git commit` or `git push`, `gh pr create` or `gh pr edit`, `mv`/`cp`/`rm`/`mkdir`/`touch`, a package install, or a Python heredoc that writes a file. Read-only commands pass through. The edict allows one such edit; a second in a row is denied (or flagged, in soft mode) until you make an Agent call in between. This only exempts work done inside a subagent; a session started with `--agent` is still gated.
-- **Prose gate**: on stop, checks your last reply for em-dashes or common AI-writing tells. If it finds any, it blocks the stop and asks you to revise with the plainlanguage skill.
-- **PR-body gate**: on `gh pr create` or `gh pr edit`, denies the command if the PR text contains an em-dash or two or more AI-writing tells.
+- **Prose gate**: on stop, checks your last reply for em-dashes, common AI-writing tells, and your own banned phrases (see below). It blocks the stop and asks you to revise with the plainlanguage skill when it finds an em-dash, two or more different tells, or any banned phrase.
+- **PR-body gate**: on `gh pr create` or `gh pr edit`, denies the command if the PR text contains an em-dash, two or more AI-writing tells, or any of your banned phrases.
+
+### Your own banned phrases
+
+To add your own rules to the prose and PR-body gates, list them in `~/.claude/steward/prose-patterns` (or `$CLAUDE_CONFIG_DIR/steward/prose-patterns`; on pi, `~/.pi/agent/steward/prose-patterns`). Each line is a case-insensitive regular expression, and a single match blocks. `^` and `$` match at the start and end of a line. Lines starting with `#` are comments, and a line that is not a valid expression is skipped. Text in code blocks and inline code is never checked, so you can still quote a banned word in backticks.
+
+```
+# words I never want in a reply
+load[- ]?bearing
+\bfootguns?\b
+# narrating a tool call at the start of a line
+^\s*(let me|now i'?ll)\b
+```
+
+The file is read on every check, so edits apply right away. Without it, the gates use only the built-in checks.
 
 Control the delegation gate by writing `off`, `soft`, or `hard` to the file `~/.claude/steward/gate` (or `$CLAUDE_CONFIG_DIR/steward/gate`):
 ```
@@ -84,13 +98,13 @@ When a session starts, steward tells the model if the plainlanguage skill is mis
 ### Install
 
 ```
-pi install npm:pi-subagents@0.75.0
+pi install npm:pi-subagents
 pi install git:github.com/tejgandham/steward
 ```
 
 Then restart pi, or run `/reload` in a running session. Both commands write to `~/.pi/agent/settings.json`; add `-l` to install for the current project only.
 
-pi-subagents ships new versions every few days, so the command above pins the version steward was tested with. Move the pin when you choose to upgrade.
+This installs the latest pi-subagents, and `pi update` keeps it current. Steward was last tested with pi-subagents 0.75.0. pi-subagents ships new versions every few days, so if an update breaks delegation, hold it at a known version with `pi install npm:pi-subagents@0.75.0`.
 
 To check the install, ask pi to "list the available subagents". You should see seven agents whose names start with `steward.`.
 
@@ -111,10 +125,10 @@ Each profile pins a full model ID and a thinking level:
 |-|-|-|
 | `steward.coder-opus-medium` | `anthropic/claude-opus-5-5` | medium |
 | `steward.deep-reasoner-opus-xhigh` | `anthropic/claude-opus-5-5` | xhigh |
-| `steward.reviewer-sonnet-high` | `anthropic/claude-sonnet-5` | high |
-| `steward.researcher-sonnet-low` | `anthropic/claude-sonnet-5` | low |
-| `steward.writer-sonnet-medium` | `anthropic/claude-sonnet-5` | medium |
-| `steward.mechanic-sonnet-low` | `anthropic/claude-sonnet-5` | low |
+| `steward.reviewer-sonnet-high` | `anthropic/claude-sonnet-5-5` | high |
+| `steward.researcher-sonnet-low` | `anthropic/claude-sonnet-5-5` | low |
+| `steward.writer-sonnet-medium` | `anthropic/claude-sonnet-5-5` | medium |
+| `steward.mechanic-sonnet-low` | `anthropic/claude-sonnet-5-5` | low |
 | `steward.reviewer-fable-xhigh` | `anthropic/claude-fable-5-1` | xhigh |
 
 If you reach Claude through another provider, override the model in `~/.pi/agent/settings.json`. The thinking level stays as the profile sets it unless you override that too:

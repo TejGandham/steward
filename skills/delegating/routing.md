@@ -1,19 +1,19 @@
 # Routing knowledge base
 
-Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium.
+Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5.
 
-## Cost ranking (per MTok, input / output / cache read), cheapest to dearest (cited: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-09-22)
+## Cost ranking (per MTok, input / output / cache read), cheapest to dearest (cited: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-09-22, re-fetched 2026-10-03)
 | Model | Input | Output | Cache read |
 |-|-|-|-|
-| Sonnet 5 | $2 | $10 | $0.20 |
+| Sonnet 5.5 | $2 | $10 | $0.20 |
 | Opus 5.5 | $4 | $20 | $0.20 |
 | Fable 5.1 = Mythos 5.1 | $10 | $50 | $0.25 |
 
-The pricing page states the $2/$10 Sonnet 5 price, originally introductory, is now standard; the planned 2026-09-01 increase to $3/$15 did not happen. Opus 5.5's price comes from anthropic.com/claude-opus-5-5, not yet on the pricing page at fetch time.
+The 2026-10-03 pricing page lists Sonnet 5.5 at the same $2/$10/$0.20 as Sonnet 5 and now includes Opus 5.5 at $4/$20/$0.20 (its cache reads are priced at 0.05x input). On 2026-09-22 the page said the $2/$10 Sonnet 5 price, originally introductory, had become standard; the planned 2026-09-01 increase to $3/$15 did not happen.
 
-Sonnet is 5x cheaper than Fable and 2x cheaper than Opus 5.5; Opus 5.5 is 2.5x cheaper than Fable. Cache reads: Sonnet 5 and Opus 5.5 tie at $0.20, Fable 5.1 is $0.25. Any correct delegation off the main thread saves tokens.
+Sonnet is 5x cheaper than Fable and 2x cheaper than Opus 5.5; Opus 5.5 is 2.5x cheaper than Fable. Cache reads: Sonnet 5.5 and Opus 5.5 tie at $0.20, Fable 5.1 is $0.25. Any correct delegation off the main thread saves tokens.
 
-Prices and model ids are as of 2026-09-22; the profiles use aliases (sonnet, opus, fable) so they track each machine's current model, which means this table can drift. Re-check before quoting a number.
+Prices and model ids are as of 2026-10-03; the Claude Code profiles use aliases (sonnet, opus, fable) so they track each machine's current model, which means this table can drift. Re-check before quoting a number.
 
 ## Opus 5.5 (launched 2026-09-22, cited: anthropic.com/claude-opus-5-5)
 - "It performs at the level of Claude Fable 5.1 on most work and costs 40% less to run than Opus 5."
@@ -33,13 +33,19 @@ Cost per token is 2x Sonnet 5 on input and output ($4/$20 versus $2/$10, see "Co
 
 If a `steward:coder-opus-medium` run misses its gate, escalate in one step: rerun the same profile (its frontmatter effort stands; do not invent a per-invocation effort override, since a bare `Agent(model=...)` call cannot set effort) and flag the miss to the deep-reasoner, or hand the task to `steward:deep-reasoner-opus-xhigh` directly.
 
-Sonnet 5 stays pinned for everyday review, research, writing, and mechanical work. Its price is the point there, and the high-stakes path already runs on Opus.
+Sonnet 5.5 stays pinned for everyday review, research, writing, and mechanical work. Its price is the point there, and the high-stakes path already runs on Opus.
+
+## Sonnet 5.5 (launched 2026-09-28, cited: platform.claude.com/docs/en/models/sonnet-5-5/overview, fetched 2026-10-03)
+- Model id `claude-sonnet-5-5`; 1M context, 128K max output; adaptive thinking; API default effort `high`; knowledge cutoff Jun 2026.
+- Price is the same as Sonnet 5: $2/$10, cache reads $0.20 (pricing page, fetched 2026-10-03). Moving the four sonnet profiles to it costs nothing extra per token.
+- Effort: the Models API on this machine's proxy reports low, medium, high, xhigh and max as supported (`GET /v1/models/claude-sonnet-5-5`, 2026-10-03), so the profiles' low, medium and high settings all apply.
+- On Claude Code the profiles use the `sonnet` alias, which already resolves to Sonnet 5.5 here (see the alias caveat below). On pi the profiles name it directly: `anthropic/claude-sonnet-5-5`.
 
 ## Dropped models (2026-09-22)
 - **Haiku 4.5** ($1/$5/$0.10): dropped. Nearest retirement floor of any model in the matrix (tentative, not sooner than 2026-10-15, three weeks out at drop time; platform.claude.com/docs/en/about-claude/model-deprecations, fetched 2026-09-22), 200K context versus 1M for the rest, no effort dial, and Sonnet 5 at `low` effort now covers the same rote work with an explicit effort setting. Cost for that rote work doubles per token, $1/$5 to $2/$10.
 - **Opus 5** ($5/$25/$0.50): dropped. Superseded by Opus 5.5 at a 20% lower input/output price, 60% lower cache reads, and Fable-level quality on most work (anthropic.com/claude-opus-5-5, quoted above). The `opus` alias already resolves to Opus 5.5 on the installed Claude Code 2.1.280 binary here; see the alias-lag caveat below. Deprecation page: Active, tentative retirement not sooner than 2027-07-24.
 
-Other matrix models' tentative retirement floors, same deprecations page: Sonnet 5 2027-06-30, Fable 5.1 2027-09-01. Opus 5.5 is not yet listed there.
+Other matrix models' tentative retirement floors, same deprecations page: Sonnet 5 2027-06-30, Fable 5.1 2027-09-01. The models overview (platform.claude.com/docs/en/models/overview, fetched 2026-10-03) gives Opus 5.5 not sooner than 2027-09-22 and Sonnet 5.5 not sooner than 2027-09-28.
 
 ## Pinned profiles (in the steward plugin `agents/` directory), delegate by subagent_type
 - **steward:coder-opus-medium** (opus, medium): pure implementation with spec and tests (TDD), well-defined bug fixes, approved plans. See "Coder on Opus 5.5" above for why it moved off Sonnet 5 xhigh.
@@ -72,6 +78,7 @@ one dependent chain fits a single context with no splittable pieces; every step 
 - "Mythos-class, tier above Opus" is cited: anthropic.com/claude/fable says "Claude Fable 5.1 is a Mythos-level model." Primary-source validation on 2026-09-03 confirmed every other cited fact too (prices, 0.025x vs 0.1x cache reads, cost ranking, all four model ids then in the matrix, 1M/1M/1M/200K context windows, the Opus-at-half-price quote, the 47-55% savings figure). The 2026-09-22 revision re-verified pricing and deprecations against primary sources; see "Cost ranking", "Opus 5.5", and "Dropped models" above for those citations.
 - Multi-model cost-savings percentages (the 40%, 20%, 60%, 30% figures above) are Anthropic's own comparisons against Opus 5, not guaranteed on any particular workload; measure before trusting a specific number.
 - A bare `Agent(model=...)` call cannot set effort; to get a profile's effort you must delegate by subagent_type (see "Model and effort mechanics" below).
+- Aliases checked 2026-10-03 on Claude Code 2.1.288 by running `claude -p --model <alias>` and reading the model id from the JSON output: `sonnet` ran `claude-sonnet-5-5`, `opus` ran `claude-opus-5-5`, `fable` ran `claude-fable-5-1`.
 - Alias lag: code.claude.com/docs/en/model-config, as crawled 2026-09-22, still says `opus` resolves to Opus 4.8 and `sonnet` to Sonnet 4.6, both behind the current launches. The installed Claude Code 2.1.280 binary on this machine labels its Opus picker entry "Opus 5.5 - best for everyday, complex tasks" and its default-model string names Opus 5.5, so `opus` means Opus 5.5 here; check the binary, not just the docs page, before trusting an alias. The env vars `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` override what an alias resolves to, and a full id in agent frontmatter overrides the alias too.
 
 # Model and effort mechanics
