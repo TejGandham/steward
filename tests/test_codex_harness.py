@@ -15,6 +15,21 @@ hook = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hook)
 
 
+SUPPORTED_EFFORTS = {"gpt-6.1-sol": {"low", "medium", "high", "xhigh", "max"},
+                     "gpt-6-astra": {"low", "medium", "high", "xhigh", "max"},
+                     "gpt-6-luna": {"none", "low", "medium", "high", "xhigh", "max"}}
+PROFILES_PATH = REPO_ROOT / "codex/skills/delegating/profiles.json"
+SKILL_PATH = REPO_ROOT / "codex/skills/delegating/SKILL.md"
+ASTRA_ROLES = {"deep-reasoner", "top-reviewer"}
+
+
+def load_installer(path):
+    spec = importlib.util.spec_from_file_location("install_agents", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def run_hook(command, payload, env):
     return subprocess.run([sys.executable, str(REPO_ROOT / "codex/steward.py"), command],
                           input=json.dumps(payload), text=True, capture_output=True, env=env)
@@ -92,23 +107,32 @@ class CodexHarnessTests(StewardTestCase):
 class CodexAgentInstallTests(StewardTestCase):
     def setUp(self):
         super().setUp()
-        spec = importlib.util.spec_from_file_location("install_agents", REPO_ROOT / "codex/install_agents.py")
-        self.installer = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.installer)
+        self.installer = load_installer(REPO_ROOT / "codex/install_agents.py")
 
     def test_all_seven_agents_pin_supported_model_and_effort(self):
         destination = Path(self.tmp) / "agents"
         self.assertEqual(self.installer.install(destination), 7)
         self.assertEqual(self.installer.install(destination), 7)
-        models = {"gpt-6.1-sol": {"low", "medium", "high", "xhigh", "max"},
-                  "gpt-6-astra": {"low", "medium", "high", "xhigh", "max"},
-                  "gpt-6-luna": {"none", "low", "medium", "high", "xhigh", "max"}}
+        models = SUPPORTED_EFFORTS
         for path in destination.glob("*.toml"):
             agent = tomllib.loads(path.read_text())
             self.assertEqual(agent["name"], path.stem)
             self.assertIn(agent["model_reasoning_effort"], models[agent["model"]])
             self.assertTrue(agent["developer_instructions"])
             self.assertNotIn("sandbox_mode", agent)
+
+    def test_fallback_field_does_not_change_generated_agents(self):
+        profiles = json.loads(PROFILES_PATH.read_text())
+        stripped = {role: {k: v for k, v in p.items() if k != "fallback"} for role, p in profiles.items()}
+        copy_root = Path(self.tmp) / "codex"
+        (copy_root / "skills/delegating").mkdir(parents=True)
+        (copy_root / "install_agents.py").write_text((REPO_ROOT / "codex/install_agents.py").read_text())
+        (copy_root / "skills/delegating/profiles.json").write_text(json.dumps(stripped))
+        baseline = load_installer(copy_root / "install_agents.py").render_agents()
+        rendered = self.installer.render_agents()
+        self.assertEqual(rendered, baseline)
+        for text in rendered.values():
+            self.assertNotIn("fallback", tomllib.loads(text))
 
     def test_collision_preserves_existing_file_and_installs_nothing(self):
         destination = Path(self.tmp) / "agents"
@@ -119,6 +143,28 @@ class CodexAgentInstallTests(StewardTestCase):
             self.installer.install(destination)
         self.assertEqual(existing.read_text(), "local edits")
         self.assertEqual(list(destination.iterdir()), [existing])
+
+
+class CodexAstraFallbackTests(unittest.TestCase):
+    def test_only_astra_roles_fall_back_to_sol_xhigh(self):
+        profiles = json.loads(PROFILES_PATH.read_text())
+        astra = {role for role, p in profiles.items() if p["model"] == "gpt-6-astra"}
+        self.assertEqual(astra, ASTRA_ROLES)
+        for role, profile in profiles.items():
+            if role in ASTRA_ROLES:
+                fallback = profile["fallback"]
+                self.assertEqual(fallback, {"model": "gpt-6.1-sol", "reasoning_effort": "xhigh"})
+                self.assertIn(fallback["reasoning_effort"], SUPPORTED_EFFORTS[fallback["model"]])
+            else:
+                self.assertNotIn("fallback", profile, role)
+
+    def test_skill_names_the_fallback_and_named_agent_workaround(self):
+        text = SKILL_PATH.read_text()
+        self.assertIn("Operator decision, 2026-10-09", text)
+        self.assertIn("fall back to `gpt-6.1-sol` at xhigh", text)
+        self.assertIn("steward-deep-reasoner", text)
+        self.assertIn("steward-top-reviewer", text)
+        self.assertNotIn(EM_DASH, text)
 
 
 if __name__ == "__main__":

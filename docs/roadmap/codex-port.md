@@ -22,19 +22,21 @@ Codex does not automatically trust installed hooks. Use `/hooks` in the CLI, or 
 
 `codex/skills/delegating/profiles.json` is the source for role briefs and optional standalone TOML agents. The skill also supports explicit model/effort dispatch on clients whose subagent tools do not select named agents.
 
-|Named agent|Model|Effort|
-|-|-|-|
-|`steward-coder`|`gpt-6.1-sol`|high|
-|`steward-deep-reasoner`|`gpt-6-astra`|xhigh|
-|`steward-reviewer`|`gpt-6.1-sol`|medium|
-|`steward-researcher`|`gpt-6.1-sol`|medium|
-|`steward-writer`|`gpt-6.1-sol`|medium|
-|`steward-mechanic`|`gpt-6-luna`|high|
-|`steward-top-reviewer`|`gpt-6-astra`|max|
+|Named agent|Model|Effort|Fallback|
+|-|-|-|-|
+|`steward-coder`|`gpt-6.1-sol`|high|none|
+|`steward-deep-reasoner`|`gpt-6-astra`|xhigh|`gpt-6.1-sol` xhigh|
+|`steward-reviewer`|`gpt-6.1-sol`|medium|none|
+|`steward-researcher`|`gpt-6.1-sol`|medium|none|
+|`steward-writer`|`gpt-6.1-sol`|medium|none|
+|`steward-mechanic`|`gpt-6-luna`|high|none|
+|`steward-top-reviewer`|`gpt-6-astra`|max|`gpt-6.1-sol` xhigh|
 
 These assignments follow the existing OpenAI routing decision, with neutral role names. The [verified evidence](../evaluations/2026-10-09-openai-model-assignment-evidence.md) confirms published model capabilities and records conflicting AA snapshots. It does not establish task-specific defect recall, writing quality, or invented-finding rates. Account model access still controls whether a profile can run. API rates are not subscription prices or Codex usage-limit weights.
 
 The coder may retry a failed check at Sol xhigh. A mechanic that needs judgment escalates to Sol low or the appropriate stronger role. The top reviewer runs only on explicit user request. Read-only roles receive read-only briefs; the generated TOML files inherit the user's runtime permissions.
+
+Operator decision, 2026-10-09: when Astra is not available, the deep-reasoner and top-reviewer fall back to `gpt-6.1-sol` at xhigh. Astra is unavailable when the client's model list omits `gpt-6-astra` or a dispatch with it is rejected as unavailable; weak results from a worker that ran do not trigger the fallback. profiles.json records the pair in a `fallback` field on those two roles only. The main agent tells the user in one line when it falls back. Every other unavailable configuration is still explained rather than silently lowered. The generated TOML agents pin one model and have no fallback key, and the installer does not write the `fallback` field. If `steward-deep-reasoner` or `steward-top-reviewer` fails because Astra is unavailable, the main agent dispatches the same brief with explicit `model: gpt-6.1-sol` and `reasoning_effort: xhigh` and no named agent, or reports the limitation when the client cannot select a model.
 
 ## Hooks and limits
 
