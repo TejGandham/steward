@@ -31,17 +31,26 @@ EM_DASH = chr(0x2014)  # the character itself is never written literally here
 
 def get_harness(env):
     """Which agent harness is calling. The pi extension sets
-    STEWARD_HARNESS=pi; anything else is Claude Code."""
-    if (env.get("STEWARD_HARNESS") or "").strip().lower() == "pi":
-        return "pi"
+    STEWARD_HARNESS=pi; the Copilot hooks.json sets STEWARD_HARNESS=copilot;
+    anything else is Claude Code."""
+    value = (env.get("STEWARD_HARNESS") or "").strip().lower()
+    if value in ("pi", "copilot"):
+        return value
     return "claude"
 
 
 def get_config_dir(env):
     """Where the harness keeps its config. Claude Code: $CLAUDE_CONFIG_DIR
-    or ~/.claude. pi: $PI_CODING_AGENT_DIR or ~/.pi/agent."""
+    or ~/.claude. pi: $PI_CODING_AGENT_DIR or ~/.pi/agent. Copilot:
+    $COPILOT_HOME or ~/.copilot."""
     home = env.get("HOME") or os.path.expanduser("~")
-    if get_harness(env) == "pi":
+    harness = get_harness(env)
+    if harness == "copilot":
+        value = env.get("COPILOT_HOME")
+        if value:
+            return _expand_user(value, env)
+        return os.path.join(home, ".copilot")
+    if harness == "pi":
         value = env.get("PI_CODING_AGENT_DIR")
         if value:
             return _expand_user(value, env)
@@ -172,8 +181,101 @@ def _pi_dependency_warnings(config_dir, env):
     return warnings
 
 
+def _copilot_bound_profiles_note(config_dir):
+    """One line naming the steward profiles the operator bound in Copilot's
+    settings.json, or None. Any read or parse problem means no line."""
+    try:
+        with open(os.path.join(config_dir, "settings.json"), "r", encoding="utf-8") as f:
+            settings = json.load(f)
+        agents = settings["subagents"]["agents"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(agents, dict):
+        return None
+    entries = []
+    for key, value in agents.items():
+        if not (isinstance(key, str) and key.startswith("steward:")):
+            continue
+        if not isinstance(value, dict):
+            value = {}
+        entries.append("{k} (model {m}, effort {e})".format(
+            k=key, m=value.get("model"), e=value.get("effortLevel")))
+    if not entries:
+        return None
+    return (
+        "Profiles bound in settings.json (omit model and reasoning_effort "
+        "when you dispatch these): " + ", ".join(entries)
+    )
+
+
+def _copilot_main_dir(env):
+    return os.path.join(get_state_dir(env), "copilot-main")
+
+
+def _record_copilot_main_session(env, session_id):
+    if not _non_empty_str(session_id):
+        return
+    directory = _copilot_main_dir(env)
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, _sanitize_session_id(session_id))
+    with open(path, "a", encoding="utf-8"):
+        pass
+
+
+def _is_copilot_main_session(env, session_id):
+    if not _non_empty_str(session_id):
+        return False
+    path = os.path.join(_copilot_main_dir(env), _sanitize_session_id(session_id))
+    return os.path.isfile(path)
+
+
+_COPILOT_FALLBACK_EDICT = (
+    "Every non-trivial task runs in a steward subagent. Dispatch it with "
+    "the task tool, agent_type steward:<profile>, and pass model and "
+    "reasoning_effort. Write for the operator in plain language with no "
+    "em-dashes.\n"
+    "STEWARD WARNING: the steward delegating skill file was missing at "
+    "{path}; this short fallback stands in for it."
+)
+
+
+def _copilot_session_start(payload, env):
+    # Best-effort and first: an unwritable state dir or a missing skill
+    # file must not cost the marker or the injection.
+    try:
+        _record_copilot_main_session(env, payload.get("session_id"))
+    except OSError:
+        pass
+    plugin_root = get_plugin_root(env)
+    skill_path = os.path.join(plugin_root, "copilot", "skills", "delegating", "SKILL.md")
+    try:
+        with open(skill_path, "r", encoding="utf-8") as f:
+            skill_body = strip_frontmatter(f.read()).strip("\n")
+    except OSError:
+        skill_body = _COPILOT_FALLBACK_EDICT.format(path=skill_path)
+    config_dir = get_config_dir(env)
+    parts = [
+        "<STEWARD>\n"
+        "You run under the steward delegation edict. The full text of the "
+        "steward delegating skill follows; read it as standing "
+        "instructions.\n\n"
+    ]
+    warnings = _pi_dependency_warnings(config_dir, env)
+    if warnings:
+        parts.append("\n".join(warnings) + "\n")
+    note = _copilot_bound_profiles_note(config_dir)
+    if note:
+        parts.append(note + "\n")
+    parts.append(skill_body)
+    parts.append("\n</STEWARD>")
+    # Copilot drops the wrapped hookSpecificOutput form at session start.
+    return json.dumps({"additionalContext": "".join(parts)})
+
+
 def cmd_session_start(payload, env):
     harness = get_harness(env)
+    if harness == "copilot":
+        return _copilot_session_start(payload, env)
     plugin_root = get_plugin_root(env)
     if harness == "pi":
         skill_path = os.path.join(
@@ -443,11 +545,35 @@ def default_allowlist_globs(env):
     config_dir = get_config_dir(env)
     home = env.get("HOME") or os.path.expanduser("~")
     pi_globs = []
-    if get_harness(env) == "pi":
+    config_globs = [os.path.join(config_dir, "**")]
+    harness = get_harness(env)
+    if harness == "pi":
         # pi's counterparts of CLAUDE.md and a project's .claude directory.
         pi_globs = ["**/AGENTS.md", "**/.pi/**"]
-    return pi_globs + [
-        os.path.join(config_dir, "**"),
+    elif harness == "copilot":
+        pi_globs = [
+            "**/AGENTS.md",
+            "**/.github/copilot-instructions.md",
+            "**/.github/instructions/**",
+            "**/.github/agents/**",
+            "**/.github/skills/**",
+            "**/.github/copilot/**",
+        ]
+        # Copilot chat sessions run with cwd under <config_dir>/chats/, so
+        # the whole config dir would exempt every edit made in a chat.
+        config_globs = [
+            os.path.join(config_dir, rel) for rel in (
+                "steward/**",
+                "settings.json",
+                "settings.local.json",
+                "copilot-instructions.md",
+                "agents/**",
+                "skills/**",
+                "hooks/**",
+                "session-state/**",
+            )
+        ]
+    return pi_globs + config_globs + [
         os.path.join(home, ".claude", "**"),
         os.path.join(home, ".claude-profiles", "**"),
         "**/memory/**",
@@ -550,8 +676,33 @@ def direct_edit_file_path(tool_name, tool_input):
     return None
 
 
+_PATCH_PATH_RE = re.compile(
+    r"^\*\*\* (?:Add File|Update File|Delete File|Move to):[ \t]*(.+?)[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def apply_patch_paths(patch):
+    """Every target path named in a Copilot apply_patch string."""
+    return [p for p in _PATCH_PATH_RE.findall(patch) if p]
+
+
 def classify_tool_call(tool_name, tool_input, env, cwd=None):
     """Returns (is_direct_edit, is_allowlisted)."""
+    if get_harness(env) == "copilot" and tool_name in ("Edit", "Write"):
+        if isinstance(tool_input, str):
+            paths = apply_patch_paths(tool_input)
+            if not paths:
+                return True, False
+            return True, all(is_allowlisted(p, env, cwd) for p in paths)
+        if not isinstance(tool_input, dict):
+            return True, False
+        path = tool_input.get("path") or tool_input.get("file_path")
+        if not path:
+            return True, False
+        return True, is_allowlisted(path, env, cwd)
+    if not isinstance(tool_input, dict):
+        tool_input = {}
     if tool_name in _DIRECT_EDIT_TOOLS:
         path = direct_edit_file_path(tool_name, tool_input)
         if not path:
@@ -692,6 +843,17 @@ def get_gate_mode(env):
 
 def gate_message(count, config_dir, harness="claude"):
     gate_path = os.path.join(config_dir, "steward", "gate")
+    if harness == "copilot":
+        return (
+            "steward delegation gate: this is direct edit #{n} on the main "
+            "thread with no subagent call in between. The edict says every "
+            "non-trivial task runs in a subagent. Delegate it with the task "
+            "tool (agent_type steward:coder-opus-medium for code, "
+            "steward:mechanic-haiku-medium for rote edits), or ask the "
+            "operator to set the gate to soft or off by writing that word "
+            "to {gate_path} (takes effect immediately; STEWARD_GATE only "
+            "applies at next start)."
+        ).format(n=count, gate_path=gate_path)
     if harness == "pi":
         return (
             "steward delegation gate: this is direct edit #{n} on the main "
@@ -863,19 +1025,27 @@ def cmd_gate(payload, env):
     if _non_empty_str(payload.get("agent_id")):
         return None
 
+    harness = get_harness(env)
+    # Copilot sends no agent_id; a subagent's calls carry its own
+    # session_id, which session-start never recorded. Fail open on those.
+    if harness == "copilot" and not _is_copilot_main_session(env, payload.get("session_id")):
+        return None
+
     mode = get_gate_mode(env)
     if mode == "off":
         return None
 
     tool_name = payload.get("tool_name")
     tool_input = payload.get("tool_input")
-    if not isinstance(tool_input, dict):
+    # A Copilot apply_patch call passes the patch as a bare string.
+    if not isinstance(tool_input, dict) and not (
+            harness == "copilot" and isinstance(tool_input, str)):
         tool_input = {}
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = None
 
-    if tool_name in _BASH_TOOLS:
+    if tool_name in _BASH_TOOLS and isinstance(tool_input, dict):
         command = tool_input.get("command")
         if not isinstance(command, str):
             command = ""
@@ -903,7 +1073,7 @@ def cmd_gate(payload, env):
         return None
 
     config_dir = get_config_dir(env)
-    msg = gate_message(count, config_dir, get_harness(env))
+    msg = gate_message(count, config_dir, harness)
     if mode == "hard":
         return json.dumps({
             "hookSpecificOutput": {
@@ -1054,6 +1224,137 @@ def _extract_last_assistant_text(transcript_path):
     return "".join(texts)
 
 
+# Copilot runs the Stop hook before it has flushed the final
+# assistant.message to events.jsonl. It writes a hook.start event for the
+# agentStop invocation after that message, so the gate polls for it.
+_COPILOT_FLUSH_POLL_SECONDS = 0.1
+_COPILOT_FLUSH_LIMIT_SECONDS = 3.0
+_COPILOT_STOP_MATCH_MS = 1000
+
+
+def _parse_iso_ms(value):
+    """Milliseconds since the epoch for an ISO 8601 string, or None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    from datetime import datetime, timezone
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return int(round(moment.timestamp() * 1000))
+
+
+def _find_copilot_stop_marker(lines, session_id, stop_ms):
+    """Index of the agentStop hook.start line for this stop, or None.
+    Without stop_ms, only a marker after the last main user.message
+    counts."""
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i].strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        if kind == "user.message" and "agentId" not in event and stop_ms is None:
+            return None
+        if kind != "hook.start":
+            continue
+        data = event.get("data")
+        if not isinstance(data, dict) or data.get("hookType") != "agentStop":
+            continue
+        hook_input = data.get("input")
+        if not isinstance(hook_input, dict) or hook_input.get("sessionId") != session_id:
+            continue
+        if stop_ms is None:
+            return i
+        ms = hook_input.get("timestamp")
+        if isinstance(ms, bool) or not isinstance(ms, (int, float)):
+            continue
+        if abs(ms - stop_ms) <= _COPILOT_STOP_MATCH_MS:
+            return i
+    return None
+
+
+def _read_copilot_until_stop(path, session_id, stop_ms):
+    """The transcript tail up to (not including) this stop's hook.start
+    line, polling until it appears. Past the limit, the whole tail."""
+    deadline = time.monotonic() + _COPILOT_FLUSH_LIMIT_SECONDS
+    while True:
+        raw = _read_transcript_tail(path)
+        lines = raw.splitlines()
+        idx = _find_copilot_stop_marker(lines, session_id, stop_ms)
+        if idx is not None:
+            return "\n".join(lines[:idx])
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return raw
+        time.sleep(min(_COPILOT_FLUSH_POLL_SECONDS, remaining))
+
+
+def _extract_last_copilot_text(transcript_path, session_id=None, stop_timestamp=None):
+    """What the operator sees as the final answer of the last turn of a
+    Copilot events.jsonl: the last non-empty main assistant.message
+    content plus any task_complete summaries after the last main-agent
+    user.message. Subagent events carry agentId and are skipped. None if
+    no user.message boundary is in the tail that was read. With a
+    session_id, first waits for the runtime to flush this stop."""
+    if not transcript_path:
+        return None
+    path = os.path.expanduser(transcript_path)
+    try:
+        if _non_empty_str(session_id):
+            raw = _read_copilot_until_stop(path, session_id, _parse_iso_ms(stop_timestamp))
+        else:
+            raw = _read_transcript_tail(path)
+    except OSError:
+        return None
+
+    final_message = None
+    summaries = []
+    found_boundary = False
+    for line in reversed(raw.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or "agentId" in event:
+            continue
+        kind = event.get("type")
+        data = event.get("data")
+        if not isinstance(data, dict):
+            data = {}
+        if kind == "user.message":
+            found_boundary = True
+            break
+        if kind == "assistant.message":
+            value = data.get("content")
+            if final_message is None and isinstance(value, str) and value.strip():
+                final_message = value
+        elif kind == "session.task_complete":
+            value = data.get("summary")
+            if isinstance(value, str) and value.strip():
+                summaries.append(value)
+
+    if not found_boundary:
+        return None
+    texts = ([final_message] if final_message is not None else []) + summaries[::-1]
+    if not texts:
+        return None
+    return "\n\n".join(texts)
+
+
 PROSE_OPERATOR_MSG_TEMPLATE = (
     "steward prose gate: your last reply has {found}. The operator's rule "
     "is plain language with zero em-dashes. Revise the reply with the "
@@ -1066,13 +1367,25 @@ def cmd_prose_gate(payload, env):
         return None
     if _non_empty_str(payload.get("agent_id")):
         return None
+    copilot = get_harness(env) == "copilot"
+    # Copilot fires Stop for subagent sessions too, with the parent's
+    # transcript path. Only a recorded main session is gated.
+    if copilot and not _is_copilot_main_session(env, payload.get("session_id")):
+        return None
 
     text = payload.get("last_assistant_message")
     if not (isinstance(text, str) and text.strip()):
         transcript_path = payload.get("transcript_path")
         text = None
         if isinstance(transcript_path, str) and transcript_path:
-            text = _extract_last_assistant_text(transcript_path)
+            if copilot:
+                text = _extract_last_copilot_text(
+                    transcript_path,
+                    session_id=payload.get("session_id"),
+                    stop_timestamp=payload.get("timestamp"),
+                )
+            else:
+                text = _extract_last_assistant_text(transcript_path)
 
     if not text:
         return None

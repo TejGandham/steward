@@ -1,0 +1,21 @@
+{
+  "name": "steward",
+  "version": "0.7.0",
+  "description": "Delegation edict for GitHub Copilot: pinned subagent profiles chosen by task complexity, plain-language prose, and hooks that enforce both.",
+  "author": {
+    "name": "Tej Gandham"
+  },
+  "repository": "https://github.com/tejgandham/steward",
+  "license": "MIT",
+  "keywords": [
+    "delegation",
+    "subagents",
+    "plain-language",
+    "hooks"
+  ],
+  "agents": "copilot/agents/",
+  "skills": [
+    "copilot/skills/"
+  ],
+  "hooks": "copilot/hooks.json"
+}

@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "STEWARD_HARNESS=copilot python3 \"${PLUGIN_ROOT}/hooks/steward_hook.py\" session-start",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "STEWARD_HARNESS=copilot python3 \"${PLUGIN_ROOT}/hooks/steward_hook.py\" gate",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "STEWARD_HARNESS=copilot python3 \"${PLUGIN_ROOT}/hooks/steward_hook.py\" delegated",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "STEWARD_HARNESS=copilot python3 \"${PLUGIN_ROOT}/hooks/steward_hook.py\" delegated",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "STEWARD_HARNESS=copilot python3 \"${PLUGIN_ROOT}/hooks/steward_hook.py\" prose-gate",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
