@@ -1,0 +1,13 @@
+{
+  "subagents": {
+    "agentOverrides": {
+      "steward.coder-opus-medium": { "model": "amorphic/claude-opus-5-5" },
+      "steward.deep-reasoner-opus-xhigh": { "model": "amorphic/claude-opus-5-5" },
+      "steward.mechanic-haiku-medium": { "model": "amorphic/claude-haiku-5-5" },
+      "steward.researcher-sonnet-low": { "model": "amorphic/claude-sonnet-5-5" },
+      "steward.reviewer-sonnet-high": { "model": "amorphic/claude-sonnet-5-5" },
+      "steward.writer-sonnet-medium": { "model": "amorphic/claude-sonnet-5-5" },
+      "steward.reviewer-fable-xhigh": { "model": "amorphic/claude-fable-5-1" }
+    }
+  }
+}
