@@ -4,7 +4,8 @@ Two groups:
 - the hook script in copilot mode (STEWARD_HARNESS=copilot), with
   Copilot-shaped payloads and events.jsonl transcripts;
 - the Copilot plugin files: the manifest, hooks.json, the agent profiles
-  (which must stay in step with the Claude Code ones) and the edict skill.
+  (which must stay in step with the Claude Code ones under the role-only
+  names in COPILOT_NAMES) and the edict skill.
 """
 
 import json
@@ -23,6 +24,23 @@ COPILOT_AGENTS = COPILOT_DIR / "agents"
 COPILOT_SKILLS = COPILOT_DIR / "skills"
 CLAUDE_AGENTS = REPO_ROOT / "agents"
 COPILOT_MANIFEST = REPO_ROOT / ".github" / "plugin" / "plugin.json"
+
+# Claude Code profile name -> Copilot role-only profile name.
+COPILOT_NAMES = {
+    "coder-opus-medium": "coder",
+    "deep-reasoner-opus-xhigh": "deep-reasoner",
+    "reviewer-sonnet-high": "reviewer",
+    "researcher-sonnet-low": "researcher",
+    "writer-sonnet-medium": "writer",
+    "mechanic-haiku-medium": "mechanic",
+    "reviewer-fable-xhigh": "top-reviewer",
+}
+
+
+def _to_copilot_names(text):
+    for old in sorted(COPILOT_NAMES, key=len, reverse=True):
+        text = text.replace(old, COPILOT_NAMES[old])
+    return text
 
 
 class CopilotHarnessCase(StewardTestCase):
@@ -169,12 +187,12 @@ class CopilotSessionStartTests(CopilotHarnessCase):
 
     def test_bound_profiles_listed(self):
         self.write_settings(json.dumps({"subagents": {"agents": {
-            "steward:coder-opus-medium": {"model": "prov/claude-opus-5-5", "effortLevel": "medium"},
+            "steward:coder": {"model": "prov/claude-opus-5-5", "effortLevel": "medium"},
             "other:thing": {"model": "m-other", "effortLevel": "low"},
         }}}))
         text = self.context(self.co_env())
         self.assertIn("Profiles bound in settings.json", text)
-        self.assertIn("steward:coder-opus-medium (model prov/claude-opus-5-5, effort medium)", text)
+        self.assertIn("steward:coder (model prov/claude-opus-5-5, effort medium)", text)
         self.assertNotIn("other:thing", text)
         self.assertNotIn("m-other", text)
 
@@ -209,7 +227,9 @@ class CopilotGateTests(CopilotHarnessCase):
         reason = self._assert_second_denied(self._edit("m1"), env)
         self.assertIsNotNone(reason)
         self.assertIn("task tool", reason)
-        self.assertIn("steward:coder-opus-medium", reason)
+        self.assertIn("steward:coder for code", reason)
+        self.assertIn("steward:mechanic for rote edits", reason)
+        self.assertNotIn("coder-opus-medium", reason)
         self.assertIn(os.path.join(self.config, "steward", "gate"), reason)
 
     def test_create_payload_counted(self):
@@ -316,7 +336,7 @@ class CopilotGateTests(CopilotHarnessCase):
         hso = json.loads(run_hook("gate", payload, env).stdout)["hookSpecificOutput"]
         self.assertNotIn("permissionDecision", hso)
         self.assertIn("task tool", hso["additionalContext"])
-        self.assertIn("steward:coder-opus-medium", hso["additionalContext"])
+        self.assertIn("steward:coder for code", hso["additionalContext"])
 
     def test_no_session_id_fails_open(self):
         env = self.co_env(STEWARD_GATE="hard")
@@ -697,10 +717,11 @@ class CopilotManifestTests(unittest.TestCase):
 
 
 class CopilotAgentProfileTests(unittest.TestCase):
-    def test_same_profiles_as_claude(self):
+    def test_role_only_names_cover_every_claude_profile(self):
+        self.assertEqual(sorted(COPILOT_NAMES), sorted(p.stem for p in CLAUDE_AGENTS.glob("*.md")))
         self.assertEqual(
             sorted(p.name[: -len(".agent.md")] for p in COPILOT_AGENTS.glob("*.agent.md")),
-            sorted(p.stem for p in CLAUDE_AGENTS.glob("*.md")),
+            sorted(COPILOT_NAMES.values()),
         )
         self.assertEqual(len(list(COPILOT_AGENTS.iterdir())), 7)
 
@@ -708,23 +729,45 @@ class CopilotAgentProfileTests(unittest.TestCase):
         for claude_path in CLAUDE_AGENTS.glob("*.md"):
             with self.subTest(profile=claude_path.stem):
                 c_fields, c_body = _frontmatter(claude_path)
-                co_fields, co_body = _frontmatter(COPILOT_AGENTS / (claude_path.stem + ".agent.md"))
-                self.assertEqual(co_fields["name"], c_fields["name"])
-                self.assertEqual(co_fields["description"], c_fields["description"])
+                role = COPILOT_NAMES[claude_path.stem]
+                co_fields, co_body = _frontmatter(COPILOT_AGENTS / (role + ".agent.md"))
+                self.assertEqual(co_fields["name"], role)
+                self.assertEqual(co_fields["description"], _to_copilot_names(c_fields["description"]))
                 self.assertEqual(co_fields["reasoning-effort"], c_fields["effort"])
                 self.assertEqual(co_fields["include-custom-instructions"], "true")
                 self.assertNotIn("model", co_fields)
                 self.assertNotIn("skills", co_fields)
-                self.assertEqual(co_body, c_body)
+                self.assertEqual(co_body, _to_copilot_names(c_body))
+
+    def test_no_old_profile_names_in_copilot_files(self):
+        paths = [p for p in COPILOT_DIR.rglob("*") if p.is_file()] + [COPILOT_MANIFEST]
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            for old in COPILOT_NAMES:
+                self.assertNotIn(old, text, "{} in {}".format(old, path))
 
 
 class CopilotSkillTests(unittest.TestCase):
     def test_skill_names_every_profile_and_has_no_em_dash(self):
         text = (COPILOT_SKILLS / "delegating" / "SKILL.md").read_text(encoding="utf-8")
-        for path in CLAUDE_AGENTS.glob("*.md"):
-            self.assertIn("steward:" + path.stem, text)
+        for role in COPILOT_NAMES.values():
+            self.assertIn("steward:" + role, text)
         self.assertNotIn(EM_DASH, text)
         self.assertNotIn("orchestrat", text.lower())
+
+    def test_skill_maps_each_role_to_model_and_effort(self):
+        text = (COPILOT_SKILLS / "delegating" / "SKILL.md").read_text(encoding="utf-8")
+        for role, model, effort in (
+            ("coder", "Claude Opus 5.5", "medium"),
+            ("deep-reasoner", "Claude Opus 5.5", "xhigh"),
+            ("reviewer", "Claude Sonnet 5.5", "high"),
+            ("researcher", "Claude Sonnet 5.5", "low"),
+            ("writer", "Claude Sonnet 5.5", "medium"),
+            ("mechanic", "Claude Haiku 5.5", "medium"),
+            ("top-reviewer", "Claude Fable 5.1", "xhigh"),
+        ):
+            self.assertIn("| steward:{} | {} | `{}` |".format(role, model, effort), text)
+        self.assertNotIn("family in the profile's name", text)
 
 
 if __name__ == "__main__":

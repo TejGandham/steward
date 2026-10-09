@@ -1,6 +1,6 @@
 ---
-name: reviewer-sonnet-high
-description: Standard code review of a diff or PR, correctness, naming, control flow, test coverage of success/failure/edge cases. Use for everyday PR review. For security-sensitive or high-stakes/complex diffs, use deep-reasoner-opus-xhigh instead.
+name: reviewer
+description: Standard code review of a diff or PR, correctness, naming, control flow, test coverage of success/failure/edge cases. Use for everyday PR review. For security-sensitive or high-stakes/complex diffs, use deep-reasoner instead.
 reasoning-effort: high
 include-custom-instructions: true
 ---

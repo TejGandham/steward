@@ -1,5 +1,5 @@
 ---
-name: coder-opus-medium
+name: coder
 description: "Pure implementation work with a clear spec and tests, write code test-first (TDD), fix a well-defined bug, implement an approved plan. Use when the task is 'make this code do X' with a verifiable gate (tests, types, lint). Not for open-ended design or cross-repo reasoning."
 reasoning-effort: medium
 include-custom-instructions: true

@@ -222,21 +222,21 @@ A SessionStart hook adds the Copilot edict as session context at the start of ev
 
 ### Profiles and models on Copilot
 
-Each profile sets a reasoning effort and `include-custom-instructions: true`, so subagents read `AGENTS.md` and other instruction files:
+The Copilot profiles carry role-only names. Each profile sets a reasoning effort and `include-custom-instructions: true`, so subagents read `AGENTS.md` and other instruction files:
 
-| Profile | Effort |
-|-|-|
-| `steward:coder-opus-medium` | medium |
-| `steward:deep-reasoner-opus-xhigh` | xhigh |
-| `steward:reviewer-sonnet-high` | high |
-| `steward:researcher-sonnet-low` | low |
-| `steward:writer-sonnet-medium` | medium |
-| `steward:mechanic-haiku-medium` | medium |
-| `steward:reviewer-fable-xhigh` | xhigh |
+| Profile | Model | Effort |
+|-|-|-|
+| `steward:coder` | Claude Opus 5.5 | medium |
+| `steward:deep-reasoner` | Claude Opus 5.5 | xhigh |
+| `steward:reviewer` | Claude Sonnet 5.5 | high |
+| `steward:researcher` | Claude Sonnet 5.5 | low |
+| `steward:writer` | Claude Sonnet 5.5 | medium |
+| `steward:mechanic` | Claude Haiku 5.5 | medium |
+| `steward:top-reviewer` | Claude Fable 5.1 | xhigh |
 
 Copilot does not resolve the `opus`, `sonnet`, `haiku`, and `fable` aliases, and model IDs differ by account and provider (for example a provider-prefixed `<provider>/claude-opus-5-5`). So the Copilot profiles set only `reasoning-effort`.
 
-Instead, the edict tells the main agent to pass two fields on every `task` call: `model`, the Claude model of the profile's family, copied from the task tool's own model list, and `reasoning_effort`, the profile's level. If Claude Haiku 5.5 is not listed, the mechanic runs on Claude Sonnet 5.5 at `low`.
+Instead, the edict tells the main agent to pass two fields on every `task` call: `model`, the role's Claude model from the table above, copied from the task tool's own model list, and `reasoning_effort`, the role's level. `steward:top-reviewer` runs only when you ask for Fable. If Claude Haiku 5.5 is not listed, the mechanic runs on Claude Sonnet 5.5 at `low`.
 
 ### Optional: bind a profile on your machine
 
@@ -246,11 +246,13 @@ To fix a profile's model and effort on one machine, add it to `~/.copilot/settin
 {
   "subagents": {
     "agents": {
-      "steward:coder-opus-medium": { "model": "<id>", "effortLevel": "medium" }
+      "steward:coder": { "model": "<id>", "effortLevel": "medium" }
     }
   }
 }
 ```
+
+The binding keys use the role-only names: `steward:coder`, `steward:mechanic`, and so on. Bindings saved under the old names, such as `steward:coder-opus-medium`, no longer match; rename those keys.
 
 The session-start note then lists the bound profiles, and the main agent omits `model` and `reasoning_effort` for them.
 

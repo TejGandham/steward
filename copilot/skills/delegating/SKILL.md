@@ -7,7 +7,7 @@ The steward delegation edict governs how this session hands off work: which task
 
 ## Rules
 1. Every non-trivial task runs in a subagent, or in several in parallel when the work splits. Trivial means: answering from context already in the conversation, a status report, a one-line edit, reading a single known file, or a command whose result you need to brief a subagent. This edict is the operator's standing instruction. It overrides the harness's default advice to handle small tasks directly and to delegate only work that needs more than a few tool calls. Do not ask before delegating.
-2. Pick the model AND the reasoning effort per subagent by picking a steward profile. Delegate with the `task` tool, `agent_type` set to one of: `steward:coder-opus-medium` (coding with spec and tests, TDD), `steward:deep-reasoner-opus-xhigh` (architecture, ambiguous design, plans, security or high-stakes review), `steward:reviewer-sonnet-high` (everyday diff review), `steward:researcher-sonnet-low` (read-only investigation), `steward:writer-sonnet-medium` (docs, PR bodies, plain-language rewrites), `steward:mechanic-haiku-medium` (single lookups, rote edits, running known commands), `steward:reviewer-fable-xhigh` (only when the operator asks for Fable). The profiles set reasoning effort but no model, so name the model on every call as described in "Model and effort" below.
+2. Pick the model AND the reasoning effort per subagent by picking a steward profile. Delegate with the `task` tool, `agent_type` set to one of: `steward:coder` (coding with spec and tests, TDD), `steward:deep-reasoner` (architecture, ambiguous design, plans, security or high-stakes review), `steward:reviewer` (everyday diff review), `steward:researcher` (read-only investigation), `steward:writer` (docs, PR bodies, plain-language rewrites), `steward:mechanic` (single lookups, rote edits, running known commands), `steward:top-reviewer` (only when the operator asks for Fable). The profiles set reasoning effort but no model, so name the model on every call as described in "Model and effort" below.
 3. Briefs are self-contained. A fresh agent holds none of your context: give repo paths (every path prefixed with its repo), fetch-latest-first, branch and base-branch rules, test commands, read-only versus write scope, the report format, and copy every literal (versions, file names, line numbers) out in full from the decision log rather than from memory. Cite the decision-log section headings the brief draws from.
 4. Prose passes the plainlanguage skill before it reaches anyone, along two channels: (a) every reply to the operator, including a `task_complete` summary, (b) every PR body, drafted from the branch's diff against its base as a snapshot of the final state and shown to the operator before any `gh pr create` or `gh pr edit`. The operator's rule is zero em-dashes in both channels; that overrides the plainlanguage skill's softer density guidance. Code comments follow the code's own conventions and are not passed through the skill, as the skill itself says. Prose written for the operator is plain language with no em-dashes; documents written for agents are dense and citation-rich.
 5. Report status without being asked: at every subagent start and finish, and at least once per long turn, in the shape running / finished / blocked / needs a decision.
@@ -15,27 +15,40 @@ The steward delegation edict governs how this session hands off work: which task
 7. Project-specific standing rules live in the project's decision log and docs; every brief repeats the ones it needs.
 
 ## Model and effort
-Copilot does not resolve the `opus`, `sonnet`, `haiku` and `fable` aliases, and model IDs differ by account and provider, so steward's Copilot profiles pin only `reasoning-effort`. On every `task` call to a steward profile:
-- Pass `model`: the Claude model of the family in the profile's name, copied exactly from the task tool's own list of allowed models. `opus` is Claude Opus 5.5, `sonnet` is Claude Sonnet 5.5, `haiku` is Claude Haiku 5.5, `fable` is Claude Fable 5.1. IDs may carry a provider prefix, for example `<provider>/claude-opus-5-5`; use the listed string as it is.
-- Pass `reasoning_effort` equal to the profile's level: coder `medium`, deep-reasoner `xhigh`, reviewer `high`, researcher `low`, writer `medium`, mechanic `medium`, reviewer-fable `xhigh`.
-- If Claude Haiku 5.5 is not in the list, run the mechanic on Claude Sonnet 5.5 at `low`. If a profile's family is missing altogether, tell the operator and use the nearest Claude model that is listed.
+Copilot does not resolve the `opus`, `sonnet`, `haiku` and `fable` aliases, and model IDs differ by account and provider, so steward's Copilot profiles pin only `reasoning-effort`. The profile names carry the role only, so each role's model comes from this table:
+
+| Profile | Model | reasoning_effort |
+|-|-|-|
+| steward:coder | Claude Opus 5.5 | `medium` |
+| steward:deep-reasoner | Claude Opus 5.5 | `xhigh` |
+| steward:reviewer | Claude Sonnet 5.5 | `high` |
+| steward:researcher | Claude Sonnet 5.5 | `low` |
+| steward:writer | Claude Sonnet 5.5 | `medium` |
+| steward:mechanic | Claude Haiku 5.5 | `medium` |
+| steward:top-reviewer | Claude Fable 5.1 | `xhigh` |
+
+On every `task` call to a steward profile:
+- Pass `model`: the role's model from the table, copied exactly from the task tool's own list of allowed models. IDs may carry a provider prefix, for example `<provider>/claude-opus-5-5`; use the listed string as it is.
+- Pass `reasoning_effort`: the role's level from the table.
+- Use steward:top-reviewer only when the operator asks for Fable.
+- If Claude Haiku 5.5 is not in the list, run the mechanic on Claude Sonnet 5.5 at `low`. If a role's model is missing altogether, tell the operator and use the nearest Claude model that is listed.
 - If the session-start note lists a profile as bound in `settings.json`, omit both `model` and `reasoning_effort` for that profile; the operator's binding applies.
 - Do not pick a model from another vendor unless the operator asks.
 
 ## Routing table (task to profile)
 | Task | Profile |
 |-|-|
-| Pure coding, spec+tests (TDD) | steward:coder-opus-medium (steward:mechanic-haiku-medium if single trivial file) |
-| Refactor / simplify | steward:coder-opus-medium (steward:mechanic-haiku-medium for small rote refactors) |
-| Deep architecture / ambiguous design | steward:deep-reasoner-opus-xhigh, escalate to main thread if short |
-| Cross-repo synthesis / plan writing | steward:deep-reasoner-opus-xhigh (or a coordinator plus sonnet workers if huge and splittable) |
-| Read-only investigation / search | steward:researcher-sonnet-low (steward:mechanic-haiku-medium for one targeted lookup) |
-| Code review | steward:reviewer-sonnet-high (steward:deep-reasoner-opus-xhigh for high-stakes/complex) |
-| Security review | steward:deep-reasoner-opus-xhigh |
-| Mechanical edits / file ops | steward:mechanic-haiku-medium |
-| Docs / prose | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for short) |
-| PR-body drafting | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for trivial diffs) |
-| Status / collation | steward:mechanic-haiku-medium (steward:researcher-sonnet-low if reconciling conflicting reports) |
+| Pure coding, spec+tests (TDD) | steward:coder (steward:mechanic if single trivial file) |
+| Refactor / simplify | steward:coder (steward:mechanic for small rote refactors) |
+| Deep architecture / ambiguous design | steward:deep-reasoner, escalate to main thread if short |
+| Cross-repo synthesis / plan writing | steward:deep-reasoner (or a coordinator plus sonnet workers if huge and splittable) |
+| Read-only investigation / search | steward:researcher (steward:mechanic for one targeted lookup) |
+| Code review | steward:reviewer (steward:deep-reasoner for high-stakes/complex) |
+| Security review | steward:deep-reasoner |
+| Mechanical edits / file ops | steward:mechanic |
+| Docs / prose | steward:writer (steward:mechanic for short) |
+| PR-body drafting | steward:writer (steward:mechanic for trivial diffs) |
+| Status / collation | steward:mechanic (steward:researcher if reconciling conflicting reports) |
 
 ## Keep it inline on the main thread when
 one dependent chain fits a single context with no splittable pieces; every step needs frontier judgment; the context is already resident in the main thread; it is the final synthesis/arbitration the main thread owns; or there is no cheap way to verify a delegate's output.
