@@ -7,7 +7,7 @@ The steward delegation edict governs how this session hands off work: which task
 
 ## Everyone (primary and secondaries)
 1. Every non-trivial task runs in a subagent, or in several in parallel when the work splits. Trivial means: answering from context already in the conversation, a status report, a one-line edit, reading a single known file, or a command whose result you need to brief a subagent.
-2. Pick the model AND the reasoning effort per subagent. Effort is definition-only, so delegate by `subagent_type` to the steward plugin's pinned profiles: `steward:coder-opus-medium` (coding with spec and tests, TDD), `steward:deep-reasoner-opus-xhigh` (architecture, ambiguous design, plans, security or high-stakes review), `steward:reviewer-sonnet-high` (everyday diff review), `steward:researcher-sonnet-low` (read-only investigation), `steward:writer-sonnet-medium` (docs, PR bodies, plain-language rewrites), `steward:mechanic-sonnet-low` (single lookups, rote edits, running known commands), `steward:reviewer-fable-xhigh` (only when the operator asks for Fable). A bare `Agent(model=...)` call cannot set effort. Routing table: below, and `routing.md` in this skill.
+2. Pick the model AND the reasoning effort per subagent. Effort is definition-only, so delegate by `subagent_type` to the steward plugin's pinned profiles: `steward:coder-opus-medium` (coding with spec and tests, TDD), `steward:deep-reasoner-opus-xhigh` (architecture, ambiguous design, plans, security or high-stakes review), `steward:reviewer-sonnet-high` (everyday diff review), `steward:researcher-sonnet-low` (read-only investigation), `steward:writer-sonnet-medium` (docs, PR bodies, plain-language rewrites), `steward:mechanic-haiku-medium` (single lookups, rote edits, running known commands), `steward:reviewer-fable-xhigh` (only when the operator asks for Fable). A bare `Agent(model=...)` call cannot set effort. Routing table: below, and `routing.md` in this skill.
 3. Briefs are self-contained. A fresh agent or a summarised session holds none of your context: give repo paths (every path prefixed with its repo), fetch-latest-first, branch and base-branch rules, test commands, read-only versus write scope, the report format, and copy every literal (versions, file names, line numbers) out in full from the decision log rather than from memory. Cite the decision-log section headings the brief draws from.
 4. Prose passes the plainlanguage skill before it reaches anyone, along two channels: (a) every reply to the operator, (b) every PR body, drafted from the branch's diff against its base as a snapshot of the final state (with the `update-pr-summary` command when it is installed; it is optional) and shown to the operator before any `gh pr create` or `gh pr edit`. The operator's rule is zero em-dashes in both channels; that overrides the plainlanguage skill's softer density guidance. Code comments follow the code's own conventions and are not passed through the skill, as the skill itself says. Prose written for the operator is plain language with no em-dashes; documents written for agents are dense and citation-rich.
 5. Report status without being asked: at every subagent start and finish, and at least once per long turn, in the shape running / finished / blocked / needs a decision.
@@ -16,18 +16,18 @@ The steward delegation edict governs how this session hands off work: which task
 
 ## Routing table (task to profile)
 | Task | Profile |
-|---|---|
-| Pure coding, spec+tests (TDD) | steward:coder-opus-medium (steward:mechanic-sonnet-low if single trivial file) |
-| Refactor / simplify | steward:coder-opus-medium (steward:mechanic-sonnet-low for small rote refactors) |
+|-|-|
+| Pure coding, spec+tests (TDD) | steward:coder-opus-medium (steward:mechanic-haiku-medium if single trivial file) |
+| Refactor / simplify | steward:coder-opus-medium (steward:mechanic-haiku-medium for small rote refactors) |
 | Deep architecture / ambiguous design | steward:deep-reasoner-opus-xhigh, escalate to main thread if short |
 | Cross-repo synthesis / plan writing | steward:deep-reasoner-opus-xhigh (or a coordinator plus sonnet workers if huge and splittable) |
-| Read-only investigation / search | steward:researcher-sonnet-low (steward:mechanic-sonnet-low for one targeted lookup) |
+| Read-only investigation / search | steward:researcher-sonnet-low (steward:mechanic-haiku-medium for one targeted lookup) |
 | Code review | steward:reviewer-sonnet-high (steward:deep-reasoner-opus-xhigh for high-stakes/complex) |
 | Security review | steward:deep-reasoner-opus-xhigh |
-| Mechanical edits / file ops | steward:mechanic-sonnet-low |
-| Docs / prose | steward:writer-sonnet-medium (steward:mechanic-sonnet-low for short) |
-| PR-body drafting | steward:writer-sonnet-medium (steward:mechanic-sonnet-low for trivial diffs) |
-| Status / collation | steward:mechanic-sonnet-low (steward:researcher-sonnet-low if reconciling conflicting reports) |
+| Mechanical edits / file ops | steward:mechanic-haiku-medium |
+| Docs / prose | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for short) |
+| PR-body drafting | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for trivial diffs) |
+| Status / collation | steward:mechanic-haiku-medium (steward:researcher-sonnet-low if reconciling conflicting reports) |
 
 ## Keep it inline on the main thread when
 one dependent chain fits a single context with no splittable pieces; every step needs frontier judgment; the context is already resident in the orchestrator thread; it is the final synthesis/arbitration the orchestrator owns; or there is no cheap way to verify a delegate's output.

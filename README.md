@@ -33,18 +33,18 @@ An `update-pr-summary` command at `<config dir>/commands/update-pr-summary.md` i
 ## The subagent profiles
 
 | Profile | Model | Effort | Use for |
-|---|---|---|---|
+|-|-|-|-|
 | `steward:coder-opus-medium` | Opus | medium | Implementation with a spec and tests (TDD) |
 | `steward:deep-reasoner-opus-xhigh` | Opus | xhigh | Architecture, ambiguous design, security review |
 | `steward:reviewer-sonnet-high` | Sonnet | high | Everyday PR and diff review |
 | `steward:researcher-sonnet-low` | Sonnet | low | Read-only investigation and search |
 | `steward:writer-sonnet-medium` | Sonnet | medium | Docs, PR bodies, plain-language rewrites |
-| `steward:mechanic-sonnet-low` | Sonnet | low | Single lookups, rote edits, running known commands |
+| `steward:mechanic-haiku-medium` | Haiku | medium | Single lookups, rote edits, running known commands |
 | `steward:reviewer-fable-xhigh` | Fable | xhigh | Highest-stakes gap review, only on explicit request (Opus 5.5 covers most of this now) |
 
-As of 0.5.0 the profiles run on three models, Sonnet 5.5, Opus 5.5, and Fable 5.1; pure coding runs on Opus 5.5 at medium effort; Haiku 4.5 and Opus 5 were dropped, and `routing.md` says why. On Claude Code the profiles use the `sonnet`, `opus` and `fable` aliases, which resolve to those three models on Claude Code 2.1.288.
+As of 0.6.0 the profiles run on four models, Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1; the mechanic runs on Haiku 5.5 at medium effort and pure coding runs on Opus 5.5 at medium effort; Haiku 4.5 and Opus 5 were dropped earlier. On Claude Code the profiles use the `haiku`, `sonnet`, `opus` and `fable` aliases, which resolve to those four models on Claude Code 2.1.295.
 
-The full routing table and the reasoning behind it live in `skills/delegating/routing.md`.
+The full routing table lives in `skills/delegating/routing.md`. The evidence tables are in `docs/evaluations/2026-10-09-model-assignment-evidence.md`, and the reasoning is in `skills/delegating/routing.md`.
 
 ## What the hooks do
 
@@ -115,7 +115,7 @@ The pi package has three parts:
 - `pi/agents/`: the seven profiles. pi-subagents loads them as `steward.<name>`, for example `steward.coder-opus-medium`.
 - `pi/extensions/steward/`: the extension that adds the edict and runs the gates. It passes each pi event to `hooks/steward_hook.py`, so both harnesses share one set of rules and tests.
 
-The model delegates with pi-subagents' `subagent` tool, for example `subagent({ agent: "steward.mechanic-sonnet-low", task: "...", async: false })`.
+The model delegates with pi-subagents' `subagent` tool, for example `subagent({ agent: "steward.mechanic-haiku-medium", task: "...", async: false })`.
 
 ### Profiles on pi
 
@@ -128,8 +128,10 @@ Each profile pins a full model ID and a thinking level:
 | `steward.reviewer-sonnet-high` | `anthropic/claude-sonnet-5-5` | high |
 | `steward.researcher-sonnet-low` | `anthropic/claude-sonnet-5-5` | low |
 | `steward.writer-sonnet-medium` | `anthropic/claude-sonnet-5-5` | medium |
-| `steward.mechanic-sonnet-low` | `anthropic/claude-sonnet-5-5` | low |
+| `steward.mechanic-haiku-medium` | `anthropic/claude-haiku-5-5` | medium |
 | `steward.reviewer-fable-xhigh` | `anthropic/claude-fable-5-1` | xhigh |
+
+pi needs version 1.1.0 or later for `anthropic/claude-haiku-5-5`, and a custom provider needs its own `claude-haiku-5-5` model entry.
 
 If you reach Claude through another provider, override the model in `~/.pi/agent/settings.json`. The thinking level stays as the profile sets it unless you override that too:
 

@@ -138,7 +138,7 @@ test("second direct write is blocked until a subagent launch", async () => {
 	await fire("tool_result", subagentResult({ agent: "steward.no-such-profile", task: "x" }, true));
 	assert.equal((await fire("tool_call", write())).block, true);
 
-	await fire("tool_result", subagentResult({ agent: "steward.mechanic-sonnet-low", task: "x" }));
+	await fire("tool_result", subagentResult({ agent: "steward.mechanic-haiku-medium", task: "x" }));
 	assert.equal(await fire("tool_call", write()), undefined);
 	assert.equal((await fire("tool_call", write())).block, true);
 

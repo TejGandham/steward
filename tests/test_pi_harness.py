@@ -254,6 +254,7 @@ class PiPackageManifestTests(unittest.TestCase):
 
 class PiAgentProfileTests(unittest.TestCase):
     MODEL_MAP = {
+        "haiku": "anthropic/claude-haiku-5-5",
         "opus": "anthropic/claude-opus-5-5",
         "sonnet": "anthropic/claude-sonnet-5-5",
         "fable": "anthropic/claude-fable-5-1",
