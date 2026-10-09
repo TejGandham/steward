@@ -1,6 +1,6 @@
 # steward
 
-A Claude Code plugin that packages a delegation edict: the main session hands off every non-trivial task to a pinned subagent chosen by task complexity, and all user-facing prose passes a plain-language check. It also installs as a pi package; see [Pi](#pi).
+A Claude Code plugin that packages a delegation edict: the main session hands off every non-trivial task to a pinned subagent chosen by task complexity, and all user-facing prose passes a plain-language check. It also installs as a pi package and as a GitHub Copilot plugin; see [Pi](#pi) and [GitHub Copilot](#github-copilot).
 
 It gives you three things:
 - Seven pinned agent profiles, each fixed to a model and reasoning effort for a specific kind of task.
@@ -184,6 +184,97 @@ pi install /path/to/steward
 
 A local path install reads the files in place, so edits apply on the next pi start or `/reload`.
 
+## GitHub Copilot
+
+Steward also installs as a GitHub Copilot plugin. You get the same edict, the same seven profiles, and the same three gates. The primary and secondary roles (orchestration) are not part of the Copilot port. The Copilot cloud agent is not covered.
+
+Windows is not supported yet, because the hook commands start with a POSIX `STEWARD_HARNESS=copilot python3 ...` prefix.
+
+### What you need
+
+- `python3` on your PATH.
+- The `plainlanguage` skill, in `~/.agents/skills/plainlanguage/` or `~/.copilot/skills/plainlanguage/`.
+
+### Install
+
+From GitHub:
+
+```
+copilot plugin install TejGandham/steward
+```
+
+Copilot reads `.github/plugin/plugin.json` before `.claude-plugin/plugin.json`, so it gets the Copilot files: `copilot/agents/`, `copilot/skills/delegating/`, and `copilot/hooks.json`. Claude Code keeps using the Claude manifest.
+
+From a checkout, for development:
+
+```
+copilot plugin marketplace add /path/to/steward
+copilot plugin install steward@steward
+```
+
+Copilot loads the plugin live from the checkout. Nothing is copied, and edits apply to the next session.
+
+Close running Copilot sessions before you uninstall or switch steward, or restart them afterwards. Uninstalling or replacing a plugin deletes its folder, but sessions that are still running keep its hooks. Copilot cannot start them (`spawn /bin/bash ENOENT`) and fails closed for PreToolUse hooks, so those sessions get every shell command and file edit denied.
+
+### How the edict gets in
+
+A SessionStart hook adds the Copilot edict as session context at the start of every main session.
+
+### Profiles and models on Copilot
+
+Each profile sets a reasoning effort and `include-custom-instructions: true`, so subagents read `AGENTS.md` and other instruction files:
+
+| Profile | Effort |
+|-|-|
+| `steward:coder-opus-medium` | medium |
+| `steward:deep-reasoner-opus-xhigh` | xhigh |
+| `steward:reviewer-sonnet-high` | high |
+| `steward:researcher-sonnet-low` | low |
+| `steward:writer-sonnet-medium` | medium |
+| `steward:mechanic-haiku-medium` | medium |
+| `steward:reviewer-fable-xhigh` | xhigh |
+
+Copilot does not resolve the `opus`, `sonnet`, `haiku`, and `fable` aliases, and model IDs differ by account and provider (for example a provider-prefixed `<provider>/claude-opus-5-5`). So the Copilot profiles set only `reasoning-effort`.
+
+Instead, the edict tells the main agent to pass two fields on every `task` call: `model`, the Claude model of the profile's family, copied from the task tool's own model list, and `reasoning_effort`, the profile's level. If Claude Haiku 5.5 is not listed, the mechanic runs on Claude Sonnet 5.5 at `low`.
+
+### Optional: bind a profile on your machine
+
+To fix a profile's model and effort on one machine, add it to `~/.copilot/settings.json`. The `/subagents` picker writes the same keys.
+
+```json
+{
+  "subagents": {
+    "agents": {
+      "steward:coder-opus-medium": { "model": "<id>", "effortLevel": "medium" }
+    }
+  }
+}
+```
+
+The session-start note then lists the bound profiles, and the main agent omits `model` and `reasoning_effort` for them.
+
+### Gates on Copilot
+
+The gates behave as described in [What the hooks do](#what-the-hooks-do), with these differences:
+- The config directory is `~/.copilot` (or `$COPILOT_HOME`). The gate mode file is `~/.copilot/steward/gate`, the banned phrases file is `~/.copilot/steward/prose-patterns`, and the extra allowlist is `~/.copilot/steward/allowlist`.
+- Subagents are not gated. Copilot does not tell a hook whether a call comes from a subagent, so steward records each main session when it starts and skips any other session. A session that was already running when steward was installed is not gated.
+- These files are exempt: `AGENTS.md`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/agents/`, `.github/skills/`, and `.github/copilot/`. Inside `~/.copilot`, only `steward/`, `settings.json`, `settings.local.json`, `copilot-instructions.md`, `agents/`, `skills/`, `hooks/`, and `session-state/` are exempt. Copilot app chat sessions run under `~/.copilot/chats/`, and edits there are still gated.
+- The prose gate reads Copilot's own transcript (`events.jsonl`) and checks the last reply of the turn and any `task_complete` summary. It waits up to 3 seconds for Copilot to write the final reply before checking. It sends the turn back once.
+- The PR-body gate works as on Claude Code.
+
+Set the gate mode with:
+
+```
+mkdir -p ~/.copilot/steward && echo soft > ~/.copilot/steward/gate
+```
+
+To share one banned-phrases file with Claude Code, symlink it:
+
+```
+ln -s ~/.claude/steward/prose-patterns ~/.copilot/steward/prose-patterns
+```
+
 ## Local development and tests
 
 ```
@@ -191,7 +282,7 @@ python3 -m unittest discover -s tests
 node --test 'tests/pi/*.test.mjs'
 ```
 
-The Python tests cover the hook script for both harnesses and check that the pi profiles stay in step with the Claude Code ones. The node tests run the pi extension's handlers against the real hook script. Node 22.18 or newer runs the TypeScript extension without a build step.
+The Python tests cover the hook script for both harnesses and check that the pi profiles stay in step with the Claude Code ones. They also cover the Copilot harness (`tests/test_copilot_harness.py`), including parity between `copilot/agents/` and `agents/`. The node tests run the pi extension's handlers against the real hook script. Node 22.18 or newer runs the TypeScript extension without a build step.
 
 ## If you already have these rules in CLAUDE.md
 
