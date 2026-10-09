@@ -9,7 +9,7 @@ Operator decision, 2026-10-09: pinning a model per profile is too hard on Copilo
 |Part|What shipped|
 |-|-|
 |Manifest|`.github/plugin/plugin.json` points at `copilot/agents/`, `copilot/skills/`, `copilot/hooks.json`. Claude Code still reads `.claude-plugin/plugin.json`. Both are at 0.7.0, as is `package.json`|
-|Profiles|`copilot/agents/*.agent.md`: same names, descriptions and bodies as `agents/`. `reasoning-effort` equals the Claude `effort`. `include-custom-instructions: true`. No `model`|
+|Profiles|`copilot/agents/*.agent.md`: same names, descriptions and bodies as `agents/`. `reasoning-effort` equals the Claude `effort`. `include-custom-instructions: true`. No `model`. Renamed to role-only names in 0.8.0.|
 |Model choice|The Copilot edict (`copilot/skills/delegating/SKILL.md`) tells the main agent to pass `model` (the Claude model of the profile's family, copied from the `task` tool's own list) and `reasoning_effort` on every call. If Haiku 5.5 is not listed, the mechanic runs on Sonnet 5.5 at `low`. A profile bound in `~/.copilot/settings.json` `subagents.agents` is listed at session start, and the main agent omits both arguments for it|
 |Hooks|`copilot/hooks.json` uses PascalCase events and the commands `STEWARD_HARNESS=copilot python3 "${PLUGIN_ROOT}/hooks/steward_hook.py" <subcommand>`|
 |Session start|Prints flat `additionalContext`. Records the main session id before reading the skill. Falls back to a short built-in edict if the skill file is missing. Lists bound profiles. Creates no orchestration registry|
@@ -183,16 +183,16 @@ The binding mechanism works the same for any vendor: a `subagents.agents` entry 
 
 **Effort levels differ by model.** `gpt-6-*` and `gpt-5.6-*` offer `none` to `max`. `gpt-5-mini` and `mai-code-1.1-flash` offer `low`, `medium`, `high`. `gpt-4.1` offers none. A level the model lacks still shows in `subagent.configured`: `gpt-5-mini` showed `xhigh`. But the level is not sent (changelog 1.0.88), and karta G21 saw the request go out at `medium`.
 
-**Routing matrix.** The evidence is in `docs/evaluations/2026-10-09-openai-model-assignment-evidence.md`. Each cell follows the model panel's majority. Scores are the Artificial Analysis Intelligence Index v4.3.2, the same scale as the Claude evidence, with USD per index task.
+**Routing matrix.** The evidence is in `docs/evaluations/2026-10-09-openai-model-assignment-evidence.md`. The model and effort choices follow the reported model panel. The 2026-10-09 Exa verification confirms Sol/Astra cells and records differing Luna source snapshots; the mechanic score uses the returned English AA comparison. Scores are the Artificial Analysis Intelligence Index v4.3.2, the same scale as the Claude evidence, with USD per index task.
 
 |Profile|Model|Effort|Score, $/task|Claude counterpart|Basis|
 |-|-|-|-|-|-|
 |coder|`gpt-6.1-sol`|high|50, 0.32|Opus 5.5 medium: 51, 1.34|Panel 5 of 8. On a missed gate, rerun at xhigh (51, 0.39)|
-|deep-reasoner|`gpt-6-astra`|xhigh|52, 2.31|Opus 5.5 xhigh: 56, 3.46|Panel 5 of 8 wanted Astra (3 xhigh, 2 max). Open, see below|
-|reviewer|`gpt-6.1-sol`|medium|48, 0.21|Sonnet 5.5 high: 47, 0.88|Panel 8 of 8. No OpenAI code-review evaluation exists|
-|researcher|`gpt-6.1-sol`|medium|48, 0.21|Sonnet 5.5 low: 36, 0.35|Panel 5 of 8: low drops 6 points. Least-confident cell|
-|writer|`gpt-6.1-sol`|medium|48, 0.21|Sonnet 5.5 medium: 41, 0.48|Panel 8 of 8. No writing evaluation exists|
-|mechanic|`gpt-6-luna`|high|32, 0.03|Haiku 5.5 medium: 34, 0.05|Panel 4 of 8. Luna scores 13% on Terminal-Bench at max, so rerun on `gpt-6.1-sol` low after a miss|
+|deep-reasoner|`gpt-6-astra`|xhigh|52, 2.31|Opus 5.5 xhigh: 56, 3.46|Panel 5 of 8 wanted Astra (3 xhigh, 2 max). Operator decision 2026-10-09: use it when the client machine's account offers it, see below|
+|reviewer|`gpt-6.1-sol`|medium|48, 0.21|Sonnet 5.5 high: 47, 0.88|Panel 8 of 8. No targeted review evaluation found in the original search|
+|researcher|`gpt-6.1-sol`|medium|48, 0.21|Sonnet 5.5 low: 36, 0.35|Panel 5 of 8: low drops 6 points. Operator decision 2026-10-09: medium|
+|writer|`gpt-6.1-sol`|medium|48, 0.21|Sonnet 5.5 medium: 41, 0.48|Panel 8 of 8. No targeted writing evaluation found in the original search|
+|mechanic|`gpt-6-luna`|high|33, 0.03|Haiku 5.5 medium: 34, 0.05|Panel 4 of 8. Luna scores 13% on Terminal-Bench at max, so rerun on `gpt-6.1-sol` low after a miss|
 |reviewer-fable|`gpt-6-astra`|max|53, 3.26|Fable 5.1 xhigh: 53.2|Panel 8 of 8. Only on explicit operator request|
 
 What the numbers say:
@@ -200,18 +200,15 @@ What the numbers say:
 - **Price at equal scores:** OpenAI costs 3 to 4 times less per index task. 6.1 Sol at xhigh matches Opus 5.5 medium (51) for $0.39 against $1.34. 6.1 Sol at medium edges Sonnet 5.5 high (48 against 47) for $0.21 against $0.88.
 - **Top end:** no OpenAI setting reaches Opus 5.5 at xhigh (56) or max (58). Astra at max, 53, is the ceiling. For the deep-reasoner's work, Claude stays ahead on this index.
 - **Agentic coding:** there is no comparison in the same harness. In Codex, AA's Coding Agent Index gives 6.1 Sol 60 and Astra 62. A third-party relay gives Opus 5.5 66 in Claude Code.
-- **Effort as the dial:** five of seven profiles land on 6.1 Sol, and effort does the rest, as it does between Opus and Sonnet.
-- **Latency:** on Astra and 6.1 Sol, the first token takes about 58 s at high and about 5 min at max. That is acceptable for background profiles. The reviewer at medium stays at a few seconds.
+- **Effort as the dial:** four of seven profiles land on 6.1 Sol, and effort does the rest, as it does between Opus and Sonnet.
+- **Latency:** the primary AA snapshot gives Astra about 83 s at high and 411 s at max; 6.1 Sol takes about 58 s at high and 314 s at max. That is acceptable for background profiles. The reviewer at medium stays at a few seconds.
+
+Operator decision, 2026-10-09, deep-reasoner: use `gpt-6-astra` at `xhigh` ($2.31 per index task) whenever the client machine's account offers it. Availability is per machine: Copilot lists Astra only on Pro+, Business, Enterprise and Max, and this machine's Copilot Free account does not have it. Where Astra is not offered, the deep-reasoner keeps its Claude default, Opus 5.5 xhigh. The options weighed were Astra xhigh, 6.1 Sol xhigh ($0.39, 3 panel votes), and Opus 5.5 xhigh in a mixed setup. Astra xhigh and 6.1 Sol max tie on the index at 52; Astra xhigh leads on Terminal-Bench (60 against 56) for 3x the cost.
+
+Operator decision, 2026-10-09, researcher: `gpt-6.1-sol` at `medium`, as in the routing matrix. Low was the other option.
 
 Open, for the operator:
 
-- **deep-reasoner:** three options.
-  - Astra xhigh, at $2.31.
-  - 6.1 Sol xhigh, at $0.39, with 3 votes.
-  - Keep Opus 5.5 xhigh in a mixed setup.
-
-  Astra xhigh and 6.1 Sol max tie on the index at 52. Astra xhigh leads on Terminal-Bench (60 against 56) for 3x the cost.
-- **researcher effort:** medium or low. A known-answer test of invented findings would settle it.
 - **Not run on this machine:** none of this has run here. The Copilot Free allowance (200 credits) is used up until 2026-11-01 00:00 UTC, and 6.1 Sol and Astra need Copilot Pro+ or higher.
 
 **Mixing vendors.** Binding the reviewers to GPT while the coder stays on Claude gives each review a second model family. Copilot's built-in rubber-duck agent does this by design ("complementary model strategy", changelog 1.0.64).
@@ -221,7 +218,7 @@ Open, for the operator:
 - Keep the names. They are the keys shared with the Claude Code routing table and `~/AGENTS.md`.
 - Give the Copilot port role-and-effort names, such as `coder-medium`.
 
-This is a decision for the operator.
+Operator decision, 2026-10-09: role-only names (`coder`, `deep-reasoner`, `reviewer`, `researcher`, `writer`, `mechanic`, `top-reviewer`), the same as the Codex port. A role-and-effort name would be wrong whenever a machine binds a model whose effort differs from Claude's, as coder, researcher and mechanic do. Built in 0.8.0.
 
 **BYOK.** The CLI's documented BYOK mode (`COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`) points a whole session at one provider. Whether a subagent binding can then name a different model on that provider was not tested.
 
