@@ -1,6 +1,6 @@
 {
   "name": "steward",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Delegate work to seven OpenAI role profiles and keep prose clear in Codex CLI and the ChatGPT desktop app.",
   "author": {
     "name": "Tej Gandham"
