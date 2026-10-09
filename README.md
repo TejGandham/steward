@@ -1,5 +1,7 @@
 # steward
 
+For Codex CLI and the ChatGPT desktop app (formerly the Codex app), see the separate [Codex port](docs/roadmap/codex-port.md). It packages seven OpenAI role profiles and Codex-specific hooks. The Claude Code installation and behavior described below are unchanged.
+
 A Claude Code plugin that packages a delegation edict: the main session hands off every non-trivial task to a pinned subagent chosen by task complexity, and all user-facing prose passes a plain-language check. It also installs as a pi package and as a GitHub Copilot plugin; see [Pi](#pi) and [GitHub Copilot](#github-copilot).
 
 It gives you three things:

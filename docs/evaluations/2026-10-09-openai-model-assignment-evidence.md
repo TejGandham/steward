@@ -1,14 +1,38 @@
 # OpenAI model assignment evidence, 2026-10-09
 
-Evidence gathered to give each steward profile an OpenAI model and effort, for use through GitHub Copilot (see `docs/roadmap/copilot-port.md`). This file holds facts only. The matrix and its reasons are in `docs/roadmap/copilot-port.md`, section "Using OpenAI models". The Anthropic counterpart is `2026-10-09-model-assignment-evidence.md`.
+Evidence gathered to give each steward profile an OpenAI model and effort, for use through GitHub Copilot and the Codex CLI/ChatGPT desktop plugin (see `docs/roadmap/copilot-port.md` and `docs/roadmap/codex-port.md`). This file separates published evidence from historical local observations and panel recommendations. The matrix and its reasons are in `docs/roadmap/copilot-port.md`, section "Using OpenAI models". The Anthropic counterpart is `2026-10-09-model-assignment-evidence.md`.
 
 Sources:
 
 - **OpenAI** (vendor), fetched 2026-10-09: developers.openai.com/api/docs/pricing and /api/docs/models/<id>, openai.com/index/gpt-5-6/, and deploymentsafety.openai.com/gpt-6-1-sol.
 - **GitHub** (vendor), fetched 2026-10-09: docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing, and the changelog post of 2026-09-22 (github.blog/changelog/2026-09-22-openais-gpt-6-sol-and-gpt-6-luna-now-available/).
-- **Artificial Analysis (AA)**, Intelligence Index v4.3.2. The per-effort cells come through a relay, respan.ai/articles/gpt-6-sol-vs-luna-vs-astra (2026-09-30). The max-effort cells were confirmed on AA's own pages.
+- **Artificial Analysis (AA)**, Intelligence Index v4.3.2. The original pass used respan.ai/articles/gpt-6-sol-vs-luna-vs-astra (2026-09-30). The verification now uses AA primary comparisons; conflicting snapshots are noted above.
 - **This machine's Copilot model catalog**, CLI runtime 1.0.94-3, read from a debug log on 2026-10-09.
 - **A model panel** (roundtable), 2026-10-09.
+
+## Verification with Exa, 2026-10-09
+
+Rechecked the named model pages, pricing, GitHub availability, AA comparisons and launch articles, the respan relay, and the Sol system card with Exa `/contents`. Discovery searches were paired with Parallel. Exa reported cached retrievals, so this is verification of the returned source snapshots, not a guarantee of live freshness. Some Parallel and locale-specific AA snapshots still show older values.
+
+|Claims|Result|
+|-|-|
+|OpenAI prices, selected-model context and effort support|Confirmed against model pages and pricing. Added vendor cache-write prices and previously missing long-context rates below. API prices do not describe Codex/ChatGPT subscription allowances.|
+|Astra and 6.1 Sol effort scores and task costs|Confirmed directly on AA; relay no longer needed for these cells.|
+|Luna effort scores|Exa's English AA release comparison gives 38/35/33/30/22/18; the original relay and several Parallel snapshots give 37/34/32/29/21/18. Costs agree. The table below uses the English comparison returned by Exa and records the discrepancy; no reason for it was established.|
+|GDPval and performance rows|Corrected Astra max to 1542, Sol max to 1487, Luna max to 1437 in the returned comparisons. Replaced latency estimates; per-effort benchmark rows are available.|
+|Coding Agent Index|AA launch articles confirm Astra 62, Sol 57, Luna 41; 6.1 Sol max 60 is derived from AA's stated three-point gain over Sol. 6.1 Sol xhigh beats its max by three points on that index.|
+|GitHub plan access|Confirmed Sol/Luna launch-plan availability. Account-specific catalog toggles, quota, reset and failed calls remain historical observations, not independently reproduced here.|
+|Panel votes and original local probe|No raw transcripts or probe logs are committed. The vote counts and local account assertions cannot be independently verified from web sources. They are retained as reports from the original evaluation.|
+|Claude comparison cells and anecdotes|The companion evidence contains the Claude figures. This OpenAI verification did not independently re-evaluate them. The anecdotes and unattributed SWE-bench numbers remain unverified and are not used to pin Codex profiles.|
+|Claims that no evaluation exists|Restricted to what the original search found. AA does measure knowledge hallucination, but it does not establish Steward's invented-finding rate or code-review precision.|
+
+Primary sources used in the verification:
+
+- [OpenAI pricing](https://developers.openai.com/api/docs/pricing), [Astra](https://developers.openai.com/api/docs/models/gpt-6-astra), [6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [Luna](https://developers.openai.com/api/docs/models/gpt-6-luna). Excluded candidates were also checked on their `/api/docs/models/<id>` pages.
+- [GitHub pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing) and [Sol/Luna availability](https://github.blog/changelog/2026-09-22-openais-gpt-6-sol-and-gpt-6-luna-now-available/).
+- [AA Sol/Astra release comparison](https://artificialanalysis.ai/models/releases/comparisons/gpt-6-1-sol-vs-gpt-6-astra), [Sol/Luna release comparison](https://artificialanalysis.ai/models/releases/comparisons/gpt-6-1-sol-vs-gpt-6-luna), and [6.1 Sol/Sol comparison](https://artificialanalysis.ai/models/comparisons/gpt-6-1-sol-vs-gpt-6-sol).
+- [AA Astra launch](https://artificialanalysis.ai/articles/benchmarking-gpt-6-astra), [6.1 Sol launch](https://artificialanalysis.ai/articles/gpt-6-1-sol-replaces-gpt-6-sol-after-just-7-days-with-near-astra-intelligence), and [Sol/Luna launch](https://artificialanalysis.ai/articles/gpt-6-sol-and-luna-push-the-cost-efficiency-frontier).
+- [6.1 Sol system card](https://deploymentsafety.openai.com/gpt-6-1-sol). Its cybersecurity classification and September 29 publication are confirmed.
 
 ## Candidates
 
@@ -33,16 +57,16 @@ OpenAI pricing page and GitHub's Copilot pricing page give the same list prices.
 |GPT-6 Astra|10|1.00|50|20 / 2.00 / 75|
 |GPT-6.1 Sol|2|0.10|10|4 / 0.20 / 15|
 |GPT-6 Luna|0.10|0.01|0.50|0.20 / 0.02 / 0.75|
-|GPT-6 Sol|2|0.20|10|not found|
+|GPT-6 Sol|2|0.20|10|4 / 0.40 / 15|
 |GPT-5.6 Sol|4|0.40|20|8 / 0.80 / 30|
-|GPT-5.6 Terra|2|0.20|12|not found|
-|GPT-5.6 Luna|0.20|0.02|1.20|not found|
+|GPT-5.6 Terra|2|0.20|12|4 / 0.40 / 18|
+|GPT-5.6 Luna|0.20|0.02|1.20|0.40 / 0.04 / 1.80|
 |GPT-5 mini|0.25|0.025|2|not found|
 |GPT-5.3-Codex|1.75|0.175|14|not found|
 
 - Once a prompt passes 272K input tokens, the whole request bills at the long-context rate.
 - Reasoning tokens bill as output.
-- GitHub's page says the GPT-5.6 and GPT-6 models also charge for cache writes. The respan.ai relay gives 1.25x the uncached input rate for Astra, 6.1 Sol and Luna ($12.50, $2.50, $0.125). The vendor amount was not captured.
+- OpenAI and GitHub publish cache-write rates of 1.25x uncached input: Astra $12.50, 6.1 Sol $2.50, Luna $0.125 per million short-context tokens. Long-context cache writes are $25, $5, and $0.25. OpenAI also lists Ultrafast pricing for Astra and 6.1 Sol; the original comparison did not cover it.
 - OpenAI Batch and Flex cost 50% of standard, and Fast costs 2x. Copilot does not expose these.
 
 For comparison, from the Anthropic evidence: Haiku 5.5 is $0.10/$0.50, Sonnet 5.5 $2/$10, Opus 5.5 $4/$20, and Fable 5.1 $10/$50.
@@ -63,17 +87,17 @@ Each cell is index score, then USD per index task. AA index v4.3.2 is the same v
 
 |Effort|GPT-6 Astra|GPT-6.1 Sol|GPT-6 Luna|
 |-|-|-|-|
-|max|53, 3.26|52, 0.72|37, 0.07|
-|xhigh|52, 2.31|51, 0.39|34, 0.04|
-|high|51, 1.73|50, 0.32|32, 0.03|
-|medium|50, 1.54|48, 0.21|29, 0.02|
-|low|46, 0.82|42, 0.13|21, 0.0045|
+|max|53, 3.26|52, 0.72|38, 0.07|
+|xhigh|52, 2.31|51, 0.39|35, 0.04|
+|high|51, 1.73|50, 0.32|33, 0.03|
+|medium|50, 1.54|48, 0.21|30, 0.02|
+|low|46, 0.82|42, 0.13|22, 0.0045|
 |none|n/a|n/a|18, 0.01|
 
 Caveats:
 
-- The max row was confirmed on AA's pages. The other rows come through the respan.ai relay.
-- Other models at max: GPT-6 Sol 48 at $1.06, and GPT-5.6 Sol 47 at $1.99, both AA. GPT-5.6 Luna's max costs $0.18 per task; its score was not found.
+- All effort rows above now come from primary AA English release comparisons returned by Exa. Luna differs from the original relay and some Parallel snapshots, as described in the verification table.
+- Other models at max: GPT-6 Sol 48 at $1.06, and GPT-5.6 Sol 47 at $1.99, both AA. GPT-5.6 Luna's max costs $0.18 per task; the original pass did not find its score. AA's v4.3 announcement gives 38 at max.
 - At max, 6.1 Sol uses about 38K output tokens per index task against Astra's 27K. That is why its per-task cost gap to Astra is narrower than the 5x rate-card gap.
 - Luna at `none` costs more per task than at `low`, because it spends more output tokens.
 
@@ -95,22 +119,24 @@ The same scale for Claude, copied from the Anthropic evidence (AA v4.3.2, read 2
 |-|-|-|-|-|
 |Terminal-Bench 4.0, %, max|59 (xhigh: 60)|56|44|13|
 |AutomationBench-AA, %, max|69 (xhigh: 67)|65|62|53|
-|GDPval-AA v2.1, Elo, max|not found (xhigh: 1516)|1575|1508|1432|
+|GDPval-AA v2.1, Elo, max|1542 (xhigh: 1516)|1575|1487|1437|
 |Coding Agent Index, max, Codex harness|62|60|57|41|
 
-- Astra's max and xhigh cells come from different AA pages, an article and a comparison page. That is why Astra's Terminal-Bench cell reads higher at xhigh (60) than at max (59).
-- Per-effort Terminal-Bench, AutomationBench and GDPval rows below max were not found.
+- AA's primary comparison gives Astra Terminal-Bench 59.1% at max and 59.6% at xhigh. Higher effort does not guarantee a higher score.
+- Per-effort Terminal-Bench, AutomationBench and GDPval rows are available in the primary release comparisons linked above. For example, 6.1 Sol high scores 51.5% on Terminal-Bench versus 48.0% at medium; Luna high scores 4.5%.
+- AA reports 6.1 Sol xhigh three points above max on the Coding Agent Index. This is a different index from the Intelligence Index and supports evaluating coding effort on actual tasks.
 - For scale, from the Anthropic evidence, AA Terminal-Bench 4.0:
   - Sonnet 5.5: 43.9 at high, 57.1 at xhigh, 63.6 at max.
   - Haiku 5.5: 32.8 at max.
 - Coding Agent Index for Opus 5.5 in Claude Code: 66, effort not stated, against 57 for GPT-6 Sol in Codex, through thestackedhq.com (2026-09-28). That is a different harness from the Codex rows.
 - OpenAI's GPT-5.6 page claims 80 on the AA Coding Agent Index for GPT-5.6 Sol at max. That cannot sit on the same scale as the rows above, which suggests a different index version. It is not used.
 
-Latency (AA via respan.ai):
+Latency (AA primary release comparison returned by Exa):
 
-- Astra time to first token: about 3 s at low, 6.2 s at medium, 58 s at high, 315 s at max.
-- 6.1 Sol follows nearly the same curve, starting from 2.1 s at low.
-- Output speed: 6.1 Sol 59 to 66 tokens per second, Astra 44 to 51. Luna speed was not found.
+- Astra time to first token: 2.59 s low, 6.03 s medium, 83.11 s high, 216.48 s xhigh, 410.56 s max.
+- 6.1 Sol: 2.85 s low, 6.27 s medium, 58.26 s high, 140.76 s xhigh, 314.47 s max.
+- Output speed in that same snapshot: Sol 48 to 54 tokens/s, Astra 41 to 45. The Sol/Luna comparison gives Luna 112 to 128 tokens/s where reported.
+- These are source snapshots, not service guarantees. Separate AA comparisons and the relay show different speed/latency measurements; do not merge their cells into a single curve.
 
 ## OpenAI's stated fit (quotes)
 
@@ -119,7 +145,7 @@ Latency (AA via respan.ai):
 - GPT-6 Luna: "our most efficient model for focused, high-volume tasks."
 - GitHub's positioning (changelog 2026-09-22): GPT-6 Sol is "balanced for interactive and agentic coding"; Luna is "lightweight, lowest-cost in the GPT-6 family".
 
-## Copilot availability
+## Copilot availability (published and historical local observations)
 
 - GPT-6 Sol is available on Pro+, Max, Business and Enterprise; GPT-6 Luna on Pro and above. Both are billed by usage (GitHub changelog, 2026-09-22). Plan availability for Astra and 6.1 Sol was not found.
 - On Business and Enterprise, the admin model policy controls access.
@@ -128,20 +154,20 @@ Latency (AA via respan.ai):
 
 ## Other third-party data
 
-- No code-review evaluation (bugs caught, precision) was found for any of these OpenAI models. Searched for CodeRabbit, Greptile, Graphite and Qodo.
-- No writing or summarization quality evaluation was found.
+- The original search found no targeted code-review evaluation (bugs caught, precision) for these OpenAI models. Searched for CodeRabbit, Greptile, Graphite and Qodo.
+- The original search found no targeted writing or summarization quality evaluation. AA-Briefcase and GDPval assess broader professional deliverables; this is not a claim that no prose-related evaluation exists.
 - thestackedhq.com (2026-09-28) reports that GPT-6 Sol breaks previously working code in about 1 of 4 runs, and Opus 5.5 "rarely". No sample size is given. This is an anecdote, and it is about GPT-6 Sol, not 6.1 Sol.
 - benchlm.ai lists SWE-bench Pro at 89.9% for Opus 5.5 and 64.6% for GPT-5.6 Sol. Who produced the numbers was not established, so they are not used.
-- Not found anywhere:
+- Not established by the original search or this verification:
   - a measured invented-finding rate for any OpenAI model;
   - cost per completed spec-coding task;
   - a same-harness head-to-head of 6.1 Sol or Astra against Opus 5.5.
 
-## Local probe
+## Original Copilot local probe
 
-Not run. The Anthropic evaluation ran each profile on this machine. That was not possible here, for two reasons: the Copilot Free account's monthly allowance is used up (402), and 6.1 Sol and Astra are not part of the Free plan. Every assignment below rests on published data and the panel vote, with no local run.
+Not run successfully in the original evaluation. The Anthropic evaluation ran each profile on this machine. That was not possible here, for two reasons: the Copilot Free account's monthly allowance is used up (402), and 6.1 Sol and Astra are not part of the Free plan. The original assignments rest on published data and the reported panel vote, with no successful Copilot task run. Codex packaging and smoke verification are documented separately in `docs/roadmap/codex-port.md`.
 
-## Roundtable, 2026-10-09
+## Roundtable, 2026-10-09 (reported, not independently verified)
 
 Eight panelists responded: antigravity, codex, fireworks-deepseek, fireworks-ember, fireworks-glm5p3, fireworks-minimax, fireworks-qwen and openrouter-mimo. Each saw only the evidence above and voted on a draft:
 
