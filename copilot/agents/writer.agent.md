@@ -1,6 +1,6 @@
 ---
-name: writer-sonnet-medium
-description: Prose of substance, documentation, README sections, PR bodies for non-trivial diffs, plain-language rewrites. Use when wording quality matters and the content is more than a line or two. For a trivial PR body or a one-line note, use mechanic-haiku-medium.
+name: writer
+description: Prose of substance, documentation, README sections, PR bodies for non-trivial diffs, plain-language rewrites. Use when wording quality matters and the content is more than a line or two. For a trivial PR body or a one-line note, use mechanic.
 reasoning-effort: medium
 include-custom-instructions: true
 ---
