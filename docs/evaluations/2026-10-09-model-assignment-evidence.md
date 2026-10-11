@@ -105,6 +105,7 @@ One run per cell for the researcher and writer tasks. These are smoke-level resu
 ## Harness facts
 - Claude Code 2.1.293 and later resolve the `haiku` alias to Haiku 5.5 on the Anthropic API. Subagent frontmatter `effort` is honored for Haiku 5.5 at all five levels.
 - pi 1.0.2, installed here, has no `claude-haiku-5-5` in its model registry; pi 1.1.0 adds `anthropic/claude-haiku-5-5`. The local `amorphic` proxy serves the model, but pi's `amorphic` provider entry in `~/.pi/agent/models.json` does not list it yet.
+- Update 2026-10-11: pi 1.1.0 is now installed here and `~/.pi/agent/models.json` lists `claude-haiku-5-5` under `amorphic`. Two live runs of `steward.mechanic-haiku-medium` through the pi-subagents `subagent` tool (steward pi package at 3a64012, main model `amorphic/claude-sonnet-5-5:low`) both exited 0 at thinking medium, with model and thinking read from pi's subagent meta file and the child session: in this repo, where `.pi/settings.json` overrides the model, the child ran on `amorphic/claude-haiku-5-5` (3.8 s, $0.0022); in an empty directory with no override, it ran on the profile default `anthropic/claude-haiku-5-5` (4.5 s, $0.0022). The first empty-directory run failed on Anthropic OAuth refresh (`invalid_grant`, "Refresh token not found or invalid") although `pi auth check --no-refresh` had printed "ready", since that flag skips the refresh; it passed after re-login.
 
 ## Roundtable, 2026-10-09
 Four panelists responded (pi-seated DeepSeek, Qwen, MiniMax, Ember); GLM and MiMo returned nothing.
