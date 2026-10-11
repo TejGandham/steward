@@ -1,6 +1,7 @@
 ---
-name: coder-opus-medium
+name: coder
 package: steward
+aliases: steward.coder-opus-medium
 description: "Pure implementation work with a clear spec and tests, write code test-first (TDD), fix a well-defined bug, implement an approved plan. Use when the task is 'make this code do X' with a verifiable gate (tests, types, lint). Not for open-ended design or cross-repo reasoning."
 model: anthropic/claude-opus-5-5
 thinking: medium

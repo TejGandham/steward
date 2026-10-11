@@ -1,7 +1,8 @@
 ---
-name: researcher-sonnet-low
+name: researcher
 package: steward
-description: Thorough read-only investigation across a codebase or the web, trace how a feature works, find every use of a pattern, gather facts to brief a later task, draft plan inputs. Use when the deliverable is findings, not code changes. For a single targeted lookup, use steward.mechanic-haiku-medium instead.
+aliases: steward.researcher-sonnet-low
+description: Thorough read-only investigation across a codebase or the web, trace how a feature works, find every use of a pattern, gather facts to brief a later task, draft plan inputs. Use when the deliverable is findings, not code changes. For a single targeted lookup, use steward.mechanic instead.
 model: anthropic/claude-sonnet-5-5
 thinking: low
 systemPromptMode: append

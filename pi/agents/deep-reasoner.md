@@ -1,6 +1,7 @@
 ---
-name: deep-reasoner-opus-xhigh
+name: deep-reasoner
 package: steward
+aliases: steward.deep-reasoner-opus-xhigh
 description: Hard reasoning tasks, system/architecture design, ambiguous design decisions, cross-repo synthesis and plan writing, security review, and high-stakes or subtle code review where a miss is costly. Use when the task needs frontier judgment, not just execution. Escalate to the main thread only if this falls short.
 model: anthropic/claude-opus-5-5
 thinking: xhigh

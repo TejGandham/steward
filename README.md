@@ -116,10 +116,10 @@ To check the install, ask pi to "list the available subagents". You should see s
 
 The pi package has three parts:
 - `pi/skills/steward-delegating/`: the edict, written for pi. A pi extension adds it to the system prompt of every main session.
-- `pi/agents/`: the seven profiles. pi-subagents loads them as `steward.<name>`, for example `steward.coder-opus-medium`.
+- `pi/agents/`: the seven profiles. pi-subagents loads them as `steward.<name>`, for example `steward.coder`.
 - `pi/extensions/steward/`: the extension that adds the edict and runs the gates. It passes each pi event to `hooks/steward_hook.py`, so both harnesses share one set of rules and tests.
 
-The model delegates with pi-subagents' `subagent` tool, for example `subagent({ agent: "steward.mechanic-haiku-medium", task: "...", async: false })`.
+The model delegates with pi-subagents' `subagent` tool, for example `subagent({ agent: "steward.mechanic", task: "...", async: false })`.
 
 ### Profiles on pi
 
@@ -127,15 +127,17 @@ Each profile pins a full model ID and a thinking level:
 
 | Profile | Model | Thinking |
 |-|-|-|
-| `steward.coder-opus-medium` | `anthropic/claude-opus-5-5` | medium |
-| `steward.deep-reasoner-opus-xhigh` | `anthropic/claude-opus-5-5` | xhigh |
-| `steward.reviewer-sonnet-high` | `anthropic/claude-sonnet-5-5` | high |
-| `steward.researcher-sonnet-low` | `anthropic/claude-sonnet-5-5` | low |
-| `steward.writer-sonnet-medium` | `anthropic/claude-sonnet-5-5` | medium |
-| `steward.mechanic-haiku-medium` | `anthropic/claude-haiku-5-5` | medium |
-| `steward.reviewer-opus-max` | `anthropic/claude-opus-5-5` | max |
+| `steward.coder` | `anthropic/claude-opus-5-5` | medium |
+| `steward.deep-reasoner` | `anthropic/claude-opus-5-5` | xhigh |
+| `steward.reviewer` | `anthropic/claude-sonnet-5-5` | high |
+| `steward.researcher` | `anthropic/claude-sonnet-5-5` | low |
+| `steward.writer` | `anthropic/claude-sonnet-5-5` | medium |
+| `steward.mechanic` | `anthropic/claude-haiku-5-5` | medium |
+| `steward.top-reviewer` | `anthropic/claude-opus-5-5` | max |
 
-If you ask for Fable by name, the edict runs `steward.reviewer-opus-max` with `model: "anthropic/claude-fable-5-1:xhigh"`. The `:xhigh` suffix sets the thinking level; it becomes the level you name, if you name one.
+Version 0.10.0 renamed the pi profiles to role-only names. The old names, such as `steward.coder-opus-medium`, still launch the same profile through pi-subagents aliases, and `steward.reviewer-fable-xhigh` launches `steward.top-reviewer`. Settings are different: pi-subagents reads config such as `subagents.agentOverrides` under the new name only, so rename any override keys you saved under an old name.
+
+If you ask for Fable by name, the edict runs `steward.top-reviewer` with `model: "anthropic/claude-fable-5-1:xhigh"`. The `:xhigh` suffix sets the thinking level; it becomes the level you name, if you name one.
 
 pi needs version 1.1.0 or later for `anthropic/claude-haiku-5-5`, and a custom provider needs its own `claude-haiku-5-5` model entry.
 
@@ -145,7 +147,7 @@ If you reach Claude through another provider, override the model in `~/.pi/agent
 {
   "subagents": {
     "agentOverrides": {
-      "steward.coder-opus-medium": { "model": "openrouter/anthropic/claude-opus-5.5" }
+      "steward.coder": { "model": "openrouter/anthropic/claude-opus-5.5" }
     }
   }
 }

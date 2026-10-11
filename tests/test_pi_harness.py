@@ -18,6 +18,24 @@ from test_steward_hook import EM_DASH, REPO_ROOT, StewardTestCase, hook, run_hoo
 PI_SKILL = REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md"
 PI_AGENTS = REPO_ROOT / "pi" / "agents"
 CLAUDE_AGENTS = REPO_ROOT / "agents"
+HOOK_SCRIPT = REPO_ROOT / "hooks" / "steward_hook.py"
+
+# Claude Code profile name -> pi role-only profile name.
+PI_NAMES = {
+    "coder-opus-medium": "coder",
+    "deep-reasoner-opus-xhigh": "deep-reasoner",
+    "reviewer-sonnet-high": "reviewer",
+    "researcher-sonnet-low": "researcher",
+    "writer-sonnet-medium": "writer",
+    "mechanic-haiku-medium": "mechanic",
+    "reviewer-opus-max": "top-reviewer",
+}
+
+# pi role-only profile name -> old pi names kept as pi-subagents aliases.
+PI_ALIASES = {new: ["steward." + old] for old, new in PI_NAMES.items()}
+PI_ALIASES["top-reviewer"].append("steward.reviewer-fable-xhigh")
+
+MODEL_WORDS = ("opus", "sonnet", "haiku", "fable")
 
 
 class PiHarnessCase(StewardTestCase):
@@ -116,7 +134,9 @@ class PiGateTests(PiHarnessCase):
         out = json.loads(run_hook("gate", self._write("pg1"), env).stdout)
         reason = out["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("steward.coder-opus-medium", reason)
+        self.assertIn("steward.coder ", reason)
+        self.assertIn("steward.mechanic ", reason)
+        self.assertNotIn("steward.coder-opus-medium", reason)
         self.assertIn("subagent tool", reason)
         self.assertIn(os.path.join(self.config, "steward", "gate"), reason)
         self.assertNotIn("steward:", reason)
@@ -262,24 +282,40 @@ class PiAgentProfileTests(unittest.TestCase):
 
     def test_same_profiles_as_claude(self):
         self.assertEqual(
-            sorted(p.name for p in PI_AGENTS.glob("*.md")),
-            sorted(p.name for p in CLAUDE_AGENTS.glob("*.md")),
+            sorted(p.stem for p in PI_AGENTS.glob("*.md")),
+            sorted(PI_NAMES[p.stem] for p in CLAUDE_AGENTS.glob("*.md")),
         )
 
     def test_each_profile_mirrors_its_claude_twin(self):
         for claude_path in CLAUDE_AGENTS.glob("*.md"):
             with self.subTest(profile=claude_path.stem):
+                pi_name = PI_NAMES[claude_path.stem]
                 c_fields, c_body = _frontmatter(claude_path)
-                p_fields, p_body = _frontmatter(PI_AGENTS / claude_path.name)
-                self.assertEqual(p_fields["name"], c_fields["name"])
+                p_fields, p_body = _frontmatter(PI_AGENTS / (pi_name + ".md"))
+                self.assertEqual(p_fields["name"], pi_name)
                 self.assertEqual(p_fields["package"], "steward")
                 self.assertEqual(p_fields["model"], self.MODEL_MAP[c_fields["model"]])
                 self.assertEqual(p_fields["thinking"], c_fields["effort"])
                 self.assertEqual(p_body, c_body)
                 self.assertNotIn("steward:", p_fields["description"])
 
+    def test_old_names_kept_as_aliases(self):
+        for new, expected in PI_ALIASES.items():
+            with self.subTest(profile=new):
+                fields, _ = _frontmatter(PI_AGENTS / (new + ".md"))
+                aliases = [a.strip() for a in fields.get("aliases", "").split(",") if a.strip()]
+                for alias in expected:
+                    self.assertIn(alias, aliases)
+
+    def test_profile_names_carry_no_model(self):
+        for path in PI_AGENTS.glob("*.md"):
+            fields, _ = _frontmatter(path)
+            for word in MODEL_WORDS:
+                self.assertNotIn(word, fields["name"], path.name)
+                self.assertNotIn(word, path.stem, path.name)
+
     def test_writer_loads_plainlanguage(self):
-        fields, _ = _frontmatter(PI_AGENTS / "writer-sonnet-medium.md")
+        fields, _ = _frontmatter(PI_AGENTS / "writer.md")
         self.assertEqual(fields["skills"], "plainlanguage")
 
     def test_children_see_operator_context(self):
@@ -296,6 +332,18 @@ class PiSkillTests(unittest.TestCase):
             self.assertIn("steward." + path.stem, text)
         self.assertNotIn("steward:", text)
         self.assertNotIn(EM_DASH, text)
+
+    def test_profile_references_carry_no_model(self):
+        sources = {
+            "pi edict": PI_SKILL.read_text(encoding="utf-8"),
+            "pi gate message": hook.gate_message(2, "/h/.pi/agent", "pi"),
+        }
+        for label, text in sources.items():
+            refs = re.findall(r"steward\.([\w-]+)", text)
+            self.assertTrue(refs, label)
+            for ref in refs:
+                for word in MODEL_WORDS:
+                    self.assertNotIn(word, ref, f"{label}: steward.{ref}")
 
     def test_skill_frontmatter_name(self):
         fields, _ = _frontmatter(PI_SKILL)
