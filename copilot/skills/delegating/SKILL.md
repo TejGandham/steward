@@ -44,7 +44,7 @@ On every `task` call to a steward profile:
 | Deep architecture / ambiguous design | steward:deep-reasoner, escalate to main thread if short |
 | Cross-repo synthesis / plan writing | steward:deep-reasoner (or a coordinator plus sonnet workers if huge and splittable) |
 | Read-only investigation / search | steward:researcher (steward:mechanic for one targeted lookup) |
-| Code review | steward:reviewer (steward:deep-reasoner for high-stakes/complex) |
+| Code review | steward:reviewer (steward:deep-reasoner for auth, payments, concurrency, data migrations, or other high-stakes/complex) |
 | Security review | steward:deep-reasoner |
 | Mechanical edits / file ops | steward:mechanic |
 | Docs / prose | steward:writer (steward:mechanic for short) |

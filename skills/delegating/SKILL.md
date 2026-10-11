@@ -22,7 +22,7 @@ The steward delegation edict governs how this session hands off work: which task
 | Deep architecture / ambiguous design | steward:deep-reasoner-opus-xhigh, escalate to main thread if short |
 | Cross-repo synthesis / plan writing | steward:deep-reasoner-opus-xhigh (or a coordinator plus sonnet workers if huge and splittable) |
 | Read-only investigation / search | steward:researcher-sonnet-low (steward:mechanic-haiku-medium for one targeted lookup) |
-| Code review | steward:reviewer-sonnet-high (steward:deep-reasoner-opus-xhigh for high-stakes/complex) |
+| Code review | steward:reviewer-sonnet-high (steward:deep-reasoner-opus-xhigh for auth, payments, concurrency, data migrations, or other high-stakes/complex) |
 | Security review | steward:deep-reasoner-opus-xhigh |
 | Mechanical edits / file ops | steward:mechanic-haiku-medium |
 | Docs / prose | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for short) |

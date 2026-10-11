@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Standard code review of a diff or PR, correctness, naming, control flow, test coverage of success/failure/edge cases. Use for everyday PR review. For security-sensitive or high-stakes/complex diffs, use deep-reasoner instead.
+description: Standard code review of a diff or PR, correctness, naming, control flow, test coverage of success/failure/edge cases. Use for everyday PR review. For diffs touching auth, payments, concurrency or data migrations, and for other security-sensitive or high-stakes/complex diffs, use deep-reasoner instead.
 reasoning-effort: high
 include-custom-instructions: true
 ---

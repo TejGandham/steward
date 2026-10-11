@@ -148,3 +148,22 @@ Caveats:
 Max against xhigh for Opus 5.5: AA index 58 vs 56, cost per index task $5.98 vs $3.46, about 119K output tokens per AA task at max. CodeRabbit: Opus max caught 10 of 13 hard bugs at 52.0% precision, standard 8 of 13 at 66.7%.
 
 Decision: the operator moved the top reviewer to Opus 5.5 at max on 2026-10-11 (steward 0.9.0); see `skills/delegating/routing.md`, section "Top reviewer on Opus 5.5 max (operator decision 2026-10-11)".
+
+## Reviewer question, 2026-10-11
+Question: move everyday review from Sonnet 5.5 high to Opus 5.5 medium? Sources read 2026-10-11 from paired exa and parallelai searches. CodeRabbit's figures came from exa; the cost analyses and the ReviewBench pointer came from parallelai.
+
+| Source | Finding |
+|-|-|
+| CodeRabbit Signal, 13 hard known-bug cases | Sonnet 5.5 thinking on 6/13 caught, 41.2% precision, 17 comments, 5:27 per review; 35.3% precision without one 2-to-1 judge vote. Sonnet 5.5 thinking off 5/13, 38.5%. Opus Standard 8/13, 66.7%. Opus Max 10/13, 52.0%. Counting outside-diff findings: Sonnet 8/13, both Opus 10/13. Four cases beat every Sonnet configuration. |
+| CodeRabbit Signal, cost | Sonnet 5.5's Claude calls $0.47 per review. No Opus per-review cost published. |
+| CodeRabbit OSS August, 80 cases | Opus Standard 63.8% recall at 38.6% precision; baseline 61.3%. Standard beat Max overall. Sonnet 5.5 judge scores on the 44 PRs pending. |
+| CodeRabbit's own verdict | Sonnet 5.5 for the review pass on every PR, Opus for high-risk changes; simple and moderate reviews moving to Sonnet 5.5. |
+| Pondero | Sonnet with thinking on for every PR; Opus, at max if affordable, for auth, payments, concurrency and migrations. |
+| Sonar Gitar | Chose Opus 5.5 as its reviewer: median review time about halved versus Opus 5, precision up 7 points, recall up 2. No Sonnet 5.5 comparison. |
+| Deloitte, via Anthropic | Opus 5.5 at its lowest effort caught 72% of known bugs versus 56% for Opus 5 at high. No Sonnet 5.5 comparison. |
+| alekseialeinikov | Real per-turn premium of Opus over Sonnet about 1.65x, because cached input was priced the same; predates the Sonnet 5.5 cache-read cut to $0.10 on 2026-10-07. |
+| grandlinux, from Artificial Analysis | Per task at low effort: Sonnet $0.41, Opus $0.55. At max: Sonnet $7.60, Opus $5.98. |
+| GitHub ReviewBench, 219 PRs | No Claude 5.5 rows in the fetched content. |
+| Reddit three-run test | Small and inconclusive. |
+
+Decision: keep everyday review on Sonnet 5.5 high and send auth, payments, concurrency, data-migration and other high-stakes diffs to deep-reasoner on Opus 5.5 xhigh. Recorded in `skills/delegating/routing.md`, section "Reviewer stays on Sonnet 5.5 high (operator decision 2026-10-11)".

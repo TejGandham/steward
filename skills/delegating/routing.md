@@ -1,6 +1,6 @@
 # Routing knowledge base
 
-Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5; revised 2026-10-09 for Haiku 5.5 and the mechanic's move to it; revised 2026-10-11 for per-call effort and the top reviewer's move to Opus 5.5 max.
+Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5; revised 2026-10-09 for Haiku 5.5 and the mechanic's move to it; revised 2026-10-11 for per-call effort, the top reviewer's move to Opus 5.5 max, and the decision to keep everyday review on Sonnet 5.5 high.
 
 ## Cost ranking (per MTok, input / output / cache read), cheapest to dearest (cited: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-09-22, re-fetched 2026-10-03 and 2026-10-08)
 | Model | Input | Output | Cache read |
@@ -59,8 +59,15 @@ Sonnet 5.5 stays pinned for everyday review, research, and writing; mechanical w
 
 Roundtable, 2026-10-09: four responding panelists (pi-seated DeepSeek, Qwen, MiniMax, Ember; GLM and MiMo returned nothing) agreed 4 of 4 on mechanic to Haiku and on keeping coder, deep-reasoner and writer; they split on mechanic effort (3 low, 1 medium), researcher (2 Sonnet low, 1 Sonnet medium, 1 Haiku high), reviewer (3 Sonnet high, 1 Opus medium) and the Fable profile (2 remove, 1 repoint to Opus max, 1 keep). The tables behind all of this are in `docs/evaluations/2026-10-09-model-assignment-evidence.md`.
 
-### Open questions (2026-10-09)
-- Reviewer on Opus medium is the other open option (CodeRabbit: Opus caught 8 of 13 hard bugs at 66.7% precision, Sonnet 6 of 13 at 41.2%).
+### Reviewer stays on Sonnet 5.5 high (operator decision 2026-10-11)
+Closes the 2026-10-09 open question on moving everyday review to Opus 5.5 medium. Everyday diff review stays on `steward:reviewer-sonnet-high`; diffs touching auth, payments, concurrency or data migrations, and other security-sensitive or high-stakes diffs, go to `steward:deep-reasoner-opus-xhigh`. This is the split CodeRabbit adopted for its own product and Pondero recommends.
+- CodeRabbit Signal, 13 hard known-bug cases: Sonnet 5.5 thinking on caught 6/13 at 41.2% precision (35.3% without one 2-to-1 judge vote), thinking off 5/13 at 38.5%; Opus Standard 8/13 at 66.7%; Opus Max 10/13 at 52.0%. Counting outside-diff findings: Sonnet 8/13, both Opus configurations 10/13. Sonnet 5.5's Claude calls cost $0.47 per review; no Opus cost per review was published.
+- CodeRabbit OSS August, 80 cases: Opus Standard 63.8% recall at 38.6% precision against a 61.3% baseline; Standard beat Max overall. Sonnet 5.5's judged scores on the 44-PR subset are still pending.
+- CodeRabbit's choice: Sonnet 5.5 for simple and moderate reviews on every PR, Opus for high-risk changes. Pondero: Sonnet with thinking on for every PR, Opus for auth, payments, concurrency and migrations.
+- Roundtable 2026-10-09: 3 of 4 responding panelists for Sonnet high, 1 for Opus medium.
+- Gap: nearly every code-review figure traces to one vendor's test (CodeRabbit); 13 cases is a small sample; no Sonnet 5.5 versus Opus 5.5 head-to-head on ordinary PRs exists; GitHub's ReviewBench (219 PRs) had no Claude 5.5 rows as read 2026-10-11.
+- Re-check when CodeRabbit publishes Sonnet 5.5's judged scores on the 44-PR set, or when any Sonnet 5.5 versus Opus 5.5 head-to-head on ordinary PRs appears.
+Full figures: `docs/evaluations/2026-10-09-model-assignment-evidence.md`, section "Reviewer question, 2026-10-11".
 
 ## Top reviewer on Opus 5.5 max (operator decision 2026-10-11)
 The top reviewer moved from Fable 5.1 at xhigh to `steward:reviewer-opus-max` (Opus 5.5, max) in 0.9.0. Fable 5.1 runs only when the operator asks for it by name: `subagent_type: steward:reviewer-opus-max`, `model: fable`, `effort` as the operator names (`xhigh` if none). Figures read 2026-10-11; cite them with that date, since one outlet notes Artificial Analysis rescaled its index between September snapshots.
@@ -94,7 +101,7 @@ Other matrix models' tentative retirement floors, same deprecations page: Sonnet
 ## Pinned profiles (in the steward plugin `agents/` directory), delegate by subagent_type
 - **steward:coder-opus-medium** (opus, medium): pure implementation with spec and tests (TDD), well-defined bug fixes, approved plans. See "Coder on Opus 5.5" above for why it moved off Sonnet 5 xhigh.
 - **steward:deep-reasoner-opus-xhigh** (opus, xhigh): architecture, ambiguous design, cross-repo synthesis/plans, security review, high-stakes/subtle code review. Escalate to the main thread only if it falls short.
-- **steward:reviewer-sonnet-high** (sonnet, high): everyday code review of a diff/PR.
+- **steward:reviewer-sonnet-high** (sonnet, high): everyday code review of a diff/PR; diffs touching auth, payments, concurrency or data migrations go to steward:deep-reasoner-opus-xhigh.
 - **steward:researcher-sonnet-low** (sonnet, low): thorough read-only investigation/search, plan inputs, findings docs.
 - **steward:writer-sonnet-medium** (sonnet, medium): docs, README sections, substantive PR bodies, plain-language rewrites.
 - **steward:mechanic-haiku-medium** (haiku, medium): single lookups, rote edits, file ops, running known commands, status collation, trivial PR one-liners. Returned to Haiku on 2026-10-09 (0.6.0), after running on Sonnet at low effort from 0.2.0, when Haiku 4.5 was dropped; see "Haiku 5.5" above.
@@ -108,7 +115,7 @@ Other matrix models' tentative retirement floors, same deprecations page: Sonnet
 | Deep architecture / ambiguous design | steward:deep-reasoner-opus-xhigh, escalate to main thread if short |
 | Cross-repo synthesis / plan writing | steward:deep-reasoner-opus-xhigh (or a coordinator plus sonnet workers if huge and splittable) |
 | Read-only investigation / search | steward:researcher-sonnet-low (steward:mechanic-haiku-medium for one targeted lookup) |
-| Code review | steward:reviewer-sonnet-high (steward:deep-reasoner-opus-xhigh for high-stakes/complex) |
+| Code review | steward:reviewer-sonnet-high (steward:deep-reasoner-opus-xhigh for auth, payments, concurrency, data migrations, or other high-stakes/complex) |
 | Security review | steward:deep-reasoner-opus-xhigh |
 | Mechanical edits / file ops | steward:mechanic-haiku-medium |
 | Docs / prose | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for short) |
