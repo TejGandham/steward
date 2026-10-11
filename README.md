@@ -42,9 +42,11 @@ An `update-pr-summary` command at `<config dir>/commands/update-pr-summary.md` i
 | `steward:researcher-sonnet-low` | Sonnet | low | Read-only investigation and search |
 | `steward:writer-sonnet-medium` | Sonnet | medium | Docs, PR bodies, plain-language rewrites |
 | `steward:mechanic-haiku-medium` | Haiku | medium | Single lookups, rote edits, running known commands |
-| `steward:reviewer-fable-xhigh` | Fable | xhigh | Highest-stakes gap review, only on explicit request (Opus 5.5 covers most of this now) |
+| `steward:reviewer-opus-max` | Opus | max | Highest-stakes gap review, on request or when a deep-reasoner pass is not enough |
 
-As of 0.6.0 the profiles run on four models, Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.1; the mechanic runs on Haiku 5.5 at medium effort and pure coding runs on Opus 5.5 at medium effort; Haiku 4.5 and Opus 5 were dropped earlier. On Claude Code the profiles use the `haiku`, `sonnet`, `opus` and `fable` aliases, which resolve to those four models on Claude Code 2.1.295.
+As of 0.9.0 the pinned profiles run on three models: Haiku 5.5, Sonnet 5.5 and Opus 5.5. The top reviewer moved from Fable 5.1 at xhigh to Opus 5.5 at max, because Opus 5.5 now scores higher. Fable 5.1 runs only when you ask for it by name: the edict then calls the top reviewer with a one-off model override to Fable, at the effort you name (xhigh if you name none). The mechanic runs on Haiku 5.5 at medium effort, and pure coding runs on Opus 5.5 at medium effort. Haiku 4.5 and Opus 5 were dropped earlier. On Claude Code the profiles use the `haiku`, `sonnet` and `opus` aliases, which resolve to those three models on Claude Code 2.1.295; the Fable override uses the `fable` alias.
+
+Each profile sets its own effort. Claude Code 2.1.292 and later also let a single Agent call pass an `effort` that overrides the profile's. The edict passes one only when it, a skill, or you name a level.
 
 The full routing table lives in `skills/delegating/routing.md`. The evidence tables are in `docs/evaluations/2026-10-09-model-assignment-evidence.md`, and the reasoning is in `skills/delegating/routing.md`.
 
@@ -131,7 +133,9 @@ Each profile pins a full model ID and a thinking level:
 | `steward.researcher-sonnet-low` | `anthropic/claude-sonnet-5-5` | low |
 | `steward.writer-sonnet-medium` | `anthropic/claude-sonnet-5-5` | medium |
 | `steward.mechanic-haiku-medium` | `anthropic/claude-haiku-5-5` | medium |
-| `steward.reviewer-fable-xhigh` | `anthropic/claude-fable-5-1` | xhigh |
+| `steward.reviewer-opus-max` | `anthropic/claude-opus-5-5` | max |
+
+If you ask for Fable by name, the edict runs `steward.reviewer-opus-max` with `model: "anthropic/claude-fable-5-1:xhigh"`. The `:xhigh` suffix sets the thinking level; it becomes the level you name, if you name one.
 
 pi needs version 1.1.0 or later for `anthropic/claude-haiku-5-5`, and a custom provider needs its own `claude-haiku-5-5` model entry.
 
@@ -234,11 +238,11 @@ The Copilot profiles carry role-only names. Each profile sets a reasoning effort
 | `steward:researcher` | Claude Sonnet 5.5 | low |
 | `steward:writer` | Claude Sonnet 5.5 | medium |
 | `steward:mechanic` | Claude Haiku 5.5 | medium |
-| `steward:top-reviewer` | Claude Fable 5.1 | xhigh |
+| `steward:top-reviewer` | Claude Opus 5.5 | max |
 
 Copilot does not resolve the `opus`, `sonnet`, `haiku`, and `fable` aliases, and model IDs differ by account and provider (for example a provider-prefixed `<provider>/claude-opus-5-5`). So the Copilot profiles set only `reasoning-effort`.
 
-Instead, the edict tells the main agent to pass two fields on every `task` call: `model`, the role's Claude model from the table above, copied from the task tool's own model list, and `reasoning_effort`, the role's level. `steward:top-reviewer` runs only when you ask for Fable. If Claude Haiku 5.5 is not listed, the mechanic runs on Claude Sonnet 5.5 at `low`.
+Instead, the edict tells the main agent to pass two fields on every `task` call: `model`, the role's Claude model from the table above, copied from the task tool's own model list, and `reasoning_effort`, the role's level. `steward:top-reviewer` runs when you ask for the top reviewer or when a deep-reasoner pass is not enough. If you ask for Fable by name, the main agent runs the top reviewer on the Claude Fable 5.1 model from the task tool's list, at the effort you name (xhigh if you name none). If Claude Haiku 5.5 is not listed, the mechanic runs on Claude Sonnet 5.5 at `low`.
 
 ### Optional: bind a profile on your machine
 

@@ -1,6 +1,6 @@
 # Routing knowledge base
 
-Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5; revised 2026-10-09 for Haiku 5.5 and the mechanic's move to it.
+Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5; revised 2026-10-09 for Haiku 5.5 and the mechanic's move to it; revised 2026-10-11 for per-call effort and the top reviewer's move to Opus 5.5 max.
 
 ## Cost ranking (per MTok, input / output / cache read), cheapest to dearest (cited: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-09-22, re-fetched 2026-10-03 and 2026-10-08)
 | Model | Input | Output | Cache read |
@@ -9,6 +9,8 @@ Routing knowledge base for the orchestrator. WHICH model and effort to pick is h
 | Sonnet 5.5 | $2 | $10 | $0.10 |
 | Opus 5.5 | $4 | $20 | $0.20 |
 | Fable 5.1 = Mythos 5.1 | $10 | $50 | $0.25 |
+
+Fable 5.1 is no longer pinned to any profile (2026-10-11); it runs only when the operator asks for it by name, through a per-call model override on the top reviewer. See "Top reviewer on Opus 5.5 max" below.
 
 The 2026-10-03 pricing page lists Sonnet 5.5 at the same $2/$10/$0.20 as Sonnet 5 and now includes Opus 5.5 at $4/$20/$0.20 (its cache reads are priced at 0.05x input). On 2026-09-22 the page said the $2/$10 Sonnet 5 price, originally introductory, had become standard; the planned 2026-09-01 increase to $3/$15 did not happen. Sonnet 5.5 cache reads were halved to $0.10 on 2026-10-07 (anthropic.com/claude-haiku-5-5), so Sonnet and Opus no longer tie on cache reads (Opus $0.20).
 
@@ -32,7 +34,7 @@ Anthropic's pre-launch Opus 5.5 migration guide (same source as above: bundled i
 
 Cost per token is 2x Sonnet 5 on input and output ($4/$20 versus $2/$10, see "Cost ranking" above), but cache reads tie at $0.20, and Anthropic's launch page says cache reads "make up the majority of agentic and coding work costs" (anthropic.com/claude-opus-5-5, 2026-09-22). Note 2026-10-09: the tie ended 2026-10-07, when Sonnet 5.5 cache reads dropped to $0.10 against Opus 5.5's $0.20. Fewer steps and fewer tokens per task, per the migration guide's claim above, narrow the per-token gap further. What matters is cost per completed task, not cost per token, and nobody has measured that for this profile yet; say so plainly rather than implying a saving that has not been checked.
 
-If a `steward:coder-opus-medium` run misses its gate, escalate in one step: rerun the same profile (its frontmatter effort stands; do not invent a per-invocation effort override, since a bare `Agent(model=...)` call cannot set effort) and flag the miss to the deep-reasoner, or hand the task to `steward:deep-reasoner-opus-xhigh` directly.
+If a `steward:coder-opus-medium` run misses its gate, escalate in one step: rerun the same profile (its frontmatter effort stands) and flag the miss to the deep-reasoner, or hand the task to `steward:deep-reasoner-opus-xhigh` directly.
 
 Sonnet 5.5 stays pinned for everyday review, research, and writing; mechanical work moved to Haiku 5.5 on 2026-10-09 (see "Haiku 5.5" below). Its price is the point there, and the high-stakes path already runs on Opus.
 
@@ -58,8 +60,30 @@ Sonnet 5.5 stays pinned for everyday review, research, and writing; mechanical w
 Roundtable, 2026-10-09: four responding panelists (pi-seated DeepSeek, Qwen, MiniMax, Ember; GLM and MiMo returned nothing) agreed 4 of 4 on mechanic to Haiku and on keeping coder, deep-reasoner and writer; they split on mechanic effort (3 low, 1 medium), researcher (2 Sonnet low, 1 Sonnet medium, 1 Haiku high), reviewer (3 Sonnet high, 1 Opus medium) and the Fable profile (2 remove, 1 repoint to Opus max, 1 keep). The tables behind all of this are in `docs/evaluations/2026-10-09-model-assignment-evidence.md`.
 
 ### Open questions (2026-10-09)
-- Fable 5.1 scores below Opus 5.5 at xhigh on the Artificial Analysis index (53.2 versus 56.0) and on every row of Anthropic's own table, at 2.5x the token price. Nothing tests dense plan or spec review, so `reviewer-fable-xhigh` stays as an explicit-request profile pending the operator's call.
 - Reviewer on Opus medium is the other open option (CodeRabbit: Opus caught 8 of 13 hard bugs at 66.7% precision, Sonnet 6 of 13 at 41.2%).
+
+## Top reviewer on Opus 5.5 max (operator decision 2026-10-11)
+The top reviewer moved from Fable 5.1 at xhigh to `steward:reviewer-opus-max` (Opus 5.5, max) in 0.9.0. Fable 5.1 runs only when the operator asks for it by name: `subagent_type: steward:reviewer-opus-max`, `model: fable`, `effort` as the operator names (`xhigh` if none). Figures read 2026-10-11; cite them with that date, since one outlet notes Artificial Analysis rescaled its index between September snapshots.
+
+Artificial Analysis (AA):
+- artificialanalysis.ai/models/comparisons/claude-opus-5-5-xhigh-vs-claude-fable-5-1-xhigh: Intelligence Index Opus 5.5 56, Fable 5.1 53.
+- artificialanalysis.ai/models/comparisons/claude-opus-5-5-vs-claude-fable-5-1 (max versus max): Index 58 vs 53; AA-Briefcase 1822 vs 1678; GDPval-AA 1846 vs 1735; AutomationBench-AA 70% vs 59%; Terminal-Bench 4.0 60% vs 52%; SciCode 67% vs 63%; Humanity's Last Exam 61% vs 59%. Time to first token at max: Fable 276s, Opus 685s.
+
+Anthropic's table (anthropic.com/claude-opus-5-5): Opus 5.5 ahead on all nine rows. Terminal-Bench 4.0 66.4 vs 55.8; FrontierCode 54.4 vs 50.3; CursorBench 57.8 vs 51.8; GDPval-AA 1846 vs 1735; AutomationBench 40.0 vs 31.4; HLE with tools 67.7 vs 65.6; Terminal-Bench-Science 58.7 vs 52.6; OSWorld 2.0 81.8 vs 80.7; Chartography with tools 89.0 vs 88.4. Opus results are at max effort except Terminal-Bench, at xhigh.
+
+Caveats:
+- Fable leads at low effort: AA index 46.8 vs 42.3 (modelfatigue.news, reading AA on 2026-10-04). The top reviewer never runs at low, so this does not bear on the profile.
+- Fable leads 2 of 11 AA per-test scores at xhigh (same source).
+- Anthropic: "In our own use, the gap between Opus 5.5 and Claude Fable 5.1 is narrower than these scores suggest."
+- Nothing tests dense plan or spec review, the profile's actual job.
+
+Why max, not xhigh:
+- xhigh would duplicate `steward:deep-reasoner-opus-xhigh`; the top reviewer exists for the pass after that one falls short.
+- AA index 58 at max vs 56 at xhigh, at $5.98 vs $3.46 cost per index task.
+- CodeRabbit's Opus max configuration caught 10 of 13 hard bugs at 52.0% precision vs 8 of 13 at 66.7% for standard. Gap review values recall over precision, so the trade favors max.
+- Max turns run long (about 119K output tokens per AA task, and the 685s time to first token above), which fits a rare, background, highest-stakes pass.
+
+The evidence is also logged in `docs/evaluations/2026-10-09-model-assignment-evidence.md`, section "Re-verification of the Fable claim, 2026-10-11".
 
 ## Dropped models (2026-09-22)
 - **Haiku 4.5** ($1/$5/$0.10): dropped. Nearest retirement floor of any model in the matrix (tentative, not sooner than 2026-10-15, three weeks out at drop time; platform.claude.com/docs/en/about-claude/model-deprecations, fetched 2026-09-22), 200K context versus 1M for the rest, no effort dial, and Sonnet 5 at `low` effort now covers the same rote work with an explicit effort setting. Cost for that rote work doubles per token, $1/$5 to $2/$10. Those reasons (200K context, no effort dial, near retirement) do not apply to Haiku 5.5, which took the mechanic profile back on 2026-10-09; see "Haiku 5.5" above.
@@ -74,7 +98,7 @@ Other matrix models' tentative retirement floors, same deprecations page: Sonnet
 - **steward:researcher-sonnet-low** (sonnet, low): thorough read-only investigation/search, plan inputs, findings docs.
 - **steward:writer-sonnet-medium** (sonnet, medium): docs, README sections, substantive PR bodies, plain-language rewrites.
 - **steward:mechanic-haiku-medium** (haiku, medium): single lookups, rote edits, file ops, running known commands, status collation, trivial PR one-liners. Returned to Haiku on 2026-10-09 (0.6.0), after running on Sonnet at low effort from 0.2.0, when Haiku 4.5 was dropped; see "Haiku 5.5" above.
-- **steward:reviewer-fable-xhigh** (fable, xhigh): highest-stakes gap reviews of plans/specs; reserve for explicit operator requests, since Opus 5.5 is at Fable 5.1 level on most work for 40% of the price (cost: highest).
+- **steward:reviewer-opus-max** (opus, max): highest-stakes gap reviews of plans/specs; use on the operator's request or when a deep-reasoner pass is not enough (cost: highest of the pinned profiles; max turns run long). Moved off Fable 5.1 xhigh on 2026-10-11; Fable runs only by per-call `model: fable` override on the operator's request. See "Top reviewer on Opus 5.5 max" above.
 
 ## Rubric (task to profile)
 | Task | Profile |
@@ -97,15 +121,13 @@ one dependent chain fits a single context with no splittable pieces; every step 
 ## Caveats to remember (do not overclaim)
 - "Mythos-class, tier above Opus" is cited: anthropic.com/claude/fable says "Claude Fable 5.1 is a Mythos-level model." Primary-source validation on 2026-09-03 confirmed every other cited fact too (prices, 0.025x vs 0.1x cache reads, cost ranking, all four model ids then in the matrix, 1M/1M/1M/200K context windows, the Opus-at-half-price quote, the 47-55% savings figure). The 2026-09-22 revision re-verified pricing and deprecations against primary sources; see "Cost ranking", "Opus 5.5", and "Dropped models" above for those citations.
 - Multi-model cost-savings percentages (the 40%, 20%, 60%, 30% figures above) are Anthropic's own comparisons against Opus 5, not guaranteed on any particular workload; measure before trusting a specific number.
-- A bare `Agent(model=...)` call cannot set effort; to get a profile's effort you must delegate by subagent_type (see "Model and effort mechanics" below).
+- Pinned profiles are the default source of effort. A per-call Agent `effort` (Claude Code 2.1.292+) overrides a profile's frontmatter effort, but pass it only when the edict, a skill, or the operator names a level; a per-call `model` alone leaves effort unchanged (see "Model and effort mechanics" below).
 - Aliases checked 2026-10-03 on Claude Code 2.1.288 by running `claude -p --model <alias>` and reading the model id from the JSON output: `sonnet` ran `claude-sonnet-5-5`, `opus` ran `claude-opus-5-5`, `fable` ran `claude-fable-5-1`. Checked 2026-10-08 on Claude Code 2.1.295: `haiku` ran `claude-haiku-5-5`; the docs require 2.1.293 or later.
 - Alias lag: code.claude.com/docs/en/model-config, as crawled 2026-09-22, still says `opus` resolves to Opus 4.8 and `sonnet` to Sonnet 4.6, both behind the current launches. The installed Claude Code 2.1.280 binary on this machine labels its Opus picker entry "Opus 5.5 - best for everyday, complex tasks" and its default-model string names Opus 5.5, so `opus` means Opus 5.5 here; check the binary, not just the docs page, before trusting an alias. The env vars `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_FABLE_MODEL` override what an alias resolves to, and a full id in agent frontmatter overrides the alias too.
 
 # Model and effort mechanics
 
-Operational reference for choosing and setting a subagent's model and reasoning effort. Effort is definition-only, so effort control requires an agent file. Pair with the routing knowledge base above to decide WHICH model and effort; this section is HOW to set it. Sources: code.claude.com/docs/en/sub-agents.md and code.claude.com/docs/en/model-config.md (confirmed 2026-09-03).
-
-Caveat: Claude Code 2.1.295's Agent tool exposes a per-invocation `effort` parameter (seen in the tool schema 2026-10-08 and confirmed in run logs); the statements here that effort is definition-only predate it. Pinned profiles stay the rule, because the parameter is meant for explicitly requested effort levels.
+Operational reference for choosing and setting a subagent's model and reasoning effort. Effort comes from the pinned profile's frontmatter by default; a per-call Agent `effort` parameter overrides it when a level is explicitly requested. Pair with the routing knowledge base above to decide WHICH model and effort; this section is HOW to set it. Sources: code.claude.com/docs/en/sub-agents.md and code.claude.com/docs/en/model-config.md (confirmed 2026-09-03; sub-agents page re-read 2026-10-11 for per-call effort), and the Claude Code changelog entry for 2.1.292. The earlier claim that effort is definition-only for subagents is outdated as of 2.1.292.
 
 ## Frontmatter keys (agent file in the steward plugin `agents/` directory)
 Same YAML block:
@@ -125,23 +147,31 @@ tools: <optional; omit to inherit all>
 ```
 
 ## The rule that decides routing
-**Effort is definition-only for subagents.** The Agent/Task tool exposes a per-invocation `model` param but no effort param. So:
-- To run a subagent at a chosen effort you must delegate via `subagent_type` to an agent file whose frontmatter sets `effort:`. A bare `Agent` call that only overrides `model` runs at the inherited/default effort, not a chosen one.
-- `model` can still be overridden per-invocation (Agent tool `model`), and that override sits at the top of the model-resolution order. But it does not carry an effort.
+**Pinned profiles are the default; per-call effort is for explicitly named levels.** Facts:
+- code.claude.com/docs/en/sub-agents, "Choose an effort level" (read 2026-10-11): "To run a subagent at its own effort level, set the `effort` field in its definition. When you ask Claude to run a non-fork subagent at a specific effort level, it can also pass an `effort` parameter for that invocation. The parameter overrides the `effort` field and stays in effect when the subagent is resumed. The `CLAUDE_CODE_EFFORT_LEVEL` environment variable takes precedence over both. The per-invocation parameter requires Claude Code v2.1.292 or later."
+- Same page, frontmatter table, `effort`: "Overrides the session effort level, but not the `CLAUDE_CODE_EFFORT_LEVEL` environment variable."
+- Changelog 2.1.292: "Added an `effort` parameter to the Agent tool, so Claude runs a sub-agent at the effort level you ask for".
+- The Agent tool's schema says to set `effort` only when the user, or instructions such as CLAUDE.md or a skill, explicitly ask for a level, never on the agent's own judgment, and that a fork ignores it.
+- Local evidence 2026-10-08, Claude Code 2.1.295: runs of `steward:mechanic-sonnet-low` (frontmatter effort low; the mechanic profile's name before 0.6.0 moved it to Haiku) with per-call `effort: medium` and `effort: high` recorded medium and high in their run logs, so the override works.
+
+So:
+- Delegate via `subagent_type` to a pinned profile; its frontmatter `model` and `effort` apply. Omit per-call `effort` unless the edict, a skill, or the operator names a level.
+- When a level is named, pass `effort` on that call; it overrides the profile's frontmatter for that invocation and any resume.
+- `model` can be overridden per-invocation (Agent tool `model`), and that override sits at the top of the model-resolution order. A per-call `model` alone does not change effort; the profile's frontmatter effort still applies. Example: the operator's Fable request runs as `subagent_type: steward:reviewer-opus-max`, `model: fable`, `effort: xhigh` (or the level the operator names).
 
 ## Independence and inheritance
 - `model` and `effort` do not interact: overriding the model does not reset effort.
 - `model: inherit` does not imply effort inherits. Effort inherits from the parent only when the `effort` key is omitted. Set both explicitly to be safe.
 
-## Effort can be set four ways (scope, highest-precedence-while-active first)
-1. Agent-file frontmatter `effort:`, wins while that subagent is active (use this for pinned profiles).
-2. Env `CLAUDE_CODE_EFFORT_LEVEL` / `--effort` flag, session/run scope.
-3. `/effort` command, interactive session scope.
-4. `settings.json` `effortLevel` or `modelSettings.<model>.effortLevel`, global default.
+## Effort can be set four ways (for a subagent, highest precedence first)
+1. Env `CLAUDE_CODE_EFFORT_LEVEL`: outranks both the per-call parameter and frontmatter (sub-agents page, quoted above).
+2. Per-call Agent `effort` parameter: Claude Code 2.1.292+, overrides frontmatter, persists on resume, ignored by forks. Pass it only for an explicitly named level.
+3. Agent-file frontmatter `effort:`: overrides the session effort level (use this for pinned profiles).
+4. Session-level settings: `--effort` flag, `/effort` command, `settings.json` `effortLevel` or `modelSettings.<model>.effortLevel`. Their order relative to one another is not stated in the docs quoted here.
 
 ## Caveats
 - Version note: before v2.1.251, `CLAUDE_CODE_SUBAGENT_MODEL` outranked both per-invocation `model` and frontmatter `model`; on current versions per-invocation `model` is top.
-- Unconfirmed community report (GitHub #81677, v2.1.219/220): `effort` frontmatter may be silently ignored on the `--agent <name>` session-persona path while `model` still applies; reportedly does not affect normal Task-tool-invoked subagents. If a pinned profile seems to ignore effort, suspect this and verify.
+- `effort` frontmatter is ignored on the `--agent <name>` session-persona path while `model` still applies (community report GitHub #81677, v2.1.219/220; confirmed locally 2026-10-11 on Claude Code 2.1.296 with `settings.json` `effortLevel: xhigh`: `claude -p --agent steward:reviewer-opus-max` ran `claude-opus-5-5` at xhigh, while the same profile delegated through the Agent tool with no per-call `effort` ran `claude-opus-5-5` at max, read from each run's log). Normal Agent-tool subagents honor frontmatter effort over the session level. If a pinned profile seems to ignore effort, check which path launched it.
 
 ## How to apply this
-Delegate by `subagent_type` to the pinned profile agents in the steward plugin `agents/` directory (model and effort fixed) for the recurring task archetypes. Use the Agent `model` override only to swap the model of an existing profile when its effort is still appropriate. Never rely on a bare `Agent(model=...)` call to get a specific effort; it will not work.
+Delegate by `subagent_type` to the pinned profile agents in the steward plugin `agents/` directory (model and effort fixed) for the recurring task archetypes. Pass a per-call `effort` only when the edict, a skill, or the operator names a level; otherwise omit it so the profile's frontmatter effort stands. Use the Agent `model` override to swap a profile's model; it keeps the profile's effort unless `effort` is passed too. Do not use per-call `effort` to redesign escalation: after a missed gate, rerun the same profile or hand the task to the deep-reasoner.

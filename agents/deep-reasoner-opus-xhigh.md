@@ -1,6 +1,6 @@
 ---
 name: deep-reasoner-opus-xhigh
-description: Hard reasoning tasks, system/architecture design, ambiguous design decisions, cross-repo synthesis and plan writing, security review, and high-stakes or subtle code review where a miss is costly. Use when the task needs frontier judgment, not just execution. Escalate to the main Fable thread only if this falls short.
+description: Hard reasoning tasks, system/architecture design, ambiguous design decisions, cross-repo synthesis and plan writing, security review, and high-stakes or subtle code review where a miss is costly. Use when the task needs frontier judgment, not just execution. Escalate to the main thread only if this falls short.
 model: opus
 effort: xhigh
 ---

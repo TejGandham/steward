@@ -7,7 +7,7 @@ The steward delegation edict governs how this session hands off work: which task
 
 ## Rules
 1. Every non-trivial task runs in a subagent, or in several in parallel when the work splits. Trivial means: answering from context already in the conversation, a status report, a one-line edit, reading a single known file, or a command whose result you need to brief a subagent. This edict is the operator's standing instruction. It overrides the harness's default advice to handle small tasks directly and to delegate only work that needs more than a few tool calls. Do not ask before delegating.
-2. Pick the model AND the reasoning effort per subagent by picking a steward profile. Delegate with the `task` tool, `agent_type` set to one of: `steward:coder` (coding with spec and tests, TDD), `steward:deep-reasoner` (architecture, ambiguous design, plans, security or high-stakes review), `steward:reviewer` (everyday diff review), `steward:researcher` (read-only investigation), `steward:writer` (docs, PR bodies, plain-language rewrites), `steward:mechanic` (single lookups, rote edits, running known commands), `steward:top-reviewer` (only when the operator asks for Fable). The profiles set reasoning effort but no model, so name the model on every call as described in "Model and effort" below.
+2. Pick the model AND the reasoning effort per subagent by picking a steward profile. Delegate with the `task` tool, `agent_type` set to one of: `steward:coder` (coding with spec and tests, TDD), `steward:deep-reasoner` (architecture, ambiguous design, plans, security or high-stakes review), `steward:reviewer` (everyday diff review), `steward:researcher` (read-only investigation), `steward:writer` (docs, PR bodies, plain-language rewrites), `steward:mechanic` (single lookups, rote edits, running known commands), `steward:top-reviewer` (highest-stakes gap review, on the operator's request or when a deep-reasoner pass is not enough). The profiles set reasoning effort but no model, so name the model on every call as described in "Model and effort" below.
 3. Briefs are self-contained. A fresh agent holds none of your context: give repo paths (every path prefixed with its repo), fetch-latest-first, branch and base-branch rules, test commands, read-only versus write scope, the report format, and copy every literal (versions, file names, line numbers) out in full from the decision log rather than from memory. Cite the decision-log section headings the brief draws from.
 4. Prose passes the plainlanguage skill before it reaches anyone, along two channels: (a) every reply to the operator, including a `task_complete` summary, (b) every PR body, drafted from the branch's diff against its base as a snapshot of the final state and shown to the operator before any `gh pr create` or `gh pr edit`. The operator's rule is zero em-dashes in both channels; that overrides the plainlanguage skill's softer density guidance. Code comments follow the code's own conventions and are not passed through the skill, as the skill itself says. Prose written for the operator is plain language with no em-dashes; documents written for agents are dense and citation-rich.
 5. Report status without being asked: at every subagent start and finish, and at least once per long turn, in the shape running / finished / blocked / needs a decision.
@@ -25,12 +25,13 @@ Copilot does not resolve the `opus`, `sonnet`, `haiku` and `fable` aliases, and 
 | steward:researcher | Claude Sonnet 5.5 | `low` |
 | steward:writer | Claude Sonnet 5.5 | `medium` |
 | steward:mechanic | Claude Haiku 5.5 | `medium` |
-| steward:top-reviewer | Claude Fable 5.1 | `xhigh` |
+| steward:top-reviewer | Claude Opus 5.5 | `max` |
 
 On every `task` call to a steward profile:
 - Pass `model`: the role's model from the table, copied exactly from the task tool's own list of allowed models. IDs may carry a provider prefix, for example `<provider>/claude-opus-5-5`; use the listed string as it is.
 - Pass `reasoning_effort`: the role's level from the table.
-- Use steward:top-reviewer only when the operator asks for Fable.
+- Use steward:top-reviewer only when the operator asks for the top reviewer or when a steward:deep-reasoner pass is not enough.
+- When the operator asks for Fable by name, call steward:top-reviewer with `model` set to the Claude Fable 5.1 ID from the task tool's list and `reasoning_effort` set to the level the operator names (`xhigh` if none).
 - If Claude Haiku 5.5 is not in the list, run the mechanic on Claude Sonnet 5.5 at `low`. If a role's model is missing altogether, tell the operator and use the nearest Claude model that is listed.
 - If the session-start note lists a profile as bound in `settings.json`, omit both `model` and `reasoning_effort` for that profile; the operator's binding applies.
 - Do not pick a model from another vendor unless the operator asks.

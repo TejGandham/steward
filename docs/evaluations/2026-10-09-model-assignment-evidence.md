@@ -120,3 +120,31 @@ Four panelists responded (pi-seated DeepSeek, Qwen, MiniMax, Ember); GLM and MiM
 | reviewer-fable | 2 remove, 1 repoint to Opus max, 1 keep |
 
 The decision taken from this evidence is recorded in `skills/delegating/routing.md`.
+
+## Re-verification of the Fable claim, 2026-10-11
+All figures read 2026-10-11. One outlet notes Artificial Analysis rescaled its index between September snapshots, so cite these with their read date.
+
+Artificial Analysis, Opus 5.5 versus Fable 5.1:
+| Measure | Opus 5.5 | Fable 5.1 | Source |
+|-|-|-|-|
+| Intelligence Index, xhigh vs xhigh | 56 | 53 | artificialanalysis.ai/models/comparisons/claude-opus-5-5-xhigh-vs-claude-fable-5-1-xhigh |
+| Intelligence Index, max vs max | 58 | 53 | artificialanalysis.ai/models/comparisons/claude-opus-5-5-vs-claude-fable-5-1 |
+| AA-Briefcase, max | 1822 | 1678 | same max page |
+| GDPval-AA, max | 1846 | 1735 | same max page |
+| AutomationBench-AA, max | 70% | 59% | same max page |
+| Terminal-Bench 4.0, max | 60% | 52% | same max page |
+| SciCode, max | 67% | 63% | same max page |
+| Humanity's Last Exam, max | 61% | 59% | same max page |
+| Time to first token, max | 685s | 276s | same max page |
+
+Anthropic's table (anthropic.com/claude-opus-5-5): Opus 5.5 ahead on all nine rows. Terminal-Bench 4.0 66.4 vs 55.8, FrontierCode 54.4 vs 50.3, CursorBench 57.8 vs 51.8, GDPval-AA 1846 vs 1735, AutomationBench 40.0 vs 31.4, HLE with tools 67.7 vs 65.6, Terminal-Bench-Science 58.7 vs 52.6, OSWorld 2.0 81.8 vs 80.7, Chartography with tools 89.0 vs 88.4. Opus results are at max effort except Terminal-Bench, at xhigh.
+
+Caveats:
+- Fable leads at low effort: AA index 46.8 vs 42.3 (modelfatigue.news, reading AA on 2026-10-04).
+- Fable leads 2 of 11 AA per-test scores at xhigh (same source).
+- Anthropic: "In our own use, the gap between Opus 5.5 and Claude Fable 5.1 is narrower than these scores suggest."
+- Nothing tests dense plan or spec review.
+
+Max against xhigh for Opus 5.5: AA index 58 vs 56, cost per index task $5.98 vs $3.46, about 119K output tokens per AA task at max. CodeRabbit: Opus max caught 10 of 13 hard bugs at 52.0% precision, standard 8 of 13 at 66.7%.
+
+Decision: the operator moved the top reviewer to Opus 5.5 at max on 2026-10-11 (steward 0.9.0); see `skills/delegating/routing.md`, section "Top reviewer on Opus 5.5 max (operator decision 2026-10-11)".

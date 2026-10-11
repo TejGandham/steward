@@ -33,7 +33,7 @@ COPILOT_NAMES = {
     "researcher-sonnet-low": "researcher",
     "writer-sonnet-medium": "writer",
     "mechanic-haiku-medium": "mechanic",
-    "reviewer-fable-xhigh": "top-reviewer",
+    "reviewer-opus-max": "top-reviewer",
 }
 
 
@@ -764,7 +764,7 @@ class CopilotSkillTests(unittest.TestCase):
             ("researcher", "Claude Sonnet 5.5", "low"),
             ("writer", "Claude Sonnet 5.5", "medium"),
             ("mechanic", "Claude Haiku 5.5", "medium"),
-            ("top-reviewer", "Claude Fable 5.1", "xhigh"),
+            ("top-reviewer", "Claude Opus 5.5", "max"),
         ):
             self.assertIn("| steward:{} | {} | `{}` |".format(role, model, effort), text)
         self.assertNotIn("family in the profile's name", text)

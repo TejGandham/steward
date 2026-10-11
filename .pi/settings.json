@@ -7,7 +7,7 @@
       "steward.researcher-sonnet-low": { "model": "amorphic/claude-sonnet-5-5" },
       "steward.reviewer-sonnet-high": { "model": "amorphic/claude-sonnet-5-5" },
       "steward.writer-sonnet-medium": { "model": "amorphic/claude-sonnet-5-5" },
-      "steward.reviewer-fable-xhigh": { "model": "amorphic/claude-fable-5-1" }
+      "steward.reviewer-opus-max": { "model": "amorphic/claude-opus-5-5" }
     }
   }
 }
