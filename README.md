@@ -116,10 +116,10 @@ To check the install, ask pi to "list the available subagents". You should see s
 
 The pi package has three parts:
 - `pi/skills/steward-delegating/`: the edict, written for pi. A pi extension adds it to the system prompt of every main session.
-- `pi/agents/`: the seven profiles. pi-subagents loads them as `steward.<name>`, for example `steward.coder-opus-medium`.
+- `pi/agents/`: the seven profiles. pi-subagents loads them as `steward.<name>`, for example `steward.coder`.
 - `pi/extensions/steward/`: the extension that adds the edict and runs the gates. It passes each pi event to `hooks/steward_hook.py`, so both harnesses share one set of rules and tests.
 
-The model delegates with pi-subagents' `subagent` tool, for example `subagent({ agent: "steward.mechanic-haiku-medium", task: "...", async: false })`.
+The model delegates with pi-subagents' `subagent` tool, for example `subagent({ agent: "steward.mechanic", task: "...", async: false })`.
 
 ### Profiles on pi
 
@@ -127,15 +127,19 @@ Each profile pins a full model ID and a thinking level:
 
 | Profile | Model | Thinking |
 |-|-|-|
-| `steward.coder-opus-medium` | `anthropic/claude-opus-5-5` | medium |
-| `steward.deep-reasoner-opus-xhigh` | `anthropic/claude-opus-5-5` | xhigh |
-| `steward.reviewer-sonnet-high` | `anthropic/claude-sonnet-5-5` | high |
-| `steward.researcher-sonnet-low` | `anthropic/claude-sonnet-5-5` | low |
-| `steward.writer-sonnet-medium` | `anthropic/claude-sonnet-5-5` | medium |
-| `steward.mechanic-haiku-medium` | `anthropic/claude-haiku-5-5` | medium |
-| `steward.reviewer-opus-max` | `anthropic/claude-opus-5-5` | max |
+| `steward.coder` | `anthropic/claude-opus-5-5` | medium |
+| `steward.deep-reasoner` | `anthropic/claude-opus-5-5` | xhigh |
+| `steward.reviewer` | `anthropic/claude-sonnet-5-5` | high |
+| `steward.researcher` | `anthropic/claude-sonnet-5-5` | low |
+| `steward.writer` | `anthropic/claude-sonnet-5-5` | medium |
+| `steward.mechanic` | `anthropic/claude-haiku-5-5` | medium |
+| `steward.top-reviewer` | `anthropic/claude-opus-5-5` | max |
 
-If you ask for Fable by name, the edict runs `steward.reviewer-opus-max` with `model: "anthropic/claude-fable-5-1:xhigh"`. The `:xhigh` suffix sets the thinking level; it becomes the level you name, if you name one.
+Version 0.10.0 renamed the pi profiles to role-only names. The old names, such as `steward.coder-opus-medium`, still launch the same profile through pi-subagents aliases, and `steward.reviewer-fable-xhigh` launches `steward.top-reviewer`. Settings are different: pi-subagents reads config such as `subagents.agentOverrides` under the new name only, so rename any override keys you saved under an old name.
+
+A bare `agent: "coder"`, without the `steward.` prefix, now launches `steward.coder` instead of pi-subagents' builtin `worker` agent. pi-subagents lists `coder` as an alias of `worker`, but it matches an agent's own short name before it looks at aliases. To run `worker`, call it by its own name.
+
+If you ask for Fable by name, the edict runs `steward.top-reviewer` with `model: "anthropic/claude-fable-5-1:xhigh"`. The `:xhigh` suffix sets the thinking level; it becomes the level you name, if you name one.
 
 pi needs version 1.1.0 or later for `anthropic/claude-haiku-5-5`, and a custom provider needs its own `claude-haiku-5-5` model entry.
 
@@ -145,11 +149,38 @@ If you reach Claude through another provider, override the model in `~/.pi/agent
 {
   "subagents": {
     "agentOverrides": {
-      "steward.coder-opus-medium": { "model": "openrouter/anthropic/claude-opus-5.5" }
+      "steward.coder": { "model": "openrouter/anthropic/claude-opus-5.5" }
     }
   }
 }
 ```
+
+To run some profiles on other providers today, add overrides to `~/.pi/agent/settings.json`. `agentOverrides` sets a model and thinking level per profile. `agentOverridesByProvider` changes a profile only while the main thread runs on the provider you name. The providers and models below are an example; use any you have credentials for:
+
+```json
+{
+  "subagents": {
+    "agentOverrides": {
+      "steward.coder": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.researcher": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.writer": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.mechanic": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "low" },
+      "steward.reviewer": { "model": "amorphic/claude-sonnet-5-5", "thinking": "high" },
+      "steward.deep-reasoner": { "model": "inherit", "thinking": "xhigh" },
+      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "max" }
+    },
+    "agentOverridesByProvider": {
+      "amorphic": {
+        "steward.reviewer": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" }
+      }
+    }
+  }
+}
+```
+
+Here `inherit` makes the deep-reasoner run on whatever model the main thread uses, and the last block swaps the reviewer to a different model family when the main thread is on `amorphic`. Then run `/reload`, and `/subagents-models` to confirm what each profile now runs on. Use the role-only keys: overrides saved under an old name, such as `steward.coder-opus-medium`, do not apply.
+
+A repository's committed `.pi/settings.json` overrides your user settings field by field. This repo's own file pins every profile to `amorphic/claude-*`, so inside it the `model` values above lose, and `/subagents-models` shows what actually applies. If you decline project trust, pi-subagents 0.77.0 and later ignores that file.
 
 Subagents see your `AGENTS.md` files and your skills catalog. A foreground subagent does not load your pi extensions; a background one does. Steward's gates never apply inside a subagent.
 

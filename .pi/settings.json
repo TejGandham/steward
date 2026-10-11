@@ -1,13 +1,13 @@
 {
   "subagents": {
     "agentOverrides": {
-      "steward.coder-opus-medium": { "model": "amorphic/claude-opus-5-5" },
-      "steward.deep-reasoner-opus-xhigh": { "model": "amorphic/claude-opus-5-5" },
-      "steward.mechanic-haiku-medium": { "model": "amorphic/claude-haiku-5-5" },
-      "steward.researcher-sonnet-low": { "model": "amorphic/claude-sonnet-5-5" },
-      "steward.reviewer-sonnet-high": { "model": "amorphic/claude-sonnet-5-5" },
-      "steward.writer-sonnet-medium": { "model": "amorphic/claude-sonnet-5-5" },
-      "steward.reviewer-opus-max": { "model": "amorphic/claude-opus-5-5" }
+      "steward.coder": { "model": "amorphic/claude-opus-5-5" },
+      "steward.deep-reasoner": { "model": "amorphic/claude-opus-5-5" },
+      "steward.mechanic": { "model": "amorphic/claude-haiku-5-5" },
+      "steward.researcher": { "model": "amorphic/claude-sonnet-5-5" },
+      "steward.reviewer": { "model": "amorphic/claude-sonnet-5-5" },
+      "steward.writer": { "model": "amorphic/claude-sonnet-5-5" },
+      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5" }
     }
   }
 }

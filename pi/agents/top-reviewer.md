@@ -1,7 +1,8 @@
 ---
-name: reviewer-opus-max
+name: top-reviewer
 package: steward
-description: Highest-stakes review where a miss is costly and the material is dense, gap analysis of execution plans and specs, cross-repo sequencing review, adversarial checks of decision records. Use only when the operator asks for the top reviewer (or for Fable) or when a steward.deep-reasoner-opus-xhigh pass is not enough. Read-only by default.
+aliases: steward.reviewer-opus-max, steward.reviewer-fable-xhigh
+description: Highest-stakes review where a miss is costly and the material is dense, gap analysis of execution plans and specs, cross-repo sequencing review, adversarial checks of decision records. Use only when the operator asks for the top reviewer (or for Fable) or when a steward.deep-reasoner pass is not enough. Read-only by default.
 model: anthropic/claude-opus-5-5
 thinking: max
 systemPromptMode: append

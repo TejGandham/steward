@@ -100,7 +100,7 @@ test("injects the pi edict as the steward section", async () => {
 	assert.equal(await fire("before_agent_start", event), undefined);
 	const text = event.systemPromptOptions.sections.steward;
 	assert.match(text, /steward-delegating/);
-	assert.match(text, /steward\.coder-opus-medium/);
+	assert.match(text, /steward\.coder(?![\w-])/);
 	assert.doesNotMatch(text, /STEWARD WARNING: the pi-subagents extension is not loaded/);
 	assert.doesNotMatch(text, /<STEWARD>/);
 });
@@ -128,7 +128,7 @@ test("second direct write is blocked until a subagent launch", async () => {
 	const blocked = await fire("tool_call", write());
 	assert.equal(blocked.block, true);
 	assert.match(blocked.reason, /direct edit #2/);
-	assert.match(blocked.reason, /steward\.coder-opus-medium/);
+	assert.match(blocked.reason, /steward\.coder(?![\w-])/);
 
 	// a management call is not a delegation
 	await fire("tool_result", subagentResult({ action: "list" }));
@@ -138,7 +138,7 @@ test("second direct write is blocked until a subagent launch", async () => {
 	await fire("tool_result", subagentResult({ agent: "steward.no-such-profile", task: "x" }, true));
 	assert.equal((await fire("tool_call", write())).block, true);
 
-	await fire("tool_result", subagentResult({ agent: "steward.mechanic-haiku-medium", task: "x" }));
+	await fire("tool_result", subagentResult({ agent: "steward.mechanic", task: "x" }));
 	assert.equal(await fire("tool_call", write()), undefined);
 	assert.equal((await fire("tool_call", write())).block, true);
 
@@ -255,7 +255,7 @@ test("runs that skip before_agent_start get the edict in their messages", async 
 	const result = await fire("context", { type: "context", messages });
 	assert.equal(result.messages.length, 2);
 	assert.equal(result.messages[1].role, "custom");
-	assert.match(result.messages[1].content, /steward\.coder-opus-medium/);
+	assert.match(result.messages[1].content, /steward\.coder(?![\w-])/);
 	assert.equal(messages.length, 1);
 
 	// a prompted run already has it in the system prompt
@@ -372,7 +372,7 @@ test("fails open when python cannot start", async () => {
 });
 
 test("launchesWork", () => {
-	assert.equal(launchesWork({ agent: "steward.coder-opus-medium", task: "x" }), true);
+	assert.equal(launchesWork({ agent: "steward.coder", task: "x" }), true);
 	assert.equal(launchesWork({ workflow: true }), true);
 	assert.equal(launchesWork({ workflow: "review", args: {} }), true);
 	assert.equal(launchesWork({ action: "list" }), false);
