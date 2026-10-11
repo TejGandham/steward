@@ -304,8 +304,24 @@ class PiAgentProfileTests(unittest.TestCase):
             with self.subTest(profile=new):
                 fields, _ = _frontmatter(PI_AGENTS / (new + ".md"))
                 aliases = [a.strip() for a in fields.get("aliases", "").split(",") if a.strip()]
-                for alias in expected:
-                    self.assertIn(alias, aliases)
+                self.assertEqual(aliases, expected)
+
+    def test_edict_defaults_match_profiles(self):
+        text = PI_SKILL.read_text(encoding="utf-8")
+        rule2 = next(line for line in text.splitlines() if line.startswith("2. "))
+        stated = {
+            m.group(1): (m.group(2).lower(), m.group(3))
+            for m in re.finditer(
+                r"`steward\.([\w-]+)` \([^)]*?; (\w+) [\d.]+, (?:thinking )?`(\w+)`\)",
+                rule2,
+            )
+        }
+        self.assertEqual(sorted(stated), sorted(PI_NAMES.values()))
+        for name, (model_word, thinking) in stated.items():
+            with self.subTest(profile=name):
+                fields, _ = _frontmatter(PI_AGENTS / (name + ".md"))
+                self.assertEqual(fields["model"], self.MODEL_MAP[model_word])
+                self.assertEqual(fields["thinking"], thinking)
 
     def test_profile_names_carry_no_model(self):
         for path in PI_AGENTS.glob("*.md"):

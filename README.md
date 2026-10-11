@@ -137,6 +137,8 @@ Each profile pins a full model ID and a thinking level:
 
 Version 0.10.0 renamed the pi profiles to role-only names. The old names, such as `steward.coder-opus-medium`, still launch the same profile through pi-subagents aliases, and `steward.reviewer-fable-xhigh` launches `steward.top-reviewer`. Settings are different: pi-subagents reads config such as `subagents.agentOverrides` under the new name only, so rename any override keys you saved under an old name.
 
+A bare `agent: "coder"`, without the `steward.` prefix, now launches `steward.coder` instead of pi-subagents' builtin `worker` agent. pi-subagents lists `coder` as an alias of `worker`, but it matches an agent's own short name before it looks at aliases. To run `worker`, call it by its own name.
+
 If you ask for Fable by name, the edict runs `steward.top-reviewer` with `model: "anthropic/claude-fable-5-1:xhigh"`. The `:xhigh` suffix sets the thinking level; it becomes the level you name, if you name one.
 
 pi needs version 1.1.0 or later for `anthropic/claude-haiku-5-5`, and a custom provider needs its own `claude-haiku-5-5` model entry.
