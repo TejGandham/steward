@@ -153,6 +153,33 @@ If you reach Claude through another provider, override the model in `~/.pi/agent
 }
 ```
 
+To run some profiles on other providers today, add overrides to `~/.pi/agent/settings.json`. `agentOverrides` sets a model and thinking level per profile. `agentOverridesByProvider` changes a profile only while the main thread runs on the provider you name. The providers and models below are an example; use any you have credentials for:
+
+```json
+{
+  "subagents": {
+    "agentOverrides": {
+      "steward.coder": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.researcher": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.writer": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.mechanic": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "low" },
+      "steward.reviewer": { "model": "amorphic/claude-sonnet-5-5", "thinking": "high" },
+      "steward.deep-reasoner": { "model": "inherit", "thinking": "xhigh" },
+      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "max" }
+    },
+    "agentOverridesByProvider": {
+      "amorphic": {
+        "steward.reviewer": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" }
+      }
+    }
+  }
+}
+```
+
+Here `inherit` makes the deep-reasoner run on whatever model the main thread uses, and the last block swaps the reviewer to a different model family when the main thread is on `amorphic`. Then run `/reload`, and `/subagents-models` to confirm what each profile now runs on. Use the role-only keys: overrides saved under an old name, such as `steward.coder-opus-medium`, do not apply.
+
+A repository's committed `.pi/settings.json` overrides your user settings field by field. This repo's own file pins every profile to `amorphic/claude-*`, so inside it the `model` values above lose, and `/subagents-models` shows what actually applies. If you decline project trust, pi-subagents 0.77.0 and later ignores that file.
+
 Subagents see your `AGENTS.md` files and your skills catalog. A foreground subagent does not load your pi extensions; a background one does. Steward's gates never apply inside a subagent.
 
 ### Gates on pi

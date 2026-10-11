@@ -1,6 +1,6 @@
 # Proposal: a model plan for steward on pi
 
-Status: proposed, 2026-10-09. Operator decisions recorded the same day; nothing is built yet.
+Status: proposed, 2026-10-09; refreshed 2026-10-11. Operator decisions are recorded below (2026-10-09 and 2026-10-11). Phase 1 (role-only pi names with aliases) was built in steward 0.10.0 (`f9e319a`) and is not yet checked in a live pi session. Phases 0 and 2 to 5 are unchanged: Phase 0 is a settings recipe (now in the README "Profiles on pi" section), Phases 2 to 5 are not built.
 
 ## Summary
 
@@ -15,7 +15,7 @@ Recommendation: steward builds no model router and owns no main-thread setting. 
 
 Fallback stays an explicit relaunch by the main thread. pi-subagents removed same-launch fallback on purpose and says a different model needs a later explicit launch. Virtual-model failover inside a child is deferred, because foreground children cannot resolve a virtual model that the parent registered. Claude Code, Copilot and Codex behavior does not change.
 
-Path abbreviations used below: `PIDOCS` is `/home/dev/.pi/agent/install/releases/1.1.0/node_modules/@earendil-works/pi-coding-agent/docs`; `PIDIST` is the sibling `dist/core`; `PS` is `/home/dev/.pi/agent/npm/node_modules/pi-subagents` (0.76.1). Repo paths are relative to the steward repo at `a2ab9eb`.
+Path abbreviations used below: `PIDOCS` is `/home/dev/.pi/agent/install/releases/1.1.0/node_modules/@earendil-works/pi-coding-agent/docs`; `PIDIST` is the sibling `dist/core`; `PS` is `/home/dev/.pi/agent/npm/node_modules/pi-subagents` (0.77.0). Repo paths are relative to the steward repo at `f9e319a` (0.10.0, branch `pi-role-names`, on main `a8bb20c`); citations were re-verified against that tree, pi 1.1.0 and pi-subagents 0.77.0 on 2026-10-11.
 
 ## Build versus reuse
 
@@ -27,9 +27,9 @@ Path abbreviations used below: `PIDOCS` is `/home/dev/.pi/agent/install/releases
 |Policy limits|`subagents.modelScope` (policy only, `PS/docs/models.md:191-221`), `subagents.maxThinking` (`PS/docs/models.md:125-138`)|The check reads both and reports conflicts. It never writes them|
 |Live probe of each model|`/subagents-check-profile <name>`: registry lookup plus a one-shot `pi -p --model X --no-tools` probe with a 45 s timeout (`PS/docs/models.md:251`, `PS/src/profiles/profiles.js:226-234,501-525`)|`apply` also writes a `steward` profile file so that probe can run on the plan|
 |Live mapping|`/subagents-models` (`PS/docs/models.md:167-176`)|`/steward-models check` adds plan versus effective binding, sources, fallbacks, warnings|
-|Fallback after a provider error|None. `fallbackModels` was removed in 0.68.0 (`PS/CHANGELOG.md:404`) and is rejected by the parsers (`PS/src/agents/agents.js:736-737`, `PS/src/profiles/profiles.js:66-67`)|Rendered relaunch model plus an edict rule|
+|Fallback after a provider error|None. `fallbackModels` was removed in 0.68.0 (`PS/CHANGELOG.md:471`) and is rejected by the parsers (`PS/src/agents/agents.js:760-761,1937-1938`, `PS/src/profiles/profiles.js:66-67`)|Rendered relaunch model plus an edict rule|
 |Escalation after a failed check|None|Rendered escalation model plus an edict rule|
-|Concurrency|`parallel.concurrency` (default 4), `globalConcurrencyLimit` (default 20), `maxActiveAsyncRunsPerSession` (unset), all in `~/.pi/agent/extensions/subagent/config.json` and none per provider (`PS/docs/configuration.md:373-381,405-411,447-456`)|Per-provider `maxConcurrent` in the plan; the check warns; the edict states the cap|
+|Concurrency|`parallel.concurrency` (default 4), `globalConcurrencyLimit` (default 20), `maxActiveAsyncRunsPerSession` (unset), all in `~/.pi/agent/extensions/subagent/config.json` and none per provider (`PS/docs/configuration.md:422-430,454-474,494-505`)|Per-provider `maxConcurrent` in the plan; the check warns; the edict states the cap|
 
 ### Why a steward plan file instead of only validating pi-subagents settings
 
@@ -37,8 +37,8 @@ Validating hand-written `subagents.agentOverrides` would be thinner by one file,
 
 - **Fallbacks and escalations have nowhere else to live.** pi-subagents throws on `fallbackModels` in settings and profiles (references above), and it has no escalation field.
 - **pi-subagents profile switches erase the mapping.** `/subagents-load-profile` replaces the whole `agentOverrides` object in user settings (`PS/src/profiles/profiles.js:359-386`, "A profile owns the complete agent mapping"). The plan file survives that, and `apply` restores the `steward.*` keys.
-- **Role keys outlive runtime names.** The plan says `coder`. `apply` maps that to whatever runtime name the profile has and migrates stale keys. pi-subagents config keys must use canonical names (`PS/docs/agents.md:355`), so a rename otherwise silently orphans overrides.
-- **One shape across ports.** Codex already keeps per-role model, effort and a `retry` (escalation) entry in `codex/skills/delegating/profiles.json:7,41`.
+- **Role keys outlive runtime names.** The plan says `coder`. `apply` maps that to whatever runtime name the profile has and migrates stale keys. pi-subagents config keys must use canonical names (`PS/docs/agents.md:417`), so a rename otherwise silently orphans overrides.
+- **One shape across ports.** Codex already keeps per-role model, effort, a `retry` (escalation) entry (`codex/skills/delegating/profiles.json:7,45`) and, since 0.8.1, a `fallback` entry on deep-reasoner and top-reviewer (`profiles.json:17,55`, `gpt-6.1-sol` at `xhigh`).
 
 Steward does not own the main thread. Pi saves the startup model and thinking level from its own UI (`PIDOCS/models.md:29-31`) and restores a resumed session's model by design (`PIDOCS/models.md:35`). A second writer would only conflict with it.
 
@@ -81,12 +81,12 @@ Location: `get_config_dir(env)/steward/model-plan.json`, the same directory as t
       "thinking": "xhigh",
       "fallback": ["amorphic/claude-opus-5-5", "openai-codex/gpt-6.1-sol"]
     },
-    "top-reviewer": { "model": "amorphic/claude-fable-5-1", "thinking": "xhigh" }
+    "top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "max" }
   }
 }
 ```
 
-What this does: coder, researcher, writer and mechanic run on Flash through Ollama Cloud and fall back to the same model on Fireworks. Thinking is `high`, except mechanic on `low`, never `off` (see the Flash thinking section). Deep-reasoner runs on whatever the main thread runs (`inherit`), at `xhigh` where the model supports it. `main.models` and `main.thinking` are only what the check compares the session against; steward never sets the main thread. The reviewer is never DeepSeek, and it is never the main thread's family either: Sonnet when the main thread is Sol, Sol when the main thread is Opus on `amorphic`. Top-reviewer stays on Fable.
+What this does: coder, researcher, writer and mechanic run on Flash through Ollama Cloud and fall back to the same model on Fireworks. Thinking is `high`, except mechanic on `low`, never `off` (see the Flash thinking section). Deep-reasoner runs on whatever the main thread runs (`inherit`), at `xhigh` where the model supports it. `main.models` and `main.thinking` are only what the check compares the session against; steward never sets the main thread. The reviewer is never DeepSeek, and it is never the main thread's family either: Sonnet when the main thread is Sol, Sol when the main thread is Opus on `amorphic`. Top-reviewer is Opus 5.5 at `max` (operator decision 2026-10-11; it was Fable 5.1 at `xhigh` when this plan was written). `~/.pi/agent/models.json` declares `max` for `amorphic/claude-opus-5-5` (`thinkingLevelMap` `xhigh` and `max`, `maxTokens` 128000), so pi does not clamp it. A request for Fable by name runs the top reviewer with per-call `model: "anthropic/claude-fable-5-1:xhigh"`; `amorphic/claude-fable-5-1` also declares `max`.
 
 The "everything on Flash" variant is the `"*"` entry alone, with no other roles listed. It is allowed but is not the operator's choice. The check and the edict then warn that deep-reasoner and top-reviewer are below the judgment floor and that the reviewer shares the coder's family, and the edict tells the main thread to keep judgment work inline.
 
@@ -119,15 +119,15 @@ Rules the check enforces:
 
 Decision 2026-10-09: a per-repo override is a v1 requirement. A repo must be able to pin steward profiles away from third-party providers, for example to keep everything on Anthropic or OpenAI.
 
-Shape: a project file `<repo>/.pi/steward-model-plan.json`, in the same schema as the user plan, read only when the project is trusted (`ctx.isProjectTrusted()`, `PIDIST/extensions/types.d.ts:236`). Reasons for a separate file over a `steward` block in `.pi/settings.json`: pi-subagents and pi own that file's schema, and an unknown top-level block risks being rejected or rewritten by them; this repo already commits `.pi/settings.json` for a different purpose; a plan file keeps fallbacks, escalations and provider lists, which settings cannot hold.
+Shape: a project file `<repo>/.pi/steward-model-plan.json`, in the same schema as the user plan, read only when the project is trusted (`ctx.isProjectTrusted()`, `PIDIST/extensions/types.d.ts:238`). Reasons for a separate file over a `steward` block in `.pi/settings.json`: pi-subagents and pi own that file's schema, and an unknown top-level block risks being rejected or rewritten by them; this repo already commits `.pi/settings.json` for a different purpose; a plan file keeps fallbacks, escalations and provider lists, which settings cannot hold.
 
 Rules:
 - **Project wins over user**, field by field, role by role, the same merge as `"*"`. The check names the winning file for every binding.
 - **`allowProviders` and `denyProviders`** (lists of provider ids, project file only). The check errors when any bound model, fallback or escalation target sits on a denied provider or outside a non-empty allow list, and `apply` skips those candidates. A repo with `"allowProviders": ["amorphic", "anthropic"]` can never see a Flash binding.
-- **pi-subagents `.pi/settings.json` overrides still apply** after the plan compiles, field by field (`PS/src/agents/agents.js:1347-1359`). `apply` writes user settings only and never writes into a repo.
+- **pi-subagents `.pi/settings.json` overrides still apply** after the plan compiles, field by field (`PS/src/agents/agents.js:1350-1359`), but only in a trusted project. Since pi-subagents 0.77.0, a session that declined project trust ignores project subagent settings, project agents and chains, project-scoped packages and `modelScope`, and its default scope behaves as `user` (`PS/CHANGELOG.md:41-42`, `PS/docs/agents.md:34`, `PS/src/agents/agents.js:2396,2669`). The effective-binding computation in Phase 2 must mirror that: with `project_trusted` false, drop the project settings layer as well as `.pi/steward-model-plan.json`. `apply` writes user settings only and never writes into a repo.
 - Phase 2 builds the merge and enforcement; the tests are listed there.
 
-Known instance: this repo's committed `.pi/settings.json` pins all seven `steward.*` profiles to `amorphic/claude-*` for work inside this repo. It overrides the `model` field of any user plan here. Its keys are old profile names and must move to the role-only names in 0.9.0 (Phase 1).
+Known instance: this repo's committed `.pi/settings.json` pins all seven `steward.*` profiles to `amorphic/claude-*` for work inside this repo. It overrides the `model` field of any user plan here, in a trusted project only (see the trust rule above). Its keys moved to the role-only names in 0.10.0 (Phase 1, `.pi/settings.json:4-10`); `steward.top-reviewer` is pinned to `amorphic/claude-opus-5-5`.
 
 ## Main thread
 
@@ -144,24 +144,24 @@ Known instance: this repo's committed `.pi/settings.json` pins all seven `stewar
 |-|-|-|
 |A. Static availability at `apply`|Bind the first candidate that is in the registry and whose provider has credentials (`modelRegistry.find`, `hasConfiguredAuth`, `PIDIST/model-registry.d.ts:27-32`); skip providers with `enabled: false`|Build, Phase 3|
 |B. Re-check at session start|If the bound model is no longer available, the block's row says to pass the next available candidate as `model` on every launch of that profile until `apply` is rerun|Build, Phase 2|
-|C. Relaunch rule in the edict|After a provider error, one explicit relaunch with the rendered model. pi-subagents prescribes this itself: "To try another model, the parent or operator must issue a later explicit launch" (`PS/docs/models.md:106`). Per-call `model` with a `:level` suffix outranks every binding (`PS/docs/models.md:14`, `PS/docs/tool-reference.md:78`)|Build, Phase 2|
+|C. Relaunch rule in the edict|After a provider error, one explicit relaunch with the rendered model. pi-subagents prescribes this itself: "To try another model, the parent or operator must issue a later explicit launch" (`PS/docs/models.md:106`). Per-call `model` with a `:level` suffix outranks every binding (`PS/docs/models.md:14`, `PS/docs/tool-reference.md:83`)|Build, Phase 2|
 |D. Rewrite `subagent` input in `tool_call`|The extension injects `model` (input mutation is allowed, `PIDOCS/extensions.md:105`)|Reject. Workflow scripts carry agent names in the script, not the tool input. Per-call models count as explicit, so an enforced `modelScope` aborts the run instead of warning (`PS/docs/models.md:214`). The transcript would show a model the main thread did not choose|
 |E. Virtual model per role that switches on `retry`|`pi.registerVirtualModel` with `request.failed` (`PIDOCS/virtual-models.md:65-86`)|Defer to Phase 5. Explained below|
-|F. pi-subagents `fallbackModels`|Removed in 0.68.0 (`PS/CHANGELOG.md:404`)|Not available|
+|F. pi-subagents `fallbackModels`|Removed in 0.68.0 (`PS/CHANGELOG.md:471`)|Not available|
 
 Why E is deferred. Checked in the pi-subagents source:
 
-- **Foreground children cannot see the parent's virtual models.** A foreground child copies the parent's providers only (`inheritParentProviders`, `PS/src/runs/shared/child-session.js:45-75,401-404`). It registers virtual models only from extensions the child itself loads (`child-session.js:229-252`). Foreground children load no ambient extensions (`PS/docs/agents.md:360,457`). So a steward-registered virtual model resolves in the parent at launch time and then fails inside the child, unless every profile lists a router extension in `extensions` or `subagentOnlyExtensions`.
-- **That router cannot be the steward extension file.** Its child guard checks only `PI_SUBAGENT_CHILD` (`pi/extensions/steward/index.ts:159`). Only the background runner sets that variable (`PS/src/runs/background/subagent-runner.js:87`), so inside an in-process foreground child the edict and gates would switch on. The other route, `registerRequiredChildExtensions`, needs pi-subagents to be a Node dependency of steward, which a separately installed package is not (`PS/docs/extension-api.md:191`).
+- **Foreground children cannot see the parent's virtual models.** A foreground child copies the parent's providers only (`inheritParentProviders`, `PS/src/runs/shared/child-session.js:45-75,401-404`). It registers virtual models only from extensions the child itself loads (`child-session.js:229-252`). Foreground children load no ambient extensions (`PS/docs/agents.md:422,520`). So a steward-registered virtual model resolves in the parent at launch time and then fails inside the child, unless every profile lists a router extension in `extensions` or `subagentOnlyExtensions`.
+- **That router cannot be the steward extension file.** Its child guard checks only `PI_SUBAGENT_CHILD` (`pi/extensions/steward/index.ts:159`). Only the background runner sets that variable (`PS/src/runs/background/subagent-runner.js:87`), so inside an in-process foreground child the edict and gates would switch on. The other route, `registerRequiredChildExtensions`, needs pi-subagents to be a Node dependency of steward, which a separately installed package is not (`PS/docs/agents.md:449`, `PS/docs/extension-api.md:205`).
 - **It would not catch the failures that matter here.** Pi retries only after an error (`retry.*`, `PIDOCS/settings.md:125-131`). A 30-40 s first-token stall like Ollama Cloud's is slow, not failed.
-- **Changing models mid-task has costs.** It drops the prompt cache, can change model family halfway through a task, and depends on pi-subagents' response-model verification handling `virtualModelId` (`PS/src/runs/foreground/execution.js:1037`), which is unverified.
+- **Changing models mid-task has costs.** It drops the prompt cache, can change model family halfway through a task, and depends on pi-subagents' response-model verification handling a virtual selection. The 0.77.0 source does handle it: it compares the child's virtual selection exactly with the launch candidate and says `modelResponseAliases` does not apply (`PS/src/runs/shared/model-resolution.js:7-15`, called at `PS/src/runs/foreground/execution.js:1040`). The earlier "unverified" no longer holds for the source; no live run has exercised it.
 - **The evidence for routers is weak.** Routers often fail to beat the single best model (Arize, LLMRouterBench).
 
 Error versus failed check: a provider error (HTTP 429, 5xx, authentication, timeout, empty response, context overflow) means "same tier, other provider", so use the fallback. A failed verifiable check means "stronger model", so use the escalation. The edict keeps the two apart.
 
 ## Profile names on pi
 
-Decision: role-only canonical names, with the old names as aliases. This matches the Copilot decision of 2026-10-09 ("A role-and-effort name would be wrong whenever a machine binds a model whose effort differs", `docs/roadmap/copilot-port.md:216-221`) and the Codex names (`docs/roadmap/codex-port.md`, Profiles). Under a mixed plan `steward.coder-opus-medium` would run DeepSeek at `high`, and the main thread reads that name.
+Decision: role-only canonical names, with the old names as aliases. Built in 0.10.0 (see Phase 1). This matches the Copilot decision of 2026-10-09 ("A role-and-effort name would be wrong whenever a machine binds a model whose effort differs", `docs/roadmap/copilot-port.md:216-221`) and the Codex names (`docs/roadmap/codex-port.md`, Profiles). Under a mixed plan `steward.coder-opus-medium` would run DeepSeek at `high`, and the main thread reads that name.
 
 |Old runtime name|New canonical name|Alias kept|
 |-|-|-|
@@ -171,31 +171,31 @@ Decision: role-only canonical names, with the old names as aliases. This matches
 |`steward.researcher-sonnet-low`|`steward.researcher`|`steward.researcher-sonnet-low`|
 |`steward.writer-sonnet-medium`|`steward.writer`|`steward.writer-sonnet-medium`|
 |`steward.mechanic-haiku-medium`|`steward.mechanic`|`steward.mechanic-haiku-medium`|
-|`steward.reviewer-fable-xhigh`|`steward.top-reviewer`|`steward.reviewer-fable-xhigh`|
+|`steward.reviewer-opus-max` (was `steward.reviewer-fable-xhigh` until 0.9.0)|`steward.top-reviewer`|both `steward.reviewer-opus-max` and `steward.reviewer-fable-xhigh`|
 
 How it works in pi-subagents:
 
-- **Aliases are taken verbatim**, with no package prefix (`PS/src/agents/agents.js:406-410,1903`). Resolution tries canonical names first, then local names, then aliases (`agents.js:420-448`). `subagent({ agent: "steward.coder-opus-medium" })` in `~/AGENTS.md:21`, `~/.pi/agent/AGENTS.md:21`, old briefs and saved workflows keeps working.
-- **Config keys do not follow aliases.** "Runtime status, persistence, and config still use the canonical name" (`PS/docs/agents.md:355`). An existing `agentOverrides["steward.coder-opus-medium"]` stops applying silently. The README entry (`README.md:138-148`) and this repo's `.pi/settings.json` both use the old keys. The check flags stale keys, and `apply` moves them.
-- **Bare names change meaning slightly.** Bare `coder` now resolves to `steward.coder` by local name before pi-subagents' builtin `worker` alias `coder` (`agents.js:431-438`; alias added in 0.39.0, `PS/CHANGELOG.md:1540`). The edict always uses the `steward.` prefix, so steward's own calls are unaffected.
-- **Frontmatter models stay Anthropic** (`pi/agents/*.md:5-6`). That is the default when no plan or override exists, so an install without a plan behaves exactly as it does today.
+- **Aliases are taken verbatim**, with no package prefix (`PS/src/agents/agents.js:431-433,1930`). Resolution tries canonical names first, then local names, then aliases (`agents.js:444-468`). `subagent({ agent: "steward.coder-opus-medium" })` in `~/AGENTS.md:21`, `~/.pi/agent/AGENTS.md:21`, old briefs and saved workflows keeps working.
+- **Config keys do not follow aliases.** "Runtime status, persistence, and config still use the canonical name" (`PS/docs/agents.md:417`). An existing `agentOverrides["steward.coder-opus-medium"]` stops applying silently. The README and this repo's `.pi/settings.json` used the old keys; both moved to the new keys in 0.10.0 (`README.md:138-152`, `.pi/settings.json:4-10`). A user's own `~/.pi/agent/settings.json` is not migrated by 0.10.0. The Phase 2 check flags stale keys, and `apply` moves them.
+- **Bare names change meaning slightly.** Bare `coder` now resolves to `steward.coder` by local name before pi-subagents' builtin `worker` alias `coder` (`agents.js:455-468`; alias added in 0.39.0, `PS/CHANGELOG.md:1607`). The edict always uses the `steward.` prefix, so steward's own calls are unaffected.
+- **Frontmatter models stay Anthropic** (`pi/agents/*.md:6-7`). That is the default when no plan or override exists, so an install without a plan behaves exactly as it does today.
 - **Claude Code keeps its names.** There the frontmatter pins Claude models, so the names stay true.
 
 ## Edict changes
 
 ### Static text in `pi/skills/steward-delegating/SKILL.md`
 
-- **Rule 2** (`SKILL.md:10`) today says each profile "pins its model and thinking level" and forbids per-call `model`. New text: pick the profile by task; the model plan decides model and thinking; the "Model plan" block below shows what each profile runs on. Pass `model` only in three cases: to relaunch after a provider error, to escalate after a failed check, or when the operator asks. In each case copy the exact string from the block.
-- **Routing table** (`SKILL.md:25-38`): role-only names. "a coordinator plus sonnet workers" becomes "a coordinator plus cheap workers".
+- **Rule 2** (`SKILL.md:10`). 0.10.0 changed it to list each profile's default model and thinking inline, since the names no longer carry them; it still forbids per-call `model` except for Fable by name. Phase 2 text to add: pick the profile by task; the model plan decides model and thinking; the "Model plan" block below shows what each profile runs on. Pass `model` only in three cases: to relaunch after a provider error, to escalate after a failed check, or when the operator asks. In each case copy the exact string from the block.
+- **Routing table** (`SKILL.md:25-38`): role-only names shipped in 0.10.0. Still to change: "a coordinator plus sonnet workers" becomes "a coordinator plus cheap workers".
 - **"Keep it inline" section**: add "the only profile for the task is below the judgment floor in the Model plan block".
-- **"How to call"**: the example becomes `subagent({ agent: "steward.mechanic", ... })`.
+- **"How to call"**: the single-child example already uses `steward.mechanic` (0.10.0). pi-subagents 0.77.0 adds a built-in `parallel` workflow, `subagent({ workflow: "parallel", args: { tasks: [{ agent, task }] } })` (`PS/docs/workflows.md:111,116`; the `tasks` form without scripts is `PS/docs/configuration.md:145`). It runs independent children in one batch with no script and no `async: true` ceremony, so Phase 2 can replace the edict's "several children" bullet (a ```` ```js workflow ```` block with `runs.all`) with it for independent fanout. It takes only `{ agent, task }` per child (see Could not confirm), so a per-child relaunch `model` still needs a single `subagent` call or a script. Keep the script form for dependent steps.
 - **New "Guardrails" section** (static):
 
 |Guardrail|Edict wording, short|Evidence|
 |-|-|-|
 |Judgment stays above the floor|Architecture, plans, security review, and final synthesis go only to a profile marked judgment-grade in the block; if none is, keep the work on the main thread|Delegation is reliable only on the two strongest models (about 0.85) and unusable on the fast tier (about 0.42-0.45) (Writer, arXiv 2607.06906). Performance is limited by the planner, not the executor (arXiv 2601.11327)|
 |Cheap models get bounded tasks with a check|A profile below the floor gets a task with a verifiable done-condition: tests, types, lint, or a command whose output proves it|Delegation contract: objective, schema, tools, budget, boundary, done-condition (Zorost). Briefs need objective, output format, tools, boundaries (Anthropic multi-agent research system)|
-|Escalate on a failed check|One failed check leads to one relaunch with the escalation model; a second failure goes to the main thread or `steward.deep-reasoner`|Escalation after repeated failure, revert when cheap output gets re-tasked (opencode-subagent-router). Codex `retry` entries (`codex/skills/delegating/profiles.json:7,41`)|
+|Escalate on a failed check|One failed check leads to one relaunch with the escalation model; a second failure goes to the main thread or `steward.deep-reasoner`|Escalation after repeated failure, revert when cheap output gets re-tasked (opencode-subagent-router). Codex `retry` and `fallback` entries (`codex/skills/delegating/profiles.json:7,17,45,55`)|
 |Fallback is not escalation|A provider error leads to one relaunch with the fallback model, never the same model twice on the same error|pi-subagents: one model per launch, errors are returned (`PS/docs/models.md:18,106`)|
 |Cross-family review|Review a child's output with a profile whose family differs from the author's; the block shows families|A reviewer from a different family on purpose (nkapila.me opencode config); Copilot's rubber-duck "complementary model strategy" (`docs/roadmap/copilot-port.md:214`)|
 |Respect provider caps|Never run more children at once on a provider than its stated cap|Ollama Cloud concurrency was the real limit (nkapila.me; operator: Pro 3, Max 10)|
@@ -225,7 +225,7 @@ With no plan file, the block still lists the effective bindings from settings an
 Split of work, following the existing architecture where every decision is in `hooks/steward_hook.py` and the extension only translates (`pi/extensions/steward/index.ts:1-12`):
 
 - **The extension gathers registry facts** and adds them to the `session-start` payload, which today carries only `session_id` (`index.ts:200-210`). The facts are: main model and thinking level; available models (`getAvailable()`), each with provider, id, supported thinking levels, `maxTokens` and `api`; and `project_trusted`. For supported levels it uses `getSupportedThinkingLevels` from `@earendil-works/pi-ai` (`.../pi-ai/dist/models.d.ts:262`) if the extension can import it; otherwise it reads `reasoning` and `thinkingLevelMap`, where `null` marks a level unsupported. The `check` command also sends `getAll()` with auth flags, so it can tell "not in the catalog" from "no credentials".
-- **A new `hooks/model_plan.py`** does everything else, imported only for harness `pi`. It parses the plan, merges `"*"`, resolves candidates, and computes effective bindings from user and trusted-project settings using the documented precedence: per-run, then provider-scoped role override, then `agentOverrides`, then frontmatter, then `subagents.defaultModel`, then parent (`PS/docs/models.md:14`). The user layer comes first and the project layer second, each with its provider map merged in (`PS/src/agents/agents.js:1046-1056,1347-1359`). It also renders the block and builds the `apply` patch.
+- **A new `hooks/model_plan.py`** does everything else, imported only for harness `pi`. It parses the plan, merges `"*"`, resolves candidates, and computes effective bindings from user and trusted-project settings using the documented precedence: per-run, then provider-scoped role override, then `agentOverrides`, then frontmatter, then `subagents.defaultModel`, then parent (`PS/docs/models.md:14`). The user layer comes first and the project layer second, each with its provider map merged in (`PS/src/agents/agents.js:1031-1064,1350-1359`). It also renders the block and builds the `apply` patch.
 - **Session start stays offline and fast.** It reads files and the registry, with no network calls and no probes, inside the existing 15 s hook timeout (`index.ts:22`). At most one warning line per problem.
 
 |Check|Severity|Source of truth|
@@ -236,11 +236,11 @@ Split of work, following the existing architecture where every decision is in `h
 |Thinking level supported by the bound model|warn: "clamped to X"; pi clamps silently (`PIDOCS/models.md:125`, `virtual-models.md:65`). A declared level is not proof the provider honors it (Ollama and `max`)|Supported levels|
 |`maxTokens` below 32K on `coder` or `writer`|warn: Ollama's 16.4K cap truncates large edits|Registry|
 |Router or `-latest` ids|warn: drift, and strict response verification may need `modelResponseAliases`|`PS/docs/configuration.md:51-65`|
-|Role on a provider with `maxConcurrent` N while `parallel.concurrency` or `globalConcurrencyLimit` is above N|warn, naming the values to set in `~/.pi/agent/extensions/subagent/config.json`|`PS/docs/configuration.md:373-381,447-456`|
+|Role on a provider with `maxConcurrent` N while `parallel.concurrency` or `globalConcurrencyLimit` is above N|warn, naming the values to set in `~/.pi/agent/extensions/subagent/config.json`|`PS/docs/configuration.md:422-430,494-505`|
 |A judgment role, or the main thread, outside `judgmentModels`|warn|Plan|
 |Reviewer family equals coder family, or equals the main family when `byMainProvider` is used|warn|Family patterns|
 |Effective binding differs from the plan, with the winning file named (for example this repo's `.pi/settings.json`)|warn: "run /steward-models apply" or "project override wins"|Settings files|
-|`agentOverrides` keys for old profile names|warn: stale key, no longer applied|`PS/docs/agents.md:355`|
+|`agentOverrides` keys for old profile names|warn: stale key, no longer applied|`PS/docs/agents.md:417`|
 |Plan model outside an enforced `subagents.modelScope`|error for per-call relaunch models (they abort, `PS/docs/models.md:214`); warn for bindings|Settings|
 |Role thinking above `subagents.maxThinking`|error: the launch fails before start (`PS/docs/models.md:138`)|Settings|
 |Main model not in `main.models`; effective startup thinking differs from `main.thinking`|warn|`ctx.model`, settings|
@@ -264,50 +264,46 @@ Main thread: `/model`, select Sol, Ctrl+S. Then `/thinking`, `xhigh`, Ctrl+S. If
 {
   "subagents": {
     "agentOverrides": {
-      "steward.coder-opus-medium": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
-      "steward.researcher-sonnet-low": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
-      "steward.writer-sonnet-medium": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
-      "steward.mechanic-haiku-medium": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "low" },
-      "steward.reviewer-sonnet-high": { "model": "amorphic/claude-sonnet-5-5", "thinking": "high" },
-      "steward.deep-reasoner-opus-xhigh": { "model": "inherit", "thinking": "xhigh" },
-      "steward.reviewer-fable-xhigh": { "model": "amorphic/claude-fable-5-1", "thinking": "xhigh" }
+      "steward.coder": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.researcher": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.writer": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "high" },
+      "steward.mechanic": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "low" },
+      "steward.reviewer": { "model": "amorphic/claude-sonnet-5-5", "thinking": "high" },
+      "steward.deep-reasoner": { "model": "inherit", "thinking": "xhigh" },
+      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "max" }
     },
     "agentOverridesByProvider": {
-      "amorphic": { "steward.reviewer-sonnet-high": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" } }
+      "amorphic": { "steward.reviewer": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" } }
     }
   }
 }
 ```
 
-Then `/reload` and `/subagents-models`. Limits: the edict still says "Each profile pins its model", the names still say opus, sonnet and haiku, and nothing tells the main thread what to relaunch with. In this repo, the committed `.pi/settings.json` overrides every `model` field above.
+Then `/reload` and `/subagents-models`. The keys use the 0.10.0 role-only names; overrides saved under an old name stop applying (config keys do not follow aliases). The README "Profiles on pi" section carries this recipe. Limits: since 0.10.0 the names no longer say opus, sonnet or haiku, and edict rule 2 lists each profile's default model and thinking inline, but that text still describes the defaults, not your overrides, and nothing tells the main thread what to relaunch with. In a trusted project, this repo's committed `.pi/settings.json` overrides every `model` field above (a session that declined trust ignores it).
 
 ## Phases
 
-Each phase ships on its own and keeps `npm test` green (`python3 -m unittest discover -s tests && node --test 'tests/pi/*.test.mjs'`, `package.json` scripts). Claude Code, Copilot and Codex files are not touched. The existing `ClaudeHarnessUnchangedTests` (`tests/test_pi_harness.py:200-226`) and the Copilot and Codex suites must stay green unmodified.
+Each phase ships on its own and keeps `npm test` green (`python3 -m unittest discover -s tests && node --test 'tests/pi/*.test.mjs'`, `package.json` scripts). Claude Code, Copilot and Codex files are not touched. The existing `ClaudeHarnessUnchangedTests` (`tests/test_pi_harness.py:220-247`) and the Copilot and Codex suites must stay green unmodified.
 
 |Phase|Ships|Depends on|
 |-|-|-|
-|0|README "Profiles on pi" gains the Phase 0 recipe and the `.pi/settings.json` caveat; this document|Nothing|
-|1|Role-only pi names with aliases (0.9.0)|Nothing|
+|0|README "Profiles on pi" gains the Phase 0 recipe and the `.pi/settings.json` caveat; this document (done, 2026-10-11)|Nothing|
+|1|Role-only pi names with aliases (built in 0.10.0, `f9e319a`; live pi check pending)|Nothing|
 |2|Plan file, per-repo override file with `allowProviders`/`denyProviders`, read-only `check`, generated block, guardrails in the edict|Nothing (role-to-runtime-name map covers both name sets)|
 |3|`apply` and the `steward` pi-subagents profile file (so `/subagents-check-profile` can probe every model)|Phase 2|
 |4|Per-launch outcome log (ships, decided 2026-10-09)|Phase 2|
 |5|Deferred: in-child failover router|Phase 3 and a live probe|
 
-**Phase 1: names.**
-- Files:
-  - Rename `pi/agents/*.md` to `coder.md`, `deep-reasoner.md`, `reviewer.md`, `researcher.md`, `writer.md`, `mechanic.md`, `top-reviewer.md`, with `name:` matching and `aliases: steward.<old-name>`. Descriptions that name other profiles move to the new names (for example `researcher-sonnet-low.md:4`, `reviewer-fable-xhigh.md:4`).
-  - Edict rule 2, the routing table and the call examples.
-  - The pi gate message (`hooks/steward_hook.py:857-867`).
-  - README Pi sections (`README.md:113-150`).
-  - Version bump in `package.json` and the plugin manifests (`tests/test_pi_harness.py:249` checks they match).
-  - This repo's committed `.pi/settings.json`: move its seven keys from the old names to the role-only names, so it keeps overriding the user plan inside this repo.
-- Tests:
-  - `tests/test_pi_harness.py` gets a `PI_NAMES` map like `COPILOT_NAMES` (`tests/test_copilot_harness.py:29-37`). `test_same_profiles_as_claude` and `test_each_profile_mirrors_its_claude_twin` (`:263-279`) map through it. A new test asserts that each pi profile lists its old runtime name in `aliases`, and that no pi profile, the pi edict or the pi gate message contains `opus`, `sonnet`, `haiku` or `fable` in a profile name.
-  - `test_skill_names_every_pi_profile` (`:293-298`) keeps working by file stem.
-  - Update the name assertions at `tests/test_pi_harness.py:119` and `tests/pi/steward-extension.test.mjs:103,131,258,375`.
-- Live check: `subagent({ action: "list" })` shows seven `steward.*` role names, and launching `steward.mechanic-haiku-medium` resolves to `steward.mechanic`.
-- Operator follow-up: update the example at `~/AGENTS.md:21` and `~/.pi/agent/AGENTS.md:21`. These are operator files; the old name keeps resolving meanwhile.
+**Phase 1: names. Built in steward 0.10.0 (`f9e319a`, 2026-10-11).**
+- Shipped:
+  - `pi/agents/*.md` renamed to `coder.md`, `deep-reasoner.md`, `reviewer.md`, `researcher.md`, `writer.md`, `mechanic.md`, `top-reviewer.md`, each with `name:` matching and `aliases: steward.<old-name>` (frontmatter models unchanged: Anthropic, `pi/agents/*.md:6-7`). `top-reviewer` lists both `steward.reviewer-opus-max` and `steward.reviewer-fable-xhigh` (operator decision 2026-10-11, so saved launches under either name keep working).
+  - Edict rule 2 lists each profile's default model and thinking inline (`pi/skills/steward-delegating/SKILL.md:10`); the routing table and the call example use the new names.
+  - Pi gate message (`hooks/steward_hook.py:857-867`), README Pi sections (`README.md:87-221`), this repo's `.pi/settings.json` keys (`:4-10`) and the version in `package.json` and the three plugin manifests.
+- Tests: `PI_NAMES` map (`tests/test_pi_harness.py:24-35`); `test_same_profiles_as_claude` and `test_each_profile_mirrors_its_claude_twin` map through it (`:283-300`); `test_old_names_kept_as_aliases` (`:302`); `test_profile_names_carry_no_model` (`:310`); `test_profile_references_carry_no_model` (`:336`). `npm test` ran green: 254 Python and 23 node tests.
+- Checked: a standalone script drove the installed pi-subagents 0.77.0 resolver (`discoverAgents` and `resolveAgentName`) and resolved all 8 old names and all 7 new names.
+- Open:
+  1. **Live pi session check.** `subagent({ action: "list" })` should show seven `steward.*` role names, and launching `steward.mechanic-haiku-medium` should resolve to `steward.mechanic`. This needs the branch pushed and `pi update`.
+  2. **Operator follow-up.** Update the example at `~/AGENTS.md:21` and `~/.pi/agent/AGENTS.md:21`. These are operator files; the old name keeps resolving meanwhile.
 
 **Phase 2: plan, check, block.**
 - Files: `hooks/model_plan.py`, plus a pi branch in `cmd_session_start` (`hooks/steward_hook.py:275-305`) that appends the block when the payload has registry facts. The extension gets registry facts in `loadEdict`, a `model_select` handler that clears and reloads the edict, and a `/steward-models` command that runs a new `model-plan` hook subcommand. The edict gains the static guardrails. README documents the plan file.
@@ -349,9 +345,9 @@ Each phase ships on its own and keeps `npm test` green (`python3 -m unittest dis
 
 ## Alternatives considered
 
-- **Register the profiles at runtime with resolved models** through pi-subagents' `pi-subagents:runtime-agent-register:v1` event (`PS/docs/extension-api.md:158-195`, since 0.58.0). This avoids writing settings and resolves availability per session. Rejected for now:
-  - runtime names collide with the package's file agents (collision checks, `PS/CHANGELOG.md:1037`), so steward would have to stop shipping `pi/agents/` and depend entirely on a process-local event contract;
-  - `agentOverrides` still win over the definition (`extension-api.md:193`), so drift remains possible anyway.
+- **Register the profiles at runtime with resolved models** through pi-subagents' `pi-subagents:runtime-agent-register:v1` event (`PS/docs/extension-api.md:174-207`, since 0.58.0). This avoids writing settings and resolves availability per session. Rejected for now:
+  - runtime names collide with the package's file agents (collision checks, `PS/CHANGELOG.md:1104`), so steward would have to stop shipping `pi/agents/` and depend entirely on a process-local event contract;
+  - `agentOverrides` still win over the definition (`extension-api.md:207`), so drift remains possible anyway.
   - It stays the fallback design if settings writes prove troublesome.
 - **Ship plans as pi-subagents profiles only.** A profile cannot carry the main model, fallbacks or escalations. It replaces the whole `agentOverrides` mapping and writes user scope only (`profiles.js:359-386`). Kept as a secondary output of `apply`.
 - **A learned or per-request router** (oh-my-openagent fallback chains, opencode-subagent-router task-type routing). Rejected. The plan's static roles with ordered fallbacks already match oh-my-openagent's pipeline: override, then category default, then provider fallback, then system default. Primary agents respect the UI model and subagents follow their own chain. Router benchmarks show little gain over the best single model (Arize).
@@ -360,34 +356,47 @@ Each phase ships on its own and keeps `npm test` green (`python3 -m unittest dis
 
 |Risk|Failure scenario|Mitigation|
 |-|-|-|
-|Precedence replica drifts from pi-subagents|pi-subagents changes layering in a release (it ships every few days, `README.md:109`); the block shows Sonnet while Flash launches|Live check against `/subagents-models` in every phase; the README names the tested pi-subagents version|
+|Precedence replica drifts from pi-subagents|pi-subagents changes layering in a release (it ships every few days, `README.md:111`); the block shows Sonnet while Flash launches|Live check against `/subagents-models` in every phase; the README names the tested pi-subagents version|
 |Cheap executor is worse than it looks|Flash passes its own check but the reviewer keeps finding defects; cost per completed task rises above Sonnet's|Escalation rule; Phase 4 data; blackbox.ai showed the executor choice matters (Opus with GLM-5.2: 69.7 on Terminal-Bench 2.0 against 58.4 solo; with Kimi K2.7: no gain)|
 |Main thread mis-copies the relaunch model|Typo, so a second failed launch|Exact strings in the block. Copilot's pass-the-model approach worked live (`docs/roadmap/copilot-port.md:27`)|
 |Ollama stalls are not errors|A 30-40 s first-token stall per request (seen on minimax-m3) makes Ollama launches slow without failing; Ollama is now the primary Flash provider|Phase 4 outcome log shows duration per role and model; Fireworks fallback; the stall stays an open item|
 |Concurrency caps are global, not per provider|A 4-task parallel run on Ollama Pro gets HTTP 429s|Check warning with concrete `config.json` values; the edict cap line|
 |Settings write race|Pi saves `defaultModel` (Ctrl+S) while `apply` writes|Explicit command only; re-read and refuse on change; backup|
-|Rename orphans overrides|Existing `steward.coder-opus-medium` overrides silently stop applying after 0.9.0|Stale-key check at session start; `apply` migrates; release note|
+|Rename orphans overrides|Existing `steward.coder-opus-medium` overrides silently stop applying since 0.10.0|Stale-key check at session start; `apply` migrates; release note|
 |Thinking is declared, not honored|Plan says `max` on Ollama, the provider ignores it, and the check passes|The check states that declared levels are not verified; prefer providers that honor them|
 |Code leaves for third-party providers|A confidential repo's code is sent to Fireworks or Ollama Cloud|Per-repo `.pi/steward-model-plan.json` with `allowProviders`/`denyProviders`, enforced by the check (v1 requirement)|
 |`inherit` follows a downgraded main|The operator switches main to Flash mid-session, so deep-reasoner inherits Flash|`model_select` rebuild plus the judgment-floor warning|
 
 Could not confirm:
-- whether workflow `runs.run(...)` accepts a per-child `model` (the docs show none, `PS/docs/workflows.md:95-142`);
+- whether workflow `runs.run(...)` accepts a per-child `model`. Still open. The docs show `runs.run` examples with only `agent` and `task` (`PS/docs/workflows.md:99,123-124`) and say explicit child fields override workflow-level defaults (`PS/docs/workflows.md:66`), but no page lists `model` as a `runs.run` field and no live run was made. The answer for the built-in `parallel` workflow is no: each `tasks` item accepts only `agent` and `task`, and any other field is an error (`PS/src/workflows/structured-workflow-scripts.js:87`; unsupported `args` keys are rejected at `PS/src/workflows/workflow-resources.js:152-155`). A per-child relaunch `model` therefore needs a direct `subagent` call;
 - whether the steward extension can import `@earendil-works/pi-ai`;
 - whether `tool_result` for `subagent` reports the resolved model;
 - that `modelThinkingLevels` outranks `defaultThinkingLevel`;
-- which levels pi's catalog declares for the Fireworks Flash entry (the Ollama entry declares no `xhigh` or `max`; tested 2026-10-09).
+- which levels pi's catalog declares for the Fireworks Flash entry (the Ollama entry declares no `xhigh` or `max`; tested 2026-10-09);
+- whether a live pi session resolves the 0.10.0 aliases (only the standalone resolver script has run; Phase 1 open item).
+
+Confirmed since 2026-10-09: `amorphic/claude-opus-5-5` declares `max` in `~/.pi/agent/models.json` (`thinkingLevelMap` `xhigh` and `max`), so the top reviewer's `max` is not clamped. pi-subagents 0.77.0 shipped the project-trust change and the built-in `parallel` workflow noted above (`PS/CHANGELOG.md:5-13`).
 
 ## Operator decisions, 2026-10-09
 
 1. **Main thread default: steward sets none.** The main thread runs on whatever model and thinking level pi on the client machine picks (`defaultModel`, `defaultThinkingLevel`, `modelThinkingLevels`, `/model`). The plan's `main.models` list is only what the check compares against. The earlier claim that pi caps `amorphic/claude-opus-5-5` at `high` was wrong: a stale `modelThinkingLevels` entry (`high`) in `~/.pi/agent/settings.json` caused it, not an amorphic or pi limit. It was set to `xhigh` on 2026-10-09, and a plain `pi -p` run then recorded thinkingLevel `xhigh`.
-2. **Most roles on DeepSeek V4.1 Flash, not all.** Coder, researcher, writer and mechanic on Flash. Deep-reasoner on the main thread's model (`"model": "main"`). Reviewer on a different family from the main thread. Top-reviewer on Fable. The "all on Flash" variant stays documented as allowed with warnings but is not the operator's choice.
+2. **Most roles on DeepSeek V4.1 Flash, not all.** Coder, researcher, writer and mechanic on Flash. Deep-reasoner on the main thread's model (`"model": "main"`). Reviewer on a different family from the main thread. Top-reviewer on Fable. The "all on Flash" variant stays documented as allowed with warnings but is not the operator's choice. (Superseded for top-reviewer on 2026-10-11, see below.)
 3. **Flash provider order: Ollama Cloud first, Fireworks as fallback.** Ids: `ollama-cloud/deepseek-v4.1-flash`, then `fireworks/accounts/fireworks/models/deepseek-v4p1-flash`. Ids differ per provider, so fallbacks are written per provider. The `providers` block carries Ollama's cap of 3 concurrent requests on Pro. Trade-offs are in the plan file section.
 4. **Thinking on Flash:** coder `high`, researcher `high`, writer `high`, mechanic `low`; never `off`. Evidence in the next section.
-5. **Rename the pi profiles to role-only names in 0.9.0**, with the old names kept as pi-subagents aliases.
+5. **Rename the pi profiles to role-only names in 0.9.0**, with the old names kept as pi-subagents aliases. (Update 2026-10-11: shipped as 0.10.0, because 0.9.0 and 0.9.1 went to other changes first. See Phase 1.)
 6. **`apply` also writes a pi-subagents profile file** so `/subagents-check-profile` can probe every model. The per-launch outcome log ships (Phase 4).
 7. **A per-repo override is required in v1.** A repo can pin profiles away from third-party providers (for example everything on Anthropic or OpenAI). Shape: `.pi/steward-model-plan.json`, project wins over user, `allowProviders`/`denyProviders` enforced by the check (Scope section; tests in Phase 2).
-8. **Steward's own `.pi/settings.json` is committed.** It pins every `steward.*` profile to `amorphic/claude-*` for work inside this repo. Its keys must move to the role-only names in 0.9.0, and it overrides the user plan inside this repo.
+8. **Steward's own `.pi/settings.json` is committed.** It pins every `steward.*` profile to `amorphic/claude-*` for work inside this repo. Its keys must move to the role-only names in 0.9.0, and it overrides the user plan inside this repo. (Update 2026-10-11: moved in 0.10.0; the override applies only in a trusted project.)
+
+## Operator decisions, 2026-10-11
+
+Changes since the plan was written; the 2026-10-09 text above stays as history.
+
+1. **Top reviewer moved from Fable 5.1 at `xhigh` to Opus 5.5 at `max`** (steward 0.9.0, `skills/delegating/routing.md`, section "Top reviewer on Opus 5.5 max (operator decision 2026-10-11)"; evidence in `docs/evaluations/2026-10-09-model-assignment-evidence.md`). This replaces the Fable half of 2026-10-09 decision 2. The pi profile `reviewer-fable-xhigh` became `reviewer-opus-max` with no alias at that point; the operator-case plan JSON now uses `amorphic/claude-opus-5-5` at `max`, which that model declares (see Operator's case).
+2. **Fable by name is a per-call override.** A request for Fable runs the top reviewer with `model: "anthropic/claude-fable-5-1:xhigh"` (the `:level` suffix sets thinking). This is the one case where the edict allows a per-call `model` besides relaunch, escalation and operator requests.
+3. **Everyday review stays on Sonnet 5.5 at `high`** (steward 0.9.1, `routing.md`, section "Reviewer stays on Sonnet 5.5 high (operator decision 2026-10-11)"). Diffs touching auth, payments, concurrency or data migrations go to deep-reasoner. The plan's `reviewer` role keeps its Sonnet default and cross-family rule.
+4. **Both old top-reviewer names stay as aliases** (today, 0.10.0): `steward.top-reviewer` lists `steward.reviewer-opus-max` and `steward.reviewer-fable-xhigh`, so a saved launch under either name resolves.
+5. **Rename shipped as 0.10.0**, not 0.9.0 (decision 5 above).
 
 ## Thinking levels for DeepSeek V4.1 Flash
 
@@ -415,12 +424,12 @@ Open item: if the Fireworks fallback gets a `models.json` `thinkingLevelMap` wit
 ## Evidence base
 
 - **Local, read 2026-10-09:**
-  - steward `a2ab9eb`: files cited above;
+  - steward `f9e319a` (re-verified 2026-10-11; first read at `a2ab9eb`): files cited above;
   - `~/.pi/agent/settings.json` (`defaultProvider: amorphic`, `defaultModel: claude-opus-5-5`, `defaultThinkingLevel: xhigh`, `modelThinkingLevels`);
   - `~/.pi/agent/models.json` (providers `anthropic`, `ollama-cloud`, `amorphic`, `fireworks`);
   - `~/.pi/agent/auth.json` (provider names only: `anthropic`, `openai-codex`, `openai`);
   - `pi --list-models` on pi 1.1.0; pi docs and type declarations under `PIDOCS` and `PIDIST`;
-  - pi-subagents 0.76.1 docs and source under `PS`.
+  - pi-subagents 0.77.0 docs and source under `PS` (first read at 0.76.1).
 - **OpenCode:** per-agent `model`, `mode: primary|subagent`, subagents inherit the parent model when unset, `small_model` for hidden agents (opencode.ai/docs/agents, opencode.ai/v2/docs/agents). Issue anomalyco/opencode#26925 asks for a per-call model parameter ("Mix Code Mode").
 - **nkapila.me/posts/opencode-config (2026-07-13):** boss orchestrator; junior-dev and researcher on deepseek-v4-flash; reviewer on gemma4:31b, a different family on purpose; Ollama Cloud concurrency (Max 10, the orchestrator counts as 1) was the real constraint.
 - **oh-my-openagent** (code-yeongyu, `packages/omo-opencode/src/agents/AGENTS.md`): per-agent defaults with ordered fallback chains, `requiresProvider`, and a resolution pipeline of override, then category default, then provider fallback, then system default.
