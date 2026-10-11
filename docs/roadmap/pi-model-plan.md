@@ -302,7 +302,7 @@ Each phase ships on its own and keeps `npm test` green (`python3 -m unittest dis
 - Tests: `PI_NAMES` map (`tests/test_pi_harness.py:24-35`); `test_same_profiles_as_claude` and `test_each_profile_mirrors_its_claude_twin` map through it (`:283-300`); `test_old_names_kept_as_aliases` (`:302`); `test_profile_names_carry_no_model` (`:310`); `test_profile_references_carry_no_model` (`:336`). `npm test` ran green: 254 Python and 23 node tests.
 - Checked: a standalone script drove the installed pi-subagents 0.77.0 resolver (`discoverAgents` and `resolveAgentName`) and resolved all 8 old names and all 7 new names.
 - Open:
-  1. **Live pi session check.** `subagent({ action: "list" })` should show seven `steward.*` role names, and launching `steward.mechanic-haiku-medium` should resolve to `steward.mechanic`. This needs the branch pushed and `pi update`.
+  1. **Live pi session check. Done 2026-10-11 at 7dffda0.** In a live pi 1.1.0 session with pi-subagents 0.77.0, `steward.mechanic-haiku-medium` resolved to `steward.mechanic` (amorphic/claude-haiku-5-5, medium) and `steward.reviewer-fable-xhigh` resolved to `steward.top-reviewer` (amorphic/claude-opus-5-5, max); the empty-directory launch of `steward.mechanic` ran on anthropic/claude-haiku-5-5 at medium. The list also shows the aliases, as designed.
   2. **Operator follow-up.** Update the example at `~/AGENTS.md:21` and `~/.pi/agent/AGENTS.md:21`. These are operator files; the old name keeps resolving meanwhile.
 
 **Phase 2: plan, check, block.**
