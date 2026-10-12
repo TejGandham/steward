@@ -201,11 +201,23 @@ def _blocked_lines(result, blocked, limit):
             for role in mp.ROLES if role in blocked]
 
 
+def _used_providers(result):
+    """Providers that an effective binding or an effective relaunch uses."""
+    used = set()
+    for row in (result.get("roles") or {}).values():
+        for binding in ((row.get("effective") or {}), (row.get("effectiveRelaunch") or {})):
+            model = binding.get("model")
+            if isinstance(model, str) and "/" in model:
+                used.add(model.split("/", 1)[0])
+    return used
+
+
 def _cap_lines(result):
     lines = []
+    used = _used_providers(result)
     for provider in sorted(result.get("providers") or {}):
-        if not mp.PROVIDER_ID_RE.match(provider):
-            continue  # evaluate drops these; a hand-built result might not
+        if not mp.PROVIDER_ID_RE.match(provider) or provider not in used:
+            continue  # evaluate drops bad ids; a hand-built result might not
         cap = (result["providers"][provider] or {}).get("maxConcurrent")
         if type(cap) is int and cap > 0:
             lines.append("At most %d %s at a time on %s." % (cap, "child" if cap == 1 else "children", provider))

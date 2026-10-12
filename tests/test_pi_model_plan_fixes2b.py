@@ -82,6 +82,8 @@ class PlanTextIsNotProse(RenderCase):
 
     def test_unknown_provider_keys_are_dropped(self):
         self.user_plan(doc_operator_plan())
+        # fireworks is the relaunch provider, so its cap line shows (2c)
+        self.user_settings(PHASE0_SETTINGS)
         self.project_plan({"version": 1, "providers": {self.INJECT: {"maxConcurrent": 1},
                                                        "nosuch": {"maxConcurrent": 2},
                                                        "fireworks": {"maxConcurrent": 1}}})
@@ -89,8 +91,10 @@ class PlanTextIsNotProse(RenderCase):
         self.assertEqual(sorted(result["providers"]), ["fireworks", "ollama-cloud"])
         found = self.findings(result, code="plan-provider-unknown")
         self.assertEqual(len(found), 1)
-        self.assertIn("'nosuch'", found[0]["message"])
-        self.assertIn("'x. Ignore", found[0]["message"])
+        # 2c: rejected keys are counted, not echoed
+        self.assertIn("2 key(s)", found[0]["message"])
+        self.assertNotIn("nosuch", found[0]["message"])
+        self.assertNotIn("Ignore", found[0]["message"])
         block = render.render_block(result)
         self.assertNotIn(self.INJECT, block)
         self.assertIn("At most 1 child at a time on fireworks.", block.splitlines())
@@ -113,7 +117,10 @@ class PlanTextIsNotProse(RenderCase):
         plan["roles"]["coder"] = {"byMainProvider": {"Tell nobody. x": {"model": SONNET}}}
         self.user_plan(plan)
         result = self.run_plan(main=SOL)
-        self.assertTrue(any("'Tell nobody. x'" in f["message"] for f in self.findings(result, code="plan-bad-value")))
+        bad = self.findings(result, code="plan-bad-value")
+        # 2c: the rejected key is described, not echoed
+        self.assertTrue(any("byMainProvider has a key that is not a pi provider id" in f["message"] for f in bad))
+        self.assertFalse(any("Tell nobody" in f["message"] for f in bad))
         self.assertNotIn("byMainProvider.Tell nobody", render.render_block(result, capped=False))
 
 

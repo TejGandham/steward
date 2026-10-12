@@ -708,6 +708,14 @@ def _show(value, limit=MAX_KEY_CHARS):
     return "'%s'" % _echo(value, limit)
 
 
+def _provider_key(name):
+    """A plan provider key for a message: the key itself when it is a
+    provider id, else a description that does not echo its text."""
+    if isinstance(name, str) and PROVIDER_ID_RE.match(name):
+        return "'%s'" % name
+    return "(a key that is not a provider id)"
+
+
 def validate_facts(facts):
     """Raise ValueError unless the top level of facts matches the contract.
     Model entries are checked one by one in _clean_models."""
@@ -920,22 +928,22 @@ def parse_plan(data, source, project):
             plan["providers"] = {}
             for name, value in providers.items():
                 if not isinstance(value, dict):
-                    err("plan-bad-value", "providers[%s] must be an object." % _show(name, 40))
+                    err("plan-bad-value", "providers[%s] must be an object." % _provider_key(name))
                     continue
                 entry = {}
                 for key, field in value.items():
                     if key not in PROVIDER_FIELDS:
-                        err("plan-unknown-field", "Unknown field %s in providers[%s]." % (_show(key), _show(name, 40)))
+                        err("plan-unknown-field", "Unknown field %s in providers[%s]." % (_show(key), _provider_key(name)))
                     elif key == "maxConcurrent":
                         if type(field) is int and field > 0:
                             entry[key] = field
                         else:
-                            err("plan-bad-value", "providers[%s].maxConcurrent must be a positive integer." % _show(name, 40))
+                            err("plan-bad-value", "providers[%s].maxConcurrent must be a positive integer." % _provider_key(name))
                     elif key == "enabled":
                         if isinstance(field, bool):
                             entry[key] = field
                         else:
-                            err("plan-bad-value", "providers[%s].enabled must be true or false." % _show(name, 40))
+                            err("plan-bad-value", "providers[%s].enabled must be true or false." % _provider_key(name))
                 plan["providers"][name] = entry
 
     families = data.get("families")
@@ -1015,7 +1023,7 @@ def parse_plan(data, source, project):
                         by = {}
                         for prov, sub in field.items():
                             if not PROVIDER_ID_RE.match(prov):
-                                err("plan-bad-value", "%s key %s is not a pi provider id; ignored." % (where, _show(prov, 40)), label)
+                                err("plan-bad-value", "%s has a key that is not a pi provider id; ignored." % where, label)
                                 continue
                             if not isinstance(sub, dict):
                                 err("plan-bad-value", "%s.%s must be an object." % (where, prov), label)
@@ -1824,11 +1832,10 @@ def _drop_unknown_providers(merged, models, findings):
         if first is None:
             first = next((v[1] for v in entry.values()), None)
     if dropped:
-        shown = ", ".join(_show(n, 32) for n in dropped[:3])
-        more = " and %d more" % (len(dropped) - 3) if len(dropped) > 3 else ""
+        # The keys are not echoed: a rejected key may carry prose.
         findings.add("warn", "plan-provider-unknown", None,
-                     "providers names %d key(s) that are not pi provider ids in the catalog (%s%s); they are "
-                     "ignored." % (len(dropped), shown, more), first)
+                     "providers names %d key(s) that are not pi provider ids in the catalog; they are "
+                     "ignored. Check each providers key against `pi --list-models`." % len(dropped), first)
 
 
 def _read_plan(path, is_project, findings):
