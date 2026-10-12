@@ -17,10 +17,9 @@ const { parsePackageName } = await load("src/agents/identity.js");
 const { parseFrontmatter } = await load("src/agents/frontmatter.js");
 const version = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).version;
 
-let input = "";
-process.stdin.on("data", (chunk) => (input += chunk));
-process.stdin.on("end", () => {
-  const corpus = JSON.parse(input);
+// Synchronous read: the async stdin stream truncated input or crashed under Node 24.
+{
+  const corpus = JSON.parse(readFileSync(0, "utf8"));
   const parent = { provider: "amorphic", id: "claude-opus-5-5" };
   const resolve = (corpus.resolve ?? []).map((c) => {
     const avail = c.avail.map(([provider, id]) => ({ provider, id, fullId: `${provider}/${id}` }));
@@ -37,4 +36,4 @@ process.stdin.on("end", () => {
   });
   const frontmatter = (corpus.frontmatter ?? []).map((s) => parseFrontmatter(s).frontmatter);
   process.stdout.write(JSON.stringify({ version, resolve, normalize, package: pkg, frontmatter }));
-});
+}

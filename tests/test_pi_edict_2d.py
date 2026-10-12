@@ -44,7 +44,7 @@ class PiEdictModelPlanTests(unittest.TestCase):
     def test_rule2_unavailable_and_no_relaunch(self):
         # Option B: an unavailable binding's row says which model to pass.
         self.assertIn('"pass model X"', self.rule2)
-        # Release review: retry the same profile once without `model` after an overload.
+        # Release review: repeat the same launch once after an overload, never another model.
         self.assertIn("With no relaunch model (`none`, or no such column), do not choose a model yourself", self.rule2)
 
     def test_rule2_blocked_profiles(self):

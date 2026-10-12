@@ -44,8 +44,10 @@ class EdictReleaseReviewTests(unittest.TestCase):
         r = self.rule2
         self.assertNotIn("do not relaunch; tell the operator", r)
         self.assertIn("With no relaunch model (`none`, or no such column), do not choose a model yourself", r)
-        self.assertIn("After an overload, rate-limit or timeout error, relaunch the same profile once, without "
-                      "`model`, after checking what the failed child already changed", r)
+        self.assertIn("After an overload, rate-limit or timeout error, repeat the same launch once (same profile, "
+                      "plus the row's `model` if it says \"pass model X\"; never any other model), "
+                      "after checking what the failed child already changed", r)
+        self.assertNotIn("without `model`", r)
         self.assertIn("after any other provider error, or a second failure", r)
 
     def test_unavailable_without_model_to_pass(self):
