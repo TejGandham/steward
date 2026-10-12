@@ -1521,14 +1521,14 @@ def _check_binding_policy(ctx, role, subject, inherits, requested, resolved, mai
             return True
         blocked = ctx.provider_block(main_provider)
         if blocked:
-            f.add("error", blocked[0], role, "%s inherits the main thread on a blocked %s." % (describe, blocked[1]),
+            f.add("error", blocked[0], role, "%s inherits the main thread, which is blocked: %s." % (describe, blocked[1]),
                   source, subject)
         return bool(blocked)
     entry = ctx.catalog.get(requested)
     if entry and entry["available"]:
         blocked = ctx.policy_block(requested)
         if blocked:
-            f.add("error", blocked[0], role, "%s %s is on a blocked %s." % (describe, requested, blocked[1]),
+            f.add("error", blocked[0], role, "%s %s is blocked: %s." % (describe, requested, blocked[1]),
                   source, subject)
         return bool(blocked)
     target = resolved if resolved and resolved != requested and resolved in ctx.catalog else None
@@ -1540,7 +1540,7 @@ def _check_binding_policy(ctx, role, subject, inherits, requested, resolved, mai
     if target:
         blocked = ctx.policy_block(target)
         if blocked:
-            f.add("error", blocked[0], role, "%s resolves to %s, on a blocked %s." % (describe, target, blocked[1]),
+            f.add("error", blocked[0], role, "%s resolves to %s, which is blocked: %s." % (describe, target, blocked[1]),
                   source, subject)
     return True
 
@@ -1973,7 +1973,6 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     _resolve_role_escalations(ctx, roles, shadowed)
 
     # ---- per-role checks
-    overridden_roles = set()
     for role, row in roles.items():
         plan, eff = row["plan"], row["effective"]
         settings_files = {p for p in (user_found, project_found) if p}
@@ -1983,8 +1982,6 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         thinking_differs = bool(plan) and plan["thinking"] is not None and plan["thinking"] != eff["thinking"]
         overridden = (model_differs and eff["modelSource"]["file"] in settings_files) or (
             thinking_differs and eff["thinkingSource"]["file"] in settings_files)
-        if overridden:
-            overridden_roles.add(role)
         subjects = []  # (label, model, thinking, explicit, source)
         if plan and plan["model"]:
             subjects.append(("plan binding", plan["model"], plan["thinking"], False, plan["source"]))
@@ -2058,10 +2055,12 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                         project_root, ".pi", "settings.json")
                 else:
                     hint = "run /steward-models apply"
+                plan_model = plan["setting"] or plan["model"]
+                wanted = "%s at %s" % (plan_model, plan["thinking"]) if plan_model else "thinking %s" % plan["thinking"]
                 findings.add("warn", "binding-drift", role,
-                             "steward.%s launches on %s at %s, not the plan's %s at %s (from %s %s): %s."
-                             % (role, eff["model"], eff["thinking"], plan["setting"] or plan["model"],
-                                plan["thinking"], won["file"] or "built-in default", won["key"] or "", hint),
+                             "steward.%s launches on %s at %s, not the plan's %s (from %s %s): %s."
+                             % (role, eff["model"], eff["thinking"], wanted,
+                                won["file"] or "built-in default", won["key"] or "", hint),
                              won["file"])
 
     if ctx.lists_active:
@@ -2096,9 +2095,11 @@ def _evaluate(facts, env, agent_dir, agents_dir):
             if not cap:
                 continue
             limit, src = cap
+            # A role launches on its effective binding (the plan applies only
+            # after apply), as the block's cap lines count it.
             on = sorted(r for r, row in roles.items()
-                        if any(b and b.get("model") and b["model"].split("/", 1)[0] == provider
-                               for b in ((None if r in overridden_roles else row["plan"]), row["effective"])))
+                        if row["effective"].get("model")
+                        and row["effective"]["model"].split("/", 1)[0] == provider)
             if on and (concurrency["parallel"] > limit or concurrency["global"] > limit):
                 findings.add("warn", "concurrency-above-cap", None,
                              "%s allows %d concurrent requests and runs %s, but parallel.concurrency is %d and "
@@ -2126,7 +2127,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         blocked = ctx.provider_block(fm["provider"])
         if blocked:
             findings.add("error", "main-" + blocked[0], "main",
-                         "The main thread runs %s, on a blocked %s; use /model to switch." % (ctx.main, blocked[1]),
+                         "The main thread runs %s, which is blocked: %s. Use /model to switch." % (ctx.main, blocked[1]),
                          blocked[2])
         if expected_models and not main_out["inPlan"]:
             findings.add("warn", "main-not-in-plan", "main",
