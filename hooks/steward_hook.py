@@ -350,6 +350,53 @@ def cmd_model_plan(stdin_text, env):
     return json.dumps({"report": render.render_report(result)}), "", 0
 
 
+# The `model-plan-apply` subcommand (pi only, used by /steward-models apply)
+# reads {"model_facts", "dryRun", "expect"?} on stdin. It writes only when
+# "dryRun" is false and no --dry-run argument is given; otherwise it is a
+# preview. It compiles the user plan only (cwd and project files are
+# ignored; see hooks/model_plan_apply.py). stdout is the result object
+# ({"dryRun", "changed", "changes", "findings", "hashes", "report", ...}),
+# exit 0. A refusal (nothing written) prints {"error", "refused": true} and
+# exits 3; unusable input prints {"error"} and exits 2.
+MODEL_PLAN_REFUSED_EXIT = 3
+
+
+def cmd_model_plan_apply(stdin_text, env, argv=()):
+    """Returns (stdout text, stderr text, exit code)."""
+    def fail(message, code=MODEL_PLAN_USAGE_EXIT, refused=False):
+        message = "model-plan-apply: " + message
+        body = {"error": message}
+        if refused:
+            body["refused"] = True
+        return json.dumps(body), message, code
+
+    if get_harness(env) != "pi":
+        return fail("this subcommand runs only for pi (STEWARD_HARNESS=pi)")
+    try:
+        payload = json.loads(stdin_text) if stdin_text and stdin_text.strip() else None
+    except ValueError:
+        return fail("stdin is not JSON")
+    if not isinstance(payload, dict):
+        return fail("stdin must be a JSON object {\"model_facts\": {...}, \"dryRun\": bool}")
+    facts = payload.get("model_facts")
+    if not isinstance(facts, dict):
+        return fail("model_facts is missing or not an object")
+    expect = payload.get("expect")
+    if expect is not None and not (isinstance(expect, dict)
+                                   and all(v is None or isinstance(v, str) for v in expect.values())):
+        return fail("expect must be an object of file hashes")
+    dry_run = "--dry-run" in argv or payload.get("dryRun") is not False
+    mpa = _hook_module("model_plan_apply")
+    try:
+        result = mpa.apply(facts, env=env, dry_run=dry_run, expect=expect)
+    except ValueError as exc:
+        return fail("model_facts is malformed: %s" % exc)
+    except mpa.Refused as exc:
+        return fail(str(exc), MODEL_PLAN_REFUSED_EXIT, refused=True)
+    result.pop("newSettings", None)
+    return json.dumps(result), "", 0
+
+
 def cmd_session_start(payload, env):
     harness = get_harness(env)
     if harness == "copilot":
@@ -1522,12 +1569,16 @@ def _dispatch(argv, stdin_text, env):
 
 
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1] == "model-plan":
+    if len(sys.argv) >= 2 and sys.argv[1] in ("model-plan", "model-plan-apply"):
+        name = sys.argv[1]
         try:
-            out, err, code = cmd_model_plan(sys.stdin.read(), os.environ)
+            if name == "model-plan":
+                out, err, code = cmd_model_plan(sys.stdin.read(), os.environ)
+            else:
+                out, err, code = cmd_model_plan_apply(sys.stdin.read(), os.environ, sys.argv[2:])
         except Exception as exc:
-            out, err, code = (json.dumps({"error": "model-plan: %s" % type(exc).__name__}),
-                              "model-plan: internal error (%s)" % type(exc).__name__, 1)
+            out, err, code = (json.dumps({"error": "%s: internal error (%s)" % (name, type(exc).__name__)}),
+                              "%s: internal error (%s)" % (name, type(exc).__name__), 1)
         sys.stdout.write(out + "\n")
         if err:
             sys.stderr.write(err + "\n")

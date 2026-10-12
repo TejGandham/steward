@@ -2102,10 +2102,15 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                     hint = "the plan value comes from the project plan; set it in %s" % os.path.join(
                         project_root, ".pi", "settings.json")
                 else:
-                    # 0.11.0 has no apply: the README's Phase 0 recipe sets it by hand.
-                    hint = "set subagents.agentOverrides by hand (README Phase 0 recipe)"
+                    # The user plan: apply writes it into user settings.
+                    hint = "run /steward-models apply"
                 plan_model = plan["setting"] or plan["model"]
-                wanted = "%s at %s" % (plan_model, plan["thinking"]) if plan_model else "thinking %s" % plan["thinking"]
+                if not plan_model:
+                    wanted = "thinking %s" % plan["thinking"]
+                elif plan["thinking"] is None:
+                    wanted = plan_model
+                else:
+                    wanted = "%s at %s" % (plan_model, plan["thinking"])
                 findings.add("warn", "binding-drift", role,
                              "steward.%s launches on %s at %s, not the plan's %s (from %s %s): %s."
                              % (role, eff["model"], eff["thinking"], wanted,

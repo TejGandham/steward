@@ -50,7 +50,9 @@ class DriftMessageWithoutPlanModel(RenderCase):
         self.project_plan({"version": 1, "roles": {"coder": {"model": OPUS}}})
         drift = self.findings(self.run_plan(), code="binding-drift", role="coder")
         self.assertEqual(len(drift), 1)
-        self.assertIn("not the plan's %s at " % OPUS, drift[0]["message"])
+        # The plan names no thinking for coder, so the message names the model alone.
+        self.assertIn("not the plan's %s (from " % OPUS, drift[0]["message"])
+        self.assertNotIn("None", drift[0]["message"])
 
 
 class BlockedProviderSentences(RenderCase):
