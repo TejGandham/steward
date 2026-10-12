@@ -342,6 +342,8 @@ class SafetyTests(ApplyTestCase):
 
         again = self.apply(now=self.clock + datetime.timedelta(seconds=5))
         self.assertFalse(again["changed"])
+        self.assertTrue(again["report"].startswith("steward model plan apply: nothing to change"))
+        self.assertNotIn("preview", self.apply(dry_run=True)["report"])
         self.assertFalse(again["settingsChanged"])
         self.assertFalse(again["profileChanged"])
         self.assertEqual(again["changes"], [])

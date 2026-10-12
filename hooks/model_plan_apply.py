@@ -604,19 +604,19 @@ def apply(facts, env=None, dry_run=True, expect=None, now=None, before_write=Non
 
 def render(result):
     """Plain-text summary for the /steward-models apply preview and result."""
-    if result["dryRun"]:
-        head = "steward model plan apply: preview (nothing written yet)"
-    elif result["changed"]:
-        head = "steward model plan apply: written"
-    else:
+    if not result["changed"]:
         head = "steward model plan apply: nothing to change"
+    elif result["dryRun"]:
+        head = "steward model plan apply: preview (nothing written yet)"
+    else:
+        head = "steward model plan apply: written"
     lines = [head, "", "Plan: %s" % result["planFile"],
              "Settings: %s%s" % (result["settingsFile"], "" if result["settingsChanged"] else " (no change)"),
              "Profile: %s%s" % (result["profileFile"], "" if result["profileChanged"] else " (no change)")]
     if result["changes"]:
         lines += ["", "Changes:"] + ["- %s" % line for line in result["changes"]]
-    elif result["dryRun"]:
-        lines += ["", "Nothing to change: settings and the steward profile already match the plan."]
+    else:
+        lines += ["", "Settings and the steward profile already match the plan."]
     if result["backups"]:
         lines += ["", "Backups:"] + ["- %s" % path for path in result["backups"]]
     shown = [f for f in result["findings"] if f["severity"] in ("error", "warn")]
