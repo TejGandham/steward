@@ -1,6 +1,6 @@
 # Proposal: a model plan for steward on pi
 
-Status: proposed, 2026-10-09; refreshed 2026-10-11. Operator decisions are recorded below (2026-10-09 and 2026-10-11). Phase 1 (role-only pi names with aliases) was built in steward 0.10.0 (`f9e319a`) and is not yet checked in a live pi session. Phases 0 and 2 to 5 are unchanged: Phase 0 is a settings recipe (now in the README "Profiles on pi" section), Phases 2 to 5 are not built; Phase 2 is split into four slices and slice 2a is in progress (see Phases). The Phase 2 spike ran 2026-10-11 and its answers are recorded below.
+Status: proposed, 2026-10-09; refreshed 2026-10-11. Operator decisions are recorded below (2026-10-09, 2026-10-11 and 2026-10-12). Phase 1 (role-only pi names with aliases) was built in steward 0.10.0 (`f9e319a`) and is not yet checked in a live pi session. Phases 0 and 2 to 5 are unchanged: Phase 0 is a settings recipe (now in the README "Profiles on pi" section), Phases 2 to 5 are not built; Phase 2 is split into four slices; slice 2a is built on branch `pi-model-plan-2a`, not yet merged (see Phases). The Phase 2 spike ran 2026-10-11 and its answers are recorded below.
 
 ## Summary
 
@@ -55,7 +55,7 @@ Location: `get_config_dir(env)/steward/model-plan.json`, the same directory as t
     "models": ["openai-codex/gpt-6.1-sol", "amorphic/claude-opus-5-5"],
     "thinking": "xhigh"
   },
-  "judgmentModels": ["openai-codex/gpt-6*", "amorphic/claude-opus-5*", "amorphic/claude-fable-5*"],
+  "judgmentModels": ["openai-codex/gpt-6*", "amorphic/claude-opus-5*", "anthropic/claude-opus-5*", "amorphic/claude-fable-5*"],
   "providers": {
     "ollama-cloud": { "maxConcurrent": 3 },
     "fireworks": {}
@@ -72,6 +72,7 @@ Location: `get_config_dir(env)/steward/model-plan.json`, the same directory as t
       "model": "amorphic/claude-sonnet-5-5",
       "thinking": "high",
       "fallback": ["openai-codex/gpt-6.1-sol:medium"],
+      "escalate": "role:deep-reasoner",
       "byMainProvider": {
         "amorphic": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" }
       }
@@ -79,14 +80,20 @@ Location: `get_config_dir(env)/steward/model-plan.json`, the same directory as t
     "deep-reasoner": {
       "model": "main",
       "thinking": "xhigh",
-      "fallback": ["amorphic/claude-opus-5-5", "openai-codex/gpt-6.1-sol"]
+      "fallback": ["amorphic/claude-opus-5-5", "openai-codex/gpt-6.1-sol"],
+      "escalate": null
     },
-    "top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "max" }
+    "top-reviewer": {
+      "model": "amorphic/claude-opus-5-5",
+      "thinking": "max",
+      "fallback": ["anthropic/claude-opus-5-5:max"],
+      "escalate": null
+    }
   }
 }
 ```
 
-What this does: coder, researcher, writer and mechanic run on Flash through Ollama Cloud and fall back to the same model on Fireworks. Thinking is `high`, except mechanic on `low`, never `off` (see the Flash thinking section). Deep-reasoner runs on whatever the main thread runs (`inherit`), at `xhigh` where the model supports it. `main.models` and `main.thinking` are only what the check compares the session against; steward never sets the main thread. The reviewer is never DeepSeek, and it is never the main thread's family either: Sonnet when the main thread is Sol, Sol when the main thread is Opus on `amorphic`. Top-reviewer is Opus 5.5 at `max` (operator decision 2026-10-11; it was Fable 5.1 at `xhigh` when this plan was written). `~/.pi/agent/models.json` declares `max` for `amorphic/claude-opus-5-5` (`thinkingLevelMap` `xhigh` and `max`, `maxTokens` 128000), so pi does not clamp it. A request for Fable by name runs the top reviewer with per-call `model: "anthropic/claude-fable-5-1:xhigh"`; `amorphic/claude-fable-5-1` also declares `max`.
+What this does: coder, researcher, writer and mechanic run on Flash through Ollama Cloud and fall back to the same model on Fireworks. Thinking is `high`, except mechanic on `low`, never `off` (see the Flash thinking section). Deep-reasoner runs on whatever the main thread runs (`inherit`), at `xhigh` where the model supports it. The three non-Flash roles never inherit the `"*"` escalation to `main:high`: the reviewer escalates to `steward.deep-reasoner` (`role:deep-reasoner`, which launches on that profile's own model and thinking), and deep-reasoner and top-reviewer clear it with `"escalate": null`, so a failed check on either stays on the main thread. Their fallbacks are never Flash either: deep-reasoner relaunches on Opus or Sol, top-reviewer on `anthropic/claude-opus-5-5:max` (same model and level, other provider), the reviewer on Sol at `medium`. `main.models` and `main.thinking` are only what the check compares the session against; steward never sets the main thread. The reviewer is never DeepSeek, and it is never the main thread's family either: Sonnet when the main thread is Sol, Sol when the main thread is Opus on `amorphic`. Top-reviewer is Opus 5.5 at `max` (operator decision 2026-10-11; it was Fable 5.1 at `xhigh` when this plan was written). `~/.pi/agent/models.json` declares `max` for `amorphic/claude-opus-5-5` (`thinkingLevelMap` `xhigh` and `max`, `maxTokens` 128000), so pi does not clamp it. A request for Fable by name runs the top reviewer with per-call `model: "anthropic/claude-fable-5-1:xhigh"`; `amorphic/claude-fable-5-1` also declares `max`.
 
 The "everything on Flash" variant is the `"*"` entry alone, with no other roles listed. It is allowed but is not the operator's choice. The check and the edict then warn that deep-reasoner and top-reviewer are below the judgment floor and that the reviewer shares the coder's family, and the edict tells the main thread to keep judgment work inline.
 
@@ -106,8 +113,8 @@ Fireworks fix, 2026-10-11 (operator-approved): pi has had a built-in Fireworks p
 |`providers.<id>.enabled`|`false` makes `apply` skip that provider|Which candidate `apply` binds|
 |`roles.<role>.model`|Primary `provider/id`, or `main`|`agentOverrides["steward.<role>"].model`; `main` becomes `"inherit"`|
 |`roles.<role>.thinking`|`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`|`agentOverrides["steward.<role>"].thinking`|
-|`roles.<role>.fallback`|Ordered `provider/id[:level]` list|`apply` binds the first available candidate; the next available one is rendered as the relaunch model. A candidate equal to the bound model is skipped|
-|`roles.<role>.escalate`|`provider/id[:level]` or `main[:level]`|Rendered as the escalation model|
+|`roles.<role>.fallback`|Ordered `provider/id[:level]` list; `null` or `[]` clears an inherited `"*"` value|`apply` binds the first available candidate; the next available one is rendered as the relaunch model. A candidate equal to the bound model is skipped|
+|`roles.<role>.escalate`|`provider/id[:level]`, `main[:level]`, or `role:<role>` (another steward role, no `:level`: the target profile keeps its own model and thinking; an unknown role or the role itself is a schema error); `null` clears an inherited `"*"` value|Rendered as the escalation model, or as the target profile `steward.<role>` with its effective model and thinking|
 |`roles.<role>.byMainProvider.<p>`|`{ model, thinking }` used when the main thread's provider is `p`|`agentOverridesByProvider.<p>["steward.<role>"]`|
 |`roles["*"]`|Defaults merged under every role, field by field|Per role|
 |`families`|Optional overrides of the built-in family patterns (`*claude*`, `*gpt-*`, `*deepseek*`, `*kimi*`, `*glm*`, `*qwen*`, `*gemma*`, `*minimax*`)|Nothing: cross-family check|
@@ -121,12 +128,18 @@ Rules the check enforces:
 
 Decision 2026-10-09: a per-repo override is a v1 requirement. A repo must be able to pin steward profiles away from third-party providers, for example to keep everything on Anthropic or OpenAI.
 
-Shape: a project file `<repo>/.pi/steward-model-plan.json`, in the same schema as the user plan, read only when the project is trusted (`ctx.isProjectTrusted()`, `PIDIST/extensions/types.d.ts:238`). Reasons for a separate file over a `steward` block in `.pi/settings.json`: pi-subagents and pi own that file's schema, and an unknown top-level block risks being rejected or rewritten by them; this repo already commits `.pi/settings.json` for a different purpose; a plan file keeps fallbacks, escalations and provider lists, which settings cannot hold.
+Shape: a project file `<repo>/.pi/steward-model-plan.json`, in the same schema as the user plan, read in full only when the project is trusted (`ctx.isProjectTrusted()`, `PIDIST/extensions/types.d.ts:238`); an untrusted project contributes its two provider lists and nothing else (rules below). Reasons for a separate file over a `steward` block in `.pi/settings.json`: pi-subagents and pi own that file's schema, and an unknown top-level block risks being rejected or rewritten by them; this repo already commits `.pi/settings.json` for a different purpose; a plan file keeps fallbacks, escalations and provider lists, which settings cannot hold.
 
 Rules:
-- **Project wins over user**, field by field, role by role, the same merge as `"*"`. The check names the winning file for every binding.
-- **`allowProviders` and `denyProviders`** (lists of provider ids, project file only). The check errors when any bound model, fallback or escalation target sits on a denied provider or outside a non-empty allow list, and `apply` skips those candidates. A repo with `"allowProviders": ["amorphic", "anthropic"]` can never see a Flash binding.
-- **pi-subagents `.pi/settings.json` overrides still apply** after the plan compiles, field by field (`PS/src/agents/agents.js:1350-1359`), but only in a trusted project. Since pi-subagents 0.77.0, a session that declined project trust ignores project subagent settings, project agents and chains, project-scoped packages and `modelScope`, and its default scope behaves as `user` (`PS/CHANGELOG.md:41-42`, `PS/docs/agents.md:34`, `PS/src/agents/agents.js:2396,2669`). The effective-binding computation in Phase 2 must mirror that: with `project_trusted` false, drop the project settings layer as well as `.pi/steward-model-plan.json`. `apply` writes user settings only and never writes into a repo.
+- **Project wins over user**, field by field, role by role, the same merge as `"*"`. Merge order per role field, strongest first: project role, project `"*"`, user role, user `"*"`. The check names the winning file for every binding.
+- **`allowProviders` and `denyProviders`** (lists of provider ids, project file only). The check errors when any bound model, fallback or escalation target sits on a denied provider or outside a non-empty allow list, and `apply` skips those candidates. A `role:<role>` escalation is checked against the target profile's effective binding as well, so it cannot route around the lists. A repo with `"allowProviders": ["amorphic", "anthropic"]` can never see a Flash binding.
+- **Lists from every project plan up to home.** Every `.pi/steward-model-plan.json` from cwd up to, not including, home contributes its lists: deny lists are unioned, allow lists intersected. Only the plan at the project root contributes roles and other fields. A nested `.pi` (a vendored package) cannot hide the repo's restrictions.
+- **Lists honored in an untrusted project** (operator decision 2026-10-12). Declining trust must not unblock a provider the repo denies. From an untrusted project's plan files only `allowProviders` and `denyProviders` are read; every other field is ignored. The lists only restrict, so honoring them never widens what the session may do.
+- **One list reader for trusted and untrusted sessions.** Every project plan file's two lists are read the same way in both modes, and `version` does not gate them: a trusted plan with a missing or wrong `version` loses its other fields but keeps its lists, so trusting a repo never loosens its lists. Each file is read up to 64 KiB, as UTF-8 with or without a BOM. Every entry must match a strict provider-id pattern. Findings never echo the file's text.
+- **A list that cannot be read fails closed.** When a project plan file's lists cannot be read in full, every binding, candidate, escalation and the main thread error with `provider-not-allowed`, and the result's `listsFailClosed` names the file. That covers: a file that is unreadable, larger than 64 KiB, not JSON or not a JSON object; a list key whose value is not a list; a list longer than 64 entries; a `denyProviders` with any entry that is not a provider id, because dropping it would widen access. An `allowProviders` that is present but has no valid entry (`["Anthropic Inc"]`, or the string `"anthropic"`) is an active, empty allow list, so everything is blocked. An `allowProviders` with some valid entries keeps them, with a finding for the rest. Only an explicit `[]` means no allow list. A hostile repo could block everything with `"allowProviders": ["x"]` anyway, so failing closed costs nothing.
+- **Findings are bounded.** A plan file gives at most one finding per list key; `provider-unknown` is one finding per key across all files, and the untrusted-lists notice is one finding for the whole walk. A blocked-provider message names the provider and the file, never the list. Every finding message has control, format and line-separator characters replaced and is capped at 1,000 characters (sources at 512, echoed keys at 64), because 2b renders findings into the system prompt. A test pins a hard upper bound on findings and characters for worst-case files.
+- **Agents that replace a steward profile.** With lists active, the user and project agent directories are scanned the way pi-subagents 0.77.0 reads them (`parseFrontmatter`, block scalars included, and `normalizePackageName`); a `steward.<role>` agent there is `agent-shadowed`, and a `role:` escalation to that role errors and is cleared. A scan that stops at 5,000 files in one directory errors with `shadow-scan-truncated`. Known gap: agents from other installed pi packages are not scanned.
+- **pi-subagents `.pi/settings.json` overrides still apply** after the plan compiles, field by field (`PS/src/agents/agents.js:1350-1359`), but only in a trusted project. Since pi-subagents 0.77.0, a session that declined project trust ignores project subagent settings, project agents and chains, project-scoped packages and `modelScope`, and its default scope behaves as `user` (`PS/CHANGELOG.md:41-42`, `PS/docs/agents.md:34`, `PS/src/agents/agents.js:2396,2669`). The effective-binding computation in Phase 2 mirrors that: with `project_trusted` false, the project settings layer is dropped, and `.pi/steward-model-plan.json` contributes its two lists only (rule above). `apply` writes user settings only and never writes into a repo.
 - Phase 2 builds the merge and enforcement; the tests are listed there.
 
 Known instance: this repo's committed `.pi/settings.json` pins all seven `steward.*` profiles to `amorphic/claude-*` for work inside this repo. It overrides the `model` field of any user plan here, in a trusted project only (see the trust rule above). Its keys moved to the role-only names in 0.10.0 (Phase 1, `.pi/settings.json:4-10`); `steward.top-reviewer` is pinned to `amorphic/claude-opus-5-5`.
@@ -136,7 +149,7 @@ Known instance: this repo's committed `.pi/settings.json` pins all seven `stewar
 - **Steward sets no default.** The main thread runs on whatever model and thinking level pi on the client machine picks: `defaultModel`, `defaultThinkingLevel`, `modelThinkingLevels`, and `/model` (`PIDOCS/models.md:29-33`). Selecting a model in `/model` then Ctrl+S, `/thinking` then Ctrl+S, and `/scoped-models` for Ctrl+P switching are all pi's own.
 - **Check, never switch.** At `session_start` and on every `model_select` event (`PIDIST/extensions/types.d.ts:861-866`, sources `set`, `cycle`, `restore`), the extension reads `ctx.model` and `ctx.thinkingLevel` (`types.d.ts:225-234`) and rebuilds the plan block. The next run's system prompt carries the new block; `before_agent_start` already re-adds the edict on every run (`pi/extensions/steward/index.ts:222-240`). A model switch already costs the prompt cache, so the rebuild adds no extra cache miss.
 - **A session on a different model.** If the main model is not in `main.models`, the block opens with a `STEWARD WARNING` telling the main thread to inform the operator and name `/model`. That follows the existing warning pattern (`hooks/steward_hook.py:166-181`). If the model is also outside `judgmentModels`, the warning adds that delegation decisions are unreliable on fast-tier models (Harness Effect, below). Roles bound to `main` inherit that model, so the warning lists them too. `agentOverridesByProvider` follows the new provider at the next launch on its own (`PS/docs/models.md:64`).
-- **Thinking drift.** Confirmed startup order (`PIDIST/sdk.js:121-143`, spike 2026-10-11): an explicit option first (`--model x:level` suffix, `main.js:379-385`; `--thinking`, `main.js:412`, applied after and winning); then, for a resumed session that has a recorded thinking-level entry, that recorded level (`sdk.js:123-126`, which skips the per-model setting; a session with no entry falls through); then `modelThinkingLevels["<provider>/<id>"]` (`sdk.js:129-133`); then `defaultThinkingLevel` (`sdk.js:135`); then a clamp to the model's supported levels (`sdk.js:143`). So the per-model entry outranks the default for a fresh session, and the check must treat a resumed session's level as the effective one. Earlier drafts said pi caps `amorphic/claude-opus-5-5` at `high`. That was wrong: it was a stale `modelThinkingLevels` entry (`high`) in `~/.pi/agent/settings.json`, not an amorphic or pi limit. It was set to `xhigh` on 2026-10-09, and a plain `pi -p` run then recorded thinkingLevel `xhigh`. The check still reports a stale per-model entry that differs from `main.thinking`.
+- **Thinking drift.** Confirmed startup order (`PIDIST/sdk.js:121-143`, spike 2026-10-11): an explicit option first (`--model x:level` suffix, `main.js:379-385`; `--thinking`, `main.js:412`, applied after and winning); then, for a resumed session, its recorded thinking-level entry, or `defaultThinkingLevel` and then `medium` when it has none (`sdk.js:123-126`; a resumed session never reads `modelThinkingLevels`, with or without an entry); then, for a fresh session, `modelThinkingLevels["<provider>/<id>"]` (`sdk.js:129-133`); then `defaultThinkingLevel` (`sdk.js:135`); then a clamp to the model's supported levels (`sdk.js:143`). So the per-model entry outranks the default for a fresh session only, and the check must treat a resumed session's level as the effective one. Earlier drafts said pi caps `amorphic/claude-opus-5-5` at `high`. That was wrong: it was a stale `modelThinkingLevels` entry (`high`) in `~/.pi/agent/settings.json`, not an amorphic or pi limit. It was set to `xhigh` on 2026-10-09, and a plain `pi -p` run then recorded thinkingLevel `xhigh`. The check still reports a stale per-model entry that differs from `main.thinking`.
 - **Not used: `pi.setModel()` and `setThinkingLevel()`** (`types.d.ts:1274-1281`). They would override an explicit operator choice, including a resumed session's restored model.
 - **Not used: a steward virtual main model.** With a virtual model selected, `ctx.model` is the virtual selection (`PIDOCS/virtual-models.md:23`). pi-subagents would then key `agentOverridesByProvider` on the virtual provider, and `inherit` would expand to the virtual id (`PS/docs/models.md:221`), which a foreground child cannot resolve (next section).
 
@@ -216,8 +229,9 @@ Main thread: openai-codex/gpt-6.1-sol at xhigh. In the plan: yes. Judgment-grade
 |-|-|-|-|-|-|-|
 | steward.coder | ollama-cloud/deepseek-v4.1-flash | high | no | deepseek | fireworks/accounts/fireworks/models/deepseek-v4p1-flash:high | openai-codex/gpt-6.1-sol:high |
 | steward.researcher | ollama-cloud/deepseek-v4.1-flash | high | no | deepseek | fireworks/accounts/fireworks/models/deepseek-v4p1-flash:high | openai-codex/gpt-6.1-sol:high |
-| steward.reviewer | amorphic/claude-sonnet-5-5 | high | no | claude | openai-codex/gpt-6.1-sol:medium | use steward.deep-reasoner |
+| steward.reviewer | amorphic/claude-sonnet-5-5 | high | no | claude | openai-codex/gpt-6.1-sol:medium | steward.deep-reasoner (its own model and thinking) |
 | steward.deep-reasoner | openai-codex/gpt-6.1-sol (inherits the main thread) | xhigh | yes | gpt | amorphic/claude-opus-5-5:xhigh | keep it on the main thread |
+| steward.top-reviewer | amorphic/claude-opus-5-5 | max | yes | claude | anthropic/claude-opus-5-5:max | keep it on the main thread |
 | ... | | | | | | |
 At most 3 children at a time on ollama-cloud.
 ```
@@ -293,7 +307,7 @@ Each phase ships on its own and keeps `npm test` green (`python3 -m unittest dis
 |-|-|-|
 |0|README "Profiles on pi" gains the Phase 0 recipe and the `.pi/settings.json` caveat; this document (done, 2026-10-11)|Nothing|
 |1|Role-only pi names with aliases (built in 0.10.0, `f9e319a`; live pi check pending)|Nothing|
-|2|Plan file, per-repo override file with `allowProviders`/`denyProviders`, read-only `check`, generated block, guardrails in the edict; four slices 2a to 2d (2a in progress)|Nothing (role-to-runtime-name map covers both name sets)|
+|2|Plan file, per-repo override file with `allowProviders`/`denyProviders`, read-only `check`, generated block, guardrails in the edict; four slices 2a to 2d (2a built on `pi-model-plan-2a`)|Nothing (role-to-runtime-name map covers both name sets)|
 |3|`apply` and the `steward` pi-subagents profile file (so `/subagents-check-profile` can probe every model)|Phase 2|
 |4|Per-launch outcome log (ships, decided 2026-10-09)|Phase 2|
 |5|Deferred: in-child failover router|Phase 3 and a live probe|
@@ -310,7 +324,10 @@ Each phase ships on its own and keeps `npm test` green (`python3 -m unittest dis
   2. **Operator follow-up.** Update the example at `~/AGENTS.md:21` and `~/.pi/agent/AGENTS.md:21`. These are operator files; the old name keeps resolving meanwhile.
 
 **Phase 2: plan, check, block.** Split into four slices, each shipping with `npm test` green:
-- **2a, `hooks/model_plan.py`** (in progress on branch `pi-model-plan-2a`, worktree `steward-model-plan-2a`): schema, `"*"` merge, user plus per-repo plan merge, `allowProviders`/`denyProviders`, effective-binding precedence including the 0.77.0 untrusted-project rule, and findings. Python tests only. Deep-reasoner reviews it, because allow/deny decides whether code leaves for third-party providers.
+- **2a, `hooks/model_plan.py`** (built on branch `pi-model-plan-2a`, worktree `steward-model-plan-2a`; not merged): schema, `"*"` merge, user plus per-repo plan merge, `allowProviders`/`denyProviders`, effective-binding precedence including the 0.77.0 untrusted-project rule, and findings. Python tests only. Commits: `d6a6f6a` (core), `9302dfc` (review fixes: fail-closed deny check, robustness, layering), then the commit adding `role:<role>` escalation targets and untrusted-project lists (decisions 2026-10-12). Deep-reasoner reviewed it, because allow/deny decides whether code leaves for third-party providers. Real-resolver results:
+  - First fix pass: 300 model spellings went through the installed pi-subagents 0.77.0 resolver. 265 resolve to a denied provider and all 265 error; 35 do not resolve and all 35 error; the Python mirror matched the resolver on 300 of 300.
+  - Second review: 16,320 cases through `resolveEffectiveSubagentModel` against the mirror, 0 mismatches; fuzzing (3,000 plan and settings shapes, 2,000 malformed fact sets) gave 0 internal errors.
+  - Second fix pass (fail-closed list reading, malformed allow lists, shadowed escalation targets, pi-subagents frontmatter and package-name parity, bounded findings): the drift guard `tests/test_pi_model_plan_resolver.py` runs about 16,000 spellings (the first review's fail-open spellings included), `normalizeModelSegment`, `parsePackageName` and `parseFrontmatter` corpora through both the mirror and the installed pi-subagents via `tests/pi/resolve_model.mjs`, and requires them to agree. It pins pi-subagents 0.77.0 and fails with "re-verify the mirror" on another version; it skips, with the reason, when node or the package is missing (`$PI_SUBAGENTS_DIR` overrides the path). The reviewer's probes and both fuzzers pass, with 0 internal errors.
 - **2b, rendering and session start:** the block renderer and the pi session-start branch in `cmd_session_start`. No plan file gives byte-identical output to today.
 - **2c, extension:** registry facts in the `session-start` payload, the `model_select` rebuild, and `/steward-models check`.
 - **2d, edict text:** rule 2 rewording, the Guardrails section, the judgment-floor inline case, and the built-in `parallel` workflow for independent fanout. Carries the open item on in-reply ```` ```js ```` blocks (see Edict changes).
@@ -323,10 +340,10 @@ Detail for the whole phase:
   - first-available resolution, including a no-credentials candidate;
   - `main` rendered as inherit with the current main model;
   - clamp, `maxTokens`, router-id, concurrency, judgment-floor, family, stale-key, `modelScope` and `maxThinking` findings;
-  - effective-binding precedence over fixture user and project settings, with and without `agentOverridesByProvider`, and with an untrusted project ignored;
+  - effective-binding precedence over fixture user and project settings, with and without `agentOverridesByProvider`, and with an untrusted project's settings ignored;
   - no plan file and no registry facts gives byte-identical session-start output to today (regression);
   - rendered text has no em-dash and uses `|-|` separators;
-  - project file: merges over the user plan field by field; ignored when the project is untrusted; `denyProviders` and a non-empty `allowProviders` make the check error on a bound model, fallback or escalation target, and make `apply` skip those candidates; a repo pinned to `amorphic` and `anthropic` never resolves a Flash binding; the winning file is named in the output.
+  - project file: merges over the user plan field by field; when the project is untrusted only its lists apply (invalid entries, an oversize file and bad JSON each give a finding and no exception); `denyProviders` and a non-empty `allowProviders` make the check error on a bound model, fallback or escalation target, and make `apply` skip those candidates; a repo pinned to `amorphic` and `anthropic` never resolves a Flash binding; the winning file is named in the output.
 - Node tests in `tests/pi/steward-extension.test.mjs`:
   - payload carries main model and available models from a fake registry;
   - `model_select` triggers a rebuild that the next `before_agent_start` uses;
@@ -412,6 +429,13 @@ Changes since the plan was written; the 2026-10-09 text above stays as history.
 3. **Everyday review stays on Sonnet 5.5 at `high`** (steward 0.9.1, `routing.md`, section "Reviewer stays on Sonnet 5.5 high (operator decision 2026-10-11)"). Diffs touching auth, payments, concurrency or data migrations go to deep-reasoner. The plan's `reviewer` role keeps its Sonnet default and cross-family rule.
 4. **Both old top-reviewer names stay as aliases** (today, 0.10.0): `steward.top-reviewer` lists `steward.reviewer-opus-max` and `steward.reviewer-fable-xhigh`, so a saved launch under either name resolves.
 5. **Rename shipped as 0.10.0**, not 0.9.0 (decision 5 above).
+
+## Operator decisions, 2026-10-12
+
+1. **Escalation can name a role.** `escalate` accepts `role:<role>`: the failed check is relaunched on that steward profile with its own model and thinking, so the target takes no `:level`. An unknown role or the role itself is a schema error. The allow/deny lists are checked against the target's effective binding too, so a role target cannot bypass them.
+2. **Operator's case plan updated** (see Operator's case): deep-reasoner gets `"escalate": null`; reviewer gets `"escalate": "role:deep-reasoner"`; top-reviewer gets `"fallback": ["anthropic/claude-opus-5-5:max"]` and `"escalate": null`, and stays on `amorphic/claude-opus-5-5` at `max`. No judgment role binds, relaunches or escalates to Flash.
+3. **Untrusted projects keep their provider lists.** From an untrusted project's plan files only `allowProviders` and `denyProviders` are read, validated and size-capped; every other field stays ignored. An untrusted project's `.pi/settings.json` stays ignored, as in pi-subagents 0.77.0 (Scope section).
+4. **S5: `byMainProvider` drops the replaced model.** When a `byMainProvider` entry replaces a role's model, the replaced model is not kept as a relaunch candidate, so a relaunch never returns to the main thread's family.
 
 ## Thinking levels for DeepSeek V4.1 Flash
 
