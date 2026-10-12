@@ -15,9 +15,10 @@ tests skip and say why.
 
 import json
 import os
-import random
+import hashlib
 import shutil
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -92,25 +93,57 @@ def mutations(provider, mid):
     ]
 
 
+PREFERRED = (None, "anthropic", "amorphic", "ollama-cloud", "Ollama-Cloud")
+
+
 def resolve_corpus():
-    rng = random.Random(7)
+    """Deterministic, deduplicated cases. Every catalog entry and spelling runs bare against every preferred
+    provider; each :level suffix runs once per spelling with the preferred provider rotating, so all levels
+    meet all providers across the corpus; restricted availability uses rotating catalog windows."""
     providers = sorted({p for p, _ in CATALOG})
-    preferred = [None, "anthropic", "amorphic", "ollama-cloud", "Ollama-Cloud"]
-    cases = []
+    rotation = list(PREFERRED) + providers
+    cases, seen = [], set()
+
+    def add(model, avail, pref):
+        key = (model, tuple(avail), pref)
+        if model.strip() and model.strip() != "inherit" and key not in seen:
+            seen.add(key)
+            cases.append({"model": model, "avail": list(avail), "preferred": pref})
+
+    step = 0
     for provider, mid in CATALOG:
         for spelling in mutations(provider, mid):
-            for level in LEVELS:
-                for pref in preferred + [rng.choice(providers)]:
-                    cases.append({"model": spelling + level, "avail": CATALOG, "preferred": pref})
-    for _ in range(40):
-        subset = rng.sample(CATALOG, rng.randint(1, len(CATALOG)))
-        for provider, mid in rng.sample(CATALOG, 4):
-            for spelling in rng.sample(mutations(provider, mid), 6):
-                cases.append({"model": spelling, "avail": subset, "preferred": rng.choice([None] + providers)})
+            for pref in PREFERRED + (providers[step % len(providers)],):
+                add(spelling, CATALOG, pref)
+            for li, level in enumerate(LEVELS[1:]):
+                add(spelling + level, CATALOG, rotation[(step + li * 5) % len(rotation)])
+            step += 1
+    n = len(CATALOG)
+    for k in range(40):
+        subset = [CATALOG[(k + j) % n] for j in range(1 + k % n)]
+        for t in range(4):
+            provider, mid = CATALOG[(k * 5 + t * 3) % n]
+            spellings = mutations(provider, mid)
+            for u in range(6):
+                add(spellings[(k + u * 5) % len(spellings)], subset, rotation[(k + t + u) % len(rotation)])
     for spelling in B1_SPELLINGS:
         for pref in (None, "anthropic", "amorphic", "ollama-cloud"):
-            cases.append({"model": spelling, "avail": CATALOG, "preferred": pref})
-    return [c for c in cases if c["model"].strip() and c["model"].strip() != "inherit"]
+            add(spelling, CATALOG, pref)
+    return cases
+
+
+def wire_corpus(resolve_cases, normalize_cases):
+    """The helper payload: each distinct availability list is sent once and cases refer to it by index."""
+    avails, index = [], {}
+    rows = []
+    for case in resolve_cases:
+        key = tuple(map(tuple, case["avail"]))
+        if key not in index:
+            index[key] = len(avails)
+            avails.append([list(pair) for pair in key])
+        rows.append([case["model"], index[key], case["preferred"]])
+    return {"avails": avails, "resolve": rows, "normalize": normalize_cases, "package": PACKAGE_NAMES,
+            "frontmatter": FRONTMATTER}
 
 
 PACKAGE_NAMES = ["steward", "Steward", "STEWARD", "steward.", ".steward", " steward ", "-Steward-", "my pkg",
@@ -135,19 +168,93 @@ FRONTMATTER = [
 ]
 
 
+HELPER_INPUT_CORRUPTED = 3  # resolve_model.mjs: stdin did not match the sha256 it was given
+HELPER_ATTEMPTS = 3
+MIRROR_DRIFT = "the mirror in hooks/model_plan.py and the installed pi-subagents disagree: re-verify the mirror"
+
+
+class TransportFault(Exception):
+    """The payload or the result was damaged between the two processes, or the helper died on a signal."""
+
+
+def run_helper_once(payload):
+    proc = subprocess.run(["node", str(HELPER), str(pi_subagents_dir()), hashlib.sha256(payload).hexdigest()],
+                          input=payload, capture_output=True, timeout=120)
+    stderr = proc.stderr.decode("utf-8", "replace")[-2000:]
+    if proc.returncode < 0:
+        raise TransportFault("resolve_model.mjs died on signal %d: %s" % (-proc.returncode, stderr))
+    if proc.returncode == HELPER_INPUT_CORRUPTED:
+        raise TransportFault(stderr.strip() or "input corrupted in transit")
+    if proc.returncode != 0:
+        raise AssertionError("resolve_model.mjs failed (exit %d): %s" % (proc.returncode, stderr))
+    digest, _, body = proc.stdout.partition(b"\n")
+    if hashlib.sha256(body).hexdigest().encode() != digest:
+        raise TransportFault("resolve_model.mjs output corrupted in transit")
+    return json.loads(body)
+
+
+def run_helper(corpus):
+    """Run the helper, retrying only transport faults; a wrong answer is the caller's to report."""
+    payload = json.dumps(corpus, separators=(",", ":")).encode("utf-8")
+    faults = []
+    for _ in range(HELPER_ATTEMPTS):
+        try:
+            return run_helper_once(payload), faults
+        except TransportFault as fault:
+            faults.append(str(fault))
+    raise AssertionError("resolve_model.mjs failed %d times in transit: %s" % (HELPER_ATTEMPTS, " | ".join(faults)))
+
+
+class HelperRetryTests(unittest.TestCase):
+    def run_with(self, outcomes):
+        calls = []
+
+        def fake(payload):
+            calls.append(payload)
+            outcome = outcomes[len(calls) - 1]
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        original = globals()["run_helper_once"]
+        globals()["run_helper_once"] = fake
+        try:
+            return run_helper({}), calls
+        finally:
+            globals()["run_helper_once"] = original
+
+    def test_transport_faults_retry_up_to_two_more_times(self):
+        (result, faults), calls = self.run_with([TransportFault("a"), TransportFault("b"), {"ok": 1}])
+        self.assertEqual((result, faults, len(calls)), ({"ok": 1}, ["a", "b"], 3))
+        with self.assertRaisesRegex(AssertionError, "failed 3 times in transit"):
+            self.run_with([TransportFault("a")] * 3 + [{"ok": 1}])
+
+    def test_a_helper_error_does_not_retry(self):
+        with self.assertRaisesRegex(AssertionError, "exit 1"):
+            self.run_with([AssertionError("resolve_model.mjs failed (exit 1)"), {"ok": 1}])
+
+
 @unittest.skipIf(skip_reason(), skip_reason() or "")
 class ResolverDriftGuardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.resolve_cases = resolve_corpus()
         cls.normalize_cases = sorted({c["model"] for c in cls.resolve_cases} | set(PACKAGE_NAMES))
-        corpus = {"resolve": cls.resolve_cases, "normalize": cls.normalize_cases, "package": PACKAGE_NAMES,
-                  "frontmatter": FRONTMATTER}
-        proc = subprocess.run(["node", str(HELPER), str(pi_subagents_dir())], input=json.dumps(corpus),
-                              capture_output=True, text=True, timeout=120)
-        if proc.returncode != 0:
-            raise AssertionError("resolve_model.mjs failed: %s" % proc.stderr[-2000:])
-        cls.js = json.loads(proc.stdout)
+        cls.js, cls.transport_faults = run_helper(wire_corpus(cls.resolve_cases, cls.normalize_cases))
+        for fault in cls.transport_faults:
+            print("drift guard retried after a transport fault: %s" % fault, file=sys.stderr)
+
+    def test_helper_answered_every_case(self):
+        for key, sent in (("resolve", self.resolve_cases), ("normalize", self.normalize_cases),
+                          ("package", PACKAGE_NAMES), ("frontmatter", FRONTMATTER)):
+            self.assertEqual(len(self.js[key]), len(sent), key)
+
+    def test_helper_rejects_a_payload_that_does_not_match_its_sha256(self):
+        payload = json.dumps(wire_corpus(self.resolve_cases[:3], [])).encode("utf-8")
+        proc = subprocess.run(["node", str(HELPER), str(pi_subagents_dir()), hashlib.sha256(b"other").hexdigest()],
+                              input=payload, capture_output=True, timeout=60)
+        self.assertEqual(proc.returncode, HELPER_INPUT_CORRUPTED)
+        self.assertIn(b"input corrupted in transit", proc.stderr)
 
     def test_installed_version_is_the_mirrored_one(self):
         self.assertEqual(
@@ -158,7 +265,7 @@ class ResolverDriftGuardTests(unittest.TestCase):
             % (self.js["version"], PI_SUBAGENTS_MIRRORED, "; ".join(NON_DIFFERENTIAL_MIRRORS)))
 
     def test_model_resolution_matches(self):
-        self.assertGreater(len(self.resolve_cases), 10000)
+        self.assertGreater(len(self.resolve_cases), 4000)
         mismatches = []
         for case, js in zip(self.resolve_cases, self.js["resolve"]):
             avail = [{"provider": p, "id": i} for p, i in case["avail"]]
@@ -166,7 +273,8 @@ class ResolverDriftGuardTests(unittest.TestCase):
             py = mp.resolve_subagent_model(request, avail, case["preferred"]) or request
             if py != js:
                 mismatches.append((case["model"], case["preferred"], len(case["avail"]), py, js))
-        self.assertEqual(mismatches[:10], [], "%d of %d differ" % (len(mismatches), len(self.resolve_cases)))
+        self.assertEqual(mismatches[:10], [],
+                         "%s: %d of %d differ" % (MIRROR_DRIFT, len(mismatches), len(self.resolve_cases)))
 
     def test_b1_spellings_resolve_alike(self):
         b1 = [c for c in self.resolve_cases if c["model"] in B1_SPELLINGS]
@@ -175,7 +283,7 @@ class ResolverDriftGuardTests(unittest.TestCase):
     def test_normalize_segment_matches(self):
         mismatches = [(s, mp.normalize_segment(s), js) for s, js in zip(self.normalize_cases, self.js["normalize"])
                       if mp.normalize_segment(s) != js]
-        self.assertEqual(mismatches[:10], [])
+        self.assertEqual(mismatches[:10], [], MIRROR_DRIFT)
 
     def test_package_names_match(self):
         for raw, js in zip(PACKAGE_NAMES, self.js["package"]):
@@ -184,11 +292,11 @@ class ResolverDriftGuardTests(unittest.TestCase):
             else:
                 name = mp.normalize_package_name(raw)
                 py = {"packageName": name} if name and mp.PACKAGE_ID_RE.match(name) else {"error": True}
-            self.assertEqual(py, js, repr(raw))
+            self.assertEqual(py, js, "%s: %r" % (MIRROR_DRIFT, raw))
 
     def test_frontmatter_matches(self):
         for text, js in zip(FRONTMATTER, self.js["frontmatter"]):
-            self.assertEqual(mp.parse_frontmatter(text), js, repr(text))
+            self.assertEqual(mp.parse_frontmatter(text), js, "%s: %r" % (MIRROR_DRIFT, text))
 
 
 if __name__ == "__main__":
