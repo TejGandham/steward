@@ -17,7 +17,10 @@ PI_SKILL = REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md"
 README = REPO_ROOT / "README.md"
 NOCREDS = "openai/gpt-6.1-nocreds"
 # Edict size at 55106f6 was 10,251 bytes; the fixes may add a little.
-EDICT_MAX_BYTES = 11000
+# The edict rides in every pi request's system prompt, so the budget stays tight.
+# 0.11.1 adds the ad-hoc browser chores routing row (about 210 bytes); its
+# hand-back rule lives in skills/delegating/routing.md, not here.
+EDICT_MAX_BYTES = 11200
 
 
 def _section(text, heading):
