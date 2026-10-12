@@ -44,7 +44,8 @@ class PiEdictModelPlanTests(unittest.TestCase):
     def test_rule2_unavailable_and_no_relaunch(self):
         # Option B: an unavailable binding's row says which model to pass.
         self.assertIn('"pass model X"', self.rule2)
-        self.assertIn("With no relaunch string (`none`, or no such column), do not relaunch", self.rule2)
+        # Release review: retry the same profile once without `model` after an overload.
+        self.assertIn("With no relaunch model (`none`, or no such column), do not choose a model yourself", self.rule2)
 
     def test_rule2_blocked_profiles(self):
         self.assertIn("blocked", self.rule2)
@@ -71,7 +72,7 @@ class PiEdictModelPlanTests(unittest.TestCase):
                        "family", "cap", "thinking"):
             self.assertIn(phrase, joined)
         self.assertIn("steward.deep-reasoner", joined)
-        self.assertIn("never the same model twice", joined)
+        self.assertIn("never a model the block does not name", joined)
 
     def test_parallel_workflow_shape(self):
         call = _section(self.text, "## How to call")

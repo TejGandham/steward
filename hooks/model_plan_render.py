@@ -34,10 +34,13 @@ MAX_WARNING_CHARS = 400
 MAX_CELL_CHARS = 90
 MORE_RESERVE = 40  # room kept for the "N more" line
 
-HEADING = "## Model plan on this machine (generated at session start; rebuilt on model switch)"
+HEADING = "## Model plan on this machine (generated at session start; rebuilt on a model or thinking switch)"
 FAIL_OPEN_CODES = ("facts-invalid", "internal-error")
 # Error codes on a role's effective binding that mean "do not launch it".
-BLOCK_CODES = ("provider-denied", "provider-not-allowed", "effective-model-unverifiable", "agent-shadowed")
+# An effective binding above subagents.maxThinking, or outside a strict
+# enforced modelScope, fails before start (PS/docs/models.md).
+BLOCK_CODES = ("provider-denied", "provider-not-allowed", "effective-model-unverifiable", "agent-shadowed",
+               "thinking-above-max", "outside-model-scope")
 MAIN_WARNING_CODES = ("main-provider-denied", "main-provider-not-allowed", "main-not-in-plan",
                       "main-below-judgment-floor", "main-thinking-drift", "main-startup-thinking-drift")
 EM_DASH = chr(0x2014)
@@ -112,9 +115,11 @@ def _runs_on(row, blocked):
     if blocked:
         notes.append("blocked")
     elif eff.get("model") and not eff.get("available"):
-        plan = row.get("plan")
-        if plan and plan.get("model") and plan["model"] != eff.get("model"):
-            notes.append("unavailable; pass model %s" % _cell(mp._launch(plan["model"], plan.get("thinking"))))
+        passed = row.get("passModel")
+        if passed and passed.get("launch"):
+            notes.append("unavailable; pass model %s" % _cell(passed["launch"]))
+        elif row.get("plan"):
+            notes.append("unavailable; no model to pass")
         else:
             notes.append("unavailable")
     if not model and not notes:

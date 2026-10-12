@@ -465,6 +465,17 @@ test("a hook that cannot start is logged", async () => {
 	assert.ok(hookLog().some((e) => e.kind === "hook" && e.subcommand === "session-start" && e.error === "ENOENT"));
 });
 
+test("STEWARD_HOOK_LOG records session-start and model-plan calls only, never gate inputs or replies", async () => {
+	await runHook("gate", { session_id: "pi-x", tool_name: "Bash", tool_input: { command: "echo secret-gate-input" } });
+	await runHook("prose-gate", { session_id: "pi-x", last_assistant_message: "secret-reply-text" });
+	await runHook("delegated", { session_id: "pi-x" });
+	await runHook("session-start", { session_id: "pi-x" });
+	const subcommands = hookLog().filter((e) => e.kind === "hook").map((e) => e.subcommand);
+	assert.deepEqual(subcommands, ["session-start"]);
+	const raw = existsSync(process.env.STEWARD_HOOK_LOG) ? readFileSync(process.env.STEWARD_HOOK_LOG, "utf8") : "";
+	assert.ok(!raw.includes("secret-gate-input") && !raw.includes("secret-reply-text"));
+});
+
 test("/steward-models check is display-only: an entry, never a message in the model's context", async () => {
 	const env = load();
 	await sectionAfterStart(env);

@@ -199,7 +199,9 @@ Without a plan file the block still lists what each profile runs on.
 **Where the plan lives**
 - `~/.pi/agent/steward/model-plan.json`, or `$PI_CODING_AGENT_DIR/steward/model-plan.json`.
 - Per repo: `.pi/steward-model-plan.json`. In a trusted repo it wins over your user plan.
-- A repo's `allowProviders` and `denyProviders` apply even when you decline project trust. If a list cannot be read, every profile is blocked.
+- A repo's `allowProviders` and `denyProviders` are read even when you decline project trust. If a list cannot be read, every profile is marked blocked.
+
+**The provider lists do not stop a launch.** In 0.11.0, `allowProviders` and `denyProviders` change only what the block tells the main thread about the `steward.*` profiles and what `/steward-models check` reports. pi-subagents still launches whatever its settings say, and other agents, such as its builtin `worker` and `scout`, are not checked at all. To actually stop a launch on a provider, set an enforced, strict `subagents.modelScope` in pi-subagents settings; in an untrusted project pi-subagents ignores the project's copy of that setting.
 
 A small plan:
 
@@ -220,33 +222,41 @@ A small plan:
     "deep-reasoner": {
       "model": "anthropic/claude-opus-5-5",
       "thinking": "xhigh",
+      "fallback": null,
+      "escalate": null
+    },
+    "top-reviewer": {
+      "model": "anthropic/claude-opus-5-5",
+      "thinking": "max",
+      "fallback": null,
       "escalate": null
     }
   }
 }
 ```
 
-Every role inherits the `"*"` entry. The reviewer escalates to the `steward.deep-reasoner` profile, which keeps its own model and thinking. Deep-reasoner clears the escalation, so a failed check there stays on the main thread. [docs/roadmap/pi-model-plan.md](docs/roadmap/pi-model-plan.md) describes every field.
+Every role inherits the `"*"` entry. The reviewer escalates to the `steward.deep-reasoner` profile, which keeps its own model and thinking. Deep-reasoner and top-reviewer clear both the fallback and the escalation: a judgment role should never drop to the Sonnet fallback in `"*"`, and a failed check there stays on the main thread. [docs/roadmap/pi-model-plan.md](docs/roadmap/pi-model-plan.md) describes every field.
 
 **How the main thread uses the block**
 - It passes `model` only to relaunch after a provider error, to escalate after a failed check, or when you ask. Fable by name still works.
 - A row that says "pass model X" gets `model: "X"` on every launch.
-- If there is no relaunch model, it does not relaunch and tells you.
+- If there is no relaunch model, it never picks one itself. After an overload, rate-limit or timeout error it retries the same profile once without `model`; otherwise it does small or read-only work itself or tells you.
+- A relaunch, escalation or "pass model" string that an enforced `subagents.modelScope` or `subagents.maxThinking` would refuse is shown as `none`; the full report says why.
 - It never launches a blocked profile.
-- When no profile is above the judgment floor, judgment work stays on the main thread.
+- When every profile is marked below the judgment floor, judgment work stays on the main thread. `not checked` sets no floor.
 
-**The seven guardrails** the block states:
-1. Judgment floor: architecture, plans, security review and final synthesis go only to a judgment-grade profile, or stay on the main thread.
+**The seven guardrails** the edict states:
+1. Judgment floor: architecture, plans, security review and final synthesis go only to a profile marked judgment-grade `yes`, or stay on the main thread when every profile is `no`. With `not checked` or no block, the routing table decides.
 2. Cheap models get bounded tasks with a done-condition that a test, type check, lint or command can prove.
-3. One failed check gets one relaunch on the escalation model. A second failure goes to the main thread or `steward.deep-reasoner`.
-4. Fallback is not escalation: a provider error gets one relaunch on the fallback model, never the same model twice.
-5. Cross-family review: a child's output is reviewed by a profile from a different model family.
+3. One failed check gets one relaunch on the escalation model. With no escalation model, or after a second failure, the work goes to the main thread or `steward.deep-reasoner`.
+4. Fallback is not escalation: a provider error gets one relaunch, on the block's relaunch model when there is one, and never on a model the block does not name.
+5. Cross-family review: a child's output is reviewed by a profile from another model family when the block shows one; otherwise by the routing table's reviewer.
 6. Respect provider caps: never more children at once on a provider than its stated cap.
-7. Thinking where it pays: high thinking goes to the main thread and the judgment roles; cheap roles stay at `medium` or lower.
+7. Thinking where it pays: the main thread never raises a cheap role's thinking per call; high thinking belongs to the main thread and the judgment roles.
 
 **How the main thread delegates.** For independent children it uses the built-in `parallel` workflow. For dependent steps it makes separate `subagent` calls, one after another. It uses a workflow script only as a file path. A script written in the reply never reaches pi-subagents on pi 1.1.0 with pi-subagents 0.77.0, so the edict does not use that form.
 
-**Checking and debugging.** `/steward-models check` prints the full report on screen. It does not go into the model's context. To debug the hook, start pi with `STEWARD_HOOK_LOG=<file>`; every hook call then appends one JSON line to that file.
+**Checking and debugging.** `/steward-models check` prints the full report on screen. It does not go into the model's context. To debug the hook, start pi with `STEWARD_HOOK_LOG=<file>`. Each session-start and `model-plan` hook call then appends one JSON line to that file, holding the full payload and the hook's reply. The session-start payload includes pi's whole model catalog (a few hundred KB with many providers) and your working directory, once per session start and per model or thinking switch. Gate calls are never logged, because they carry your commands, file contents and replies. Delete the file when you are done.
 
 ### Gates on pi
 

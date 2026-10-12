@@ -12,10 +12,11 @@
  * thinking level changes, and adds the /steward-models command, which runs the hook's
  * `model-plan` subcommand and shows its report as a display-only session entry.
  *
- * Debugging: with STEWARD_HOOK_LOG=<file>, every hook call appends one JSON line to that file
- * ({kind: "hook", subcommand, payload, stdout, ms}, plus `timedOut: true` or `error: <code>` when
- * the call never finished), and each facts gathering one line ({kind: "facts", ms, models,
- * bytes}). Unset, nothing is written.
+ * Debugging: with STEWARD_HOOK_LOG=<file>, every session-start and model-plan hook call appends
+ * one JSON line to that file ({kind: "hook", subcommand, payload, stdout, ms}, plus
+ * `timedOut: true` or `error: <code>` when the call never finished), and each facts gathering one
+ * line ({kind: "facts", ms, models, bytes}). Gate calls are never logged: their payloads carry
+ * tool inputs and reply text. Unset, nothing is written.
  *
  * Delegation runs through the pi-subagents extension's `subagent` tool. Its foreground children
  * never load ambient extensions, and its background runner sets PI_SUBAGENT_CHILD=1, so this file
@@ -47,6 +48,9 @@ const MODELS_COMMAND = "steward-models";
 const MODELS_ENTRY_TYPE = "steward-models";
 const MODELS_PLAN_SUBCOMMAND = "model-plan";
 const MODELS_USAGE = "Usage: /steward-models [check|apply|stats]";
+
+/** Hook calls STEWARD_HOOK_LOG records; gate payloads carry commands, file contents and replies. */
+const LOGGED_SUBCOMMANDS = new Set(["session-start", MODELS_PLAN_SUBCOMMAND]);
 
 type HookOutput = Record<string, any> | undefined;
 
@@ -82,7 +86,7 @@ export function runHook(
 		};
 		const started = Date.now();
 		const logged = (result: HookResult, stdout: string, extra: Record<string, unknown> = {}) => {
-			if (!settled) debugLog({ kind: "hook", subcommand, payload, stdout, ms: Date.now() - started, ...extra });
+			if (!settled && LOGGED_SUBCOMMANDS.has(subcommand)) debugLog({ kind: "hook", subcommand, payload, stdout, ms: Date.now() - started, ...extra });
 			finish(result);
 		};
 		let child;
