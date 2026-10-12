@@ -50,6 +50,9 @@ On every `task` call to a steward profile:
 | Docs / prose | steward:writer (steward:mechanic for short) |
 | PR-body drafting | steward:writer (steward:mechanic for trivial diffs) |
 | Status / collation | steward:mechanic (steward:researcher if reconciling conflicting reports) |
+| Ad-hoc browser chores (open a page, read, click, fill, count, screenshot via a CDP/chrome-devtools MCP server or playwright-cli) | steward:mechanic with a turn cap in the prompt (steward:researcher or steward:coder for long multi-step flows or flaky dynamic UIs) |
+
+Browser chores: the subagent returns a short answer plus the evidence it saw (URL, page title, element text or counts), never full snapshots, and hands back to the main thread for login walls, 2FA, payment or destructive clicks, or a flow that fails twice.
 
 ## Keep it inline on the main thread when
 one dependent chain fits a single context with no splittable pieces; every step needs frontier judgment; the context is already resident in the main thread; it is the final synthesis/arbitration the main thread owns; or there is no cheap way to verify a delegate's output.

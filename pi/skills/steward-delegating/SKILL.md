@@ -39,6 +39,7 @@ The steward delegation edict governs how this session hands off work: which task
 | Docs / prose | steward.writer (steward.mechanic for short) |
 | PR-body drafting | steward.writer (steward.mechanic for trivial diffs) |
 | Status / collation | steward.mechanic (steward.researcher if reconciling conflicting reports) |
+| Ad-hoc browser chores (open a page, read, click, fill, count, screenshot via a CDP/chrome-devtools MCP server or playwright-cli) | steward.mechanic with a turn cap (steward.researcher for long or flaky flows) |
 
 ## Keep it inline on the main thread when
 one dependent chain fits a single context with no splittable pieces; every step needs frontier judgment; the context is already resident in the main thread; it is the final synthesis/arbitration the main thread owns; there is no cheap way to verify a delegate's output; or the only profile for the task is below the judgment floor in the Model plan block.
