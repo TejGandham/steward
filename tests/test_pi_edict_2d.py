@@ -41,6 +41,11 @@ class PiEdictModelPlanTests(unittest.TestCase):
         self.assertIn("copy the exact string from the block", r)
         self.assertIn("Fable", r)
 
+    def test_rule2_unavailable_and_no_relaunch(self):
+        # Option B: an unavailable binding's row says which model to pass.
+        self.assertIn('"pass model X"', self.rule2)
+        self.assertIn("With no relaunch string (`none`, or no such column), do not relaunch", self.rule2)
+
     def test_rule2_blocked_profiles(self):
         self.assertIn("blocked", self.rule2)
         self.assertIn('"do not launch"', self.rule2)
