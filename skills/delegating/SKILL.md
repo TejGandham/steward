@@ -28,6 +28,9 @@ The steward delegation edict governs how this session hands off work: which task
 | Docs / prose | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for short) |
 | PR-body drafting | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for trivial diffs) |
 | Status / collation | steward:mechanic-haiku-medium (steward:researcher-sonnet-low if reconciling conflicting reports) |
+| Ad-hoc browser chores (open a page, read, click, fill, count, screenshot via a CDP/chrome-devtools MCP server or playwright-cli) | steward:mechanic-haiku-medium with a turn cap in the brief (steward:researcher-sonnet-low or steward:coder-opus-medium for long multi-step flows or flaky dynamic UIs) |
+
+Browser chores: the subagent returns a short answer plus the evidence it saw (URL, page title, element text or counts), never full snapshots, and hands back to the main thread for login walls, 2FA, payment or destructive clicks, or a flow that fails twice.
 
 ## Keep it inline on the main thread when
 one dependent chain fits a single context with no splittable pieces; every step needs frontier judgment; the context is already resident in the orchestrator thread; it is the final synthesis/arbitration the orchestrator owns; or there is no cheap way to verify a delegate's output.

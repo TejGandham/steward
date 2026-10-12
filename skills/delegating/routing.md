@@ -1,6 +1,6 @@
 # Routing knowledge base
 
-Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5; revised 2026-10-09 for Haiku 5.5 and the mechanic's move to it; revised 2026-10-11 for per-call effort, the top reviewer's move to Opus 5.5 max, and the decision to keep everyday review on Sonnet 5.5 high.
+Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5; revised 2026-10-09 for Haiku 5.5 and the mechanic's move to it; revised 2026-10-11 for per-call effort, the top reviewer's move to Opus 5.5 max, and the decision to keep everyday review on Sonnet 5.5 high; revised 2026-10-12 for routing ad-hoc browser chores to the Haiku mechanic.
 
 ## Cost ranking (per MTok, input / output / cache read), cheapest to dearest (cited: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-09-22, re-fetched 2026-10-03 and 2026-10-08)
 | Model | Input | Output | Cache read |
@@ -92,6 +92,18 @@ Why max, not xhigh:
 
 The evidence is also logged in `docs/evaluations/2026-10-09-model-assignment-evidence.md`, section "Re-verification of the Fable claim, 2026-10-11".
 
+## Browser chores on Haiku 5.5 (operator decision 2026-10-12)
+Ad-hoc browser chores (open a page, read, click, fill, count, screenshot via a CDP/chrome-devtools MCP server or playwright-cli) go to `steward:mechanic-haiku-medium` with a turn cap in the brief, not to the main thread.
+- The subagent returns a short answer plus the evidence it saw: the URL, the page title, and the element text or counts. It never returns full snapshots.
+- It hands back to the main thread for login walls and 2FA, for payment or destructive clicks, and for any flow that fails twice.
+- Long multi-step flows and flaky dynamic UIs go to a stronger profile: `steward:researcher-sonnet-low` for read-only flows, `steward:coder-opus-medium` when the flow changes something.
+
+Basis (all read 2026-10-12):
+- Anthropic's Haiku 5.5 launch post, https://www.anthropic.com/claude-haiku-5-5 (2026-10-07): it "works especially well for speed-sensitive tasks like live customer support and browser use", "pairs well with Opus 5.5 and Sonnet 5.5 as a subagent", and is "best suited to more narrowly scoped tasks". OSWorld 2.1 offline subset: Haiku 5.5 72.4%, Sonnet 5.5 83.9%. Terminal-Bench 4.0: Haiku 39.2%, Sonnet 70.6%. Those gaps are why long or flaky flows go to a stronger profile.
+- Claude Code subagent docs, https://code.claude.com/docs/en/sub-agents: the subagent "does that work in its own context and returns only the summary". Page snapshots stay in the subagent's context instead of the main thread's.
+- Anthropic Help Center, https://support.claude.com/en/articles/14552983-models-usage-and-limits-in-claude-code: Opus "uses meaningfully more of your quota", and Haiku is for "quick mechanical work".
+- Checkly, https://www.checklyhq.com/blog/mcp-vs-cli-token-efficiency/ (2026-07-30): Playwright MCP and playwright-cli measured at "more or less the same token consumption" (45-50k tokens for one task). Picking one tool over the other saves little; moving the work off the main thread is the main saving.
+
 ## Dropped models (2026-09-22)
 - **Haiku 4.5** ($1/$5/$0.10): dropped. Nearest retirement floor of any model in the matrix (tentative, not sooner than 2026-10-15, three weeks out at drop time; platform.claude.com/docs/en/about-claude/model-deprecations, fetched 2026-09-22), 200K context versus 1M for the rest, no effort dial, and Sonnet 5 at `low` effort now covers the same rote work with an explicit effort setting. Cost for that rote work doubles per token, $1/$5 to $2/$10. Those reasons (200K context, no effort dial, near retirement) do not apply to Haiku 5.5, which took the mechanic profile back on 2026-10-09; see "Haiku 5.5" above.
 - **Opus 5** ($5/$25/$0.50): dropped. Superseded by Opus 5.5 at a 20% lower input/output price, 60% lower cache reads, and Fable-level quality on most work (anthropic.com/claude-opus-5-5, quoted above). The `opus` alias already resolves to Opus 5.5 on the installed Claude Code 2.1.280 binary here; see the alias-lag caveat below. Deprecation page: Active, tentative retirement not sooner than 2027-07-24.
@@ -121,6 +133,9 @@ Other matrix models' tentative retirement floors, same deprecations page: Sonnet
 | Docs / prose | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for short) |
 | PR-body drafting | steward:writer-sonnet-medium (steward:mechanic-haiku-medium for trivial diffs) |
 | Status / collation | steward:mechanic-haiku-medium (steward:researcher-sonnet-low if reconciling conflicting reports) |
+| Ad-hoc browser chores (open a page, read, click, fill, count, screenshot via a CDP/chrome-devtools MCP server or playwright-cli) | steward:mechanic-haiku-medium with a turn cap in the brief (steward:researcher-sonnet-low or steward:coder-opus-medium for long multi-step flows or flaky dynamic UIs) |
+
+Browser chores: the subagent returns a short answer plus the evidence it saw (URL, page title, the element text or counts), never full snapshots. It hands back to the main thread for login walls and 2FA, payment or destructive clicks, and any flow that fails twice. See "Browser chores on Haiku 5.5" below.
 
 ## Keep it inline on the main thread when
 one dependent chain fits a single context with no splittable pieces; every step needs frontier judgment; the context is already resident in the orchestrator thread; it is the final synthesis/arbitration the orchestrator owns; or there is no cheap way to verify a delegate's output.
