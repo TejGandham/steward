@@ -1,0 +1,728 @@
+"""Tests for hooks/model_plan.py, the pi model plan core (Phase 2a).
+
+Every test builds its own temp HOME, agent dir and project dir. Nothing
+here reads the real ~/.pi/agent. Profile frontmatter comes from this
+repo's pi/agents, which is part of the package under test.
+"""
+
+import copy
+import importlib.util
+import json
+import os
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MODULE = REPO_ROOT / "hooks" / "model_plan.py"
+
+_spec = importlib.util.spec_from_file_location("model_plan", str(MODULE))
+mp = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(mp)
+
+ALL = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+OLLAMA = "ollama-cloud/deepseek-v4.1-flash"
+FIREWORKS = "fireworks/accounts/fireworks/models/deepseek-v4p1-flash"
+SOL = "openai-codex/gpt-6.1-sol"
+OPUS = "amorphic/claude-opus-5-5"
+SONNET = "amorphic/claude-sonnet-5-5"
+HAIKU = "amorphic/claude-haiku-5-5"
+
+
+def model(full, levels=ALL, max_tokens=128000, available=True, api="anthropic-messages"):
+    provider, _, mid = full.partition("/")
+    return {
+        "provider": provider,
+        "id": mid,
+        "available": available,
+        "reasoning": levels != ["off"],
+        "thinkingLevels": list(levels),
+        "maxTokens": max_tokens,
+        "api": api,
+    }
+
+
+CATALOG = [
+    model(OLLAMA, ["off", "minimal", "low", "medium", "high"], 16384, api="openai-completions"),
+    model(FIREWORKS, ["off", "low", "high", "max"], 384000, api="anthropic-messages"),
+    model(SOL, ["off", "minimal", "low", "medium", "high", "xhigh"], 128000, api="openai-codex-responses"),
+    model(OPUS),
+    model(SONNET),
+    model(HAIKU),
+    model("amorphic/claude-fable-5-1"),
+    model("anthropic/claude-opus-5-5"),
+    model("anthropic/claude-sonnet-5-5"),
+    model("anthropic/claude-haiku-5-5"),
+    model("openai/gpt-6.1-nocreds", available=False),
+    model("fireworks/accounts/fireworks/routers/deepseek-flash-latest", ["off", "low", "high"], 384000),
+]
+
+OPERATOR_PLAN = {
+    "version": 1,
+    "main": {"models": [SOL, OPUS], "thinking": "xhigh"},
+    "judgmentModels": ["openai-codex/gpt-6*", "amorphic/claude-opus-5*", "amorphic/claude-fable-5*"],
+    "providers": {"ollama-cloud": {"maxConcurrent": 3}, "fireworks": {}},
+    "roles": {
+        "*": {
+            "model": OLLAMA,
+            "thinking": "high",
+            "fallback": [FIREWORKS],
+            "escalate": "main:high",
+        },
+        "mechanic": {"thinking": "low", "escalate": "main:low"},
+        "reviewer": {
+            "model": SONNET,
+            "thinking": "high",
+            "fallback": [SOL + ":medium"],
+            "byMainProvider": {"amorphic": {"model": SOL, "thinking": "medium"}},
+        },
+        "deep-reasoner": {"model": "main", "thinking": "xhigh", "fallback": [OPUS, SOL]},
+        "top-reviewer": {"model": OPUS, "thinking": "max"},
+    },
+}
+
+
+class PlanTestCase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="steward-model-plan-"))
+        self.home = self.tmp / "home"
+        self.agent_dir = self.home / ".pi" / "agent"
+        self.agent_dir.mkdir(parents=True)
+        self.project = self.tmp / "work" / "repo"
+        (self.project / ".pi").mkdir(parents=True)
+        self.env = {"HOME": str(self.home), "PI_CODING_AGENT_DIR": str(self.agent_dir)}
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    # fixture helpers
+
+    def write_json(self, path, data):
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return str(path)
+
+    def user_plan(self, data):
+        return self.write_json(self.agent_dir / "steward" / "model-plan.json", data)
+
+    def project_plan(self, data):
+        return self.write_json(self.project / ".pi" / "steward-model-plan.json", data)
+
+    def user_settings(self, data):
+        return self.write_json(self.agent_dir / "settings.json", data)
+
+    def project_settings(self, data):
+        return self.write_json(self.project / ".pi" / "settings.json", data)
+
+    def facts(self, main=SOL, thinking="xhigh", trusted=True, cwd=None, models=None):
+        main_obj = None
+        if main:
+            provider, _, mid = main.partition("/")
+            main_obj = {"provider": provider, "id": mid, "thinkingLevel": thinking}
+        return {
+            "main": main_obj,
+            "models": copy.deepcopy(CATALOG if models is None else models),
+            "projectTrusted": trusted,
+            "cwd": str(cwd or self.project),
+        }
+
+    def run_plan(self, **kw):
+        return mp.evaluate(self.facts(**kw), env=self.env)
+
+    def findings(self, result, code=None, role=None, severity=None):
+        out = []
+        for f in result["findings"]:
+            if code is not None and f["code"] != code:
+                continue
+            if role is not None and f["role"] != role:
+                continue
+            if severity is not None and f["severity"] != severity:
+                continue
+            out.append(f)
+        return out
+
+    def codes(self, result):
+        return {f["code"] for f in result["findings"]}
+
+
+class AgentDirTests(unittest.TestCase):
+    def test_matches_steward_hook_config_dir(self):
+        spec = importlib.util.spec_from_file_location("steward_hook_for_plan", str(REPO_ROOT / "hooks" / "steward_hook.py"))
+        hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hook)
+        for extra in ({}, {"PI_CODING_AGENT_DIR": "/x/agent"}, {"PI_CODING_AGENT_DIR": "~/alt"},
+                      {"PI_CODING_AGENT_DIR": "~"}):
+            env = dict({"HOME": "/h", "STEWARD_HARNESS": "pi"}, **extra)
+            self.assertEqual(mp.agent_dir_from_env(env), hook.get_config_dir(env))
+
+
+class ClampTests(unittest.TestCase):
+    def test_mirrors_pi_ai_clamp(self):
+        flash = ["off", "minimal", "low", "medium", "high"]
+        fw = ["off", "low", "high", "max"]
+        self.assertEqual(mp.clamp_thinking("xhigh", flash), "high")
+        self.assertEqual(mp.clamp_thinking("max", flash), "high")
+        self.assertEqual(mp.clamp_thinking("high", flash), "high")
+        # pi-ai searches upward first, then downward.
+        self.assertEqual(mp.clamp_thinking("medium", fw), "high")
+        self.assertEqual(mp.clamp_thinking("minimal", fw), "low")
+        self.assertEqual(mp.clamp_thinking("xhigh", fw), "max")
+        self.assertEqual(mp.clamp_thinking("high", ["off"]), "off")
+        self.assertEqual(mp.clamp_thinking("max", ALL), "max")
+
+
+class FactsContractTests(PlanTestCase):
+    def test_rejects_malformed_facts(self):
+        for bad in (None, {}, {"main": None, "models": "x", "projectTrusted": True, "cwd": "/"},
+                    {"main": {"provider": "a"}, "models": [], "projectTrusted": True, "cwd": "/"},
+                    {"main": None, "models": [{"provider": "a", "id": "b"}], "projectTrusted": True, "cwd": "/"},
+                    {"main": None, "models": [], "projectTrusted": "yes", "cwd": "/"}):
+            with self.assertRaises(ValueError):
+                mp.evaluate(bad, env=self.env)
+
+    def test_accepts_null_main(self):
+        result = self.run_plan(main=None)
+        self.assertIsNone(result["main"])
+        self.assertIn("coder", result["roles"])
+
+
+class SchemaTests(PlanTestCase):
+    def test_bare_id_is_an_error(self):
+        path = self.user_plan({"version": 1, "roles": {"coder": {"model": "deepseek-v4.1-flash"}}})
+        result = self.run_plan()
+        errs = self.findings(result, code="plan-bare-id", severity="error")
+        self.assertEqual(len(errs), 1)
+        self.assertEqual(errs[0]["role"], "coder")
+        self.assertEqual(errs[0]["source"], path)
+
+    def test_bare_id_in_fallback_and_escalate(self):
+        self.user_plan({"version": 1, "roles": {"coder": {
+            "model": OLLAMA, "fallback": ["deepseek-v4p1-flash"], "escalate": "gpt-6.1-sol:high"}}})
+        result = self.run_plan()
+        self.assertEqual(len(self.findings(result, code="plan-bare-id")), 2)
+
+    def test_unknown_role(self):
+        self.user_plan({"version": 1, "roles": {"tester": {"model": OLLAMA}}})
+        result = self.run_plan()
+        errs = self.findings(result, code="plan-unknown-role", severity="error")
+        self.assertEqual(len(errs), 1)
+        self.assertIn("tester", errs[0]["message"])
+
+    def test_unknown_field(self):
+        self.user_plan({"version": 1, "colour": "blue", "roles": {"coder": {"model": OLLAMA, "fallbackModels": []}}})
+        result = self.run_plan()
+        msgs = [f["message"] for f in self.findings(result, code="plan-unknown-field", severity="error")]
+        self.assertEqual(len(msgs), 2)
+        self.assertTrue(any("colour" in m for m in msgs))
+        self.assertTrue(any("fallbackModels" in m for m in msgs))
+
+    def test_bad_thinking(self):
+        self.user_plan({"version": 1, "main": {"thinking": "ultra"}, "roles": {
+            "coder": {"model": OLLAMA, "thinking": "hgih"},
+            "writer": {"model": OLLAMA, "fallback": [FIREWORKS + ":turbo"]}}})
+        result = self.run_plan()
+        # ":turbo" is not a level, so the whole string is the id; it is not in
+        # the catalog. Only the two named thinking values are schema errors.
+        self.assertEqual(len(self.findings(result, code="plan-bad-thinking", severity="error")), 2)
+
+    def test_bad_version_and_json(self):
+        self.user_plan({"version": 2, "roles": {}})
+        self.assertIn("plan-bad-version", self.codes(self.run_plan()))
+        (self.agent_dir / "steward" / "model-plan.json").write_text("{not json", encoding="utf-8")
+        result = self.run_plan()
+        self.assertIn("plan-unreadable", self.codes(result))
+        self.assertFalse(result["hasPlan"])
+
+    def test_allow_deny_only_in_project_file(self):
+        path = self.user_plan({"version": 1, "denyProviders": ["fireworks"], "roles": {}})
+        result = self.run_plan()
+        errs = self.findings(result, code="plan-project-only-field")
+        self.assertEqual(len(errs), 1)
+        self.assertEqual(errs[0]["source"], path)
+
+    def test_operator_plan_is_schema_clean(self):
+        self.user_plan(OPERATOR_PLAN)
+        result = self.run_plan()
+        self.assertFalse([f for f in result["findings"] if f["code"].startswith("plan-")])
+
+
+class MergeAndResolutionTests(PlanTestCase):
+    def test_star_merges_field_by_field(self):
+        path = self.user_plan(OPERATOR_PLAN)
+        result = self.run_plan()
+        mech = result["roles"]["mechanic"]
+        self.assertEqual(mech["plan"]["model"], OLLAMA)
+        self.assertEqual(mech["plan"]["thinking"], "low")
+        self.assertEqual(mech["plan"]["source"], path)
+        self.assertEqual(mech["relaunch"]["model"], FIREWORKS)
+        self.assertEqual(mech["relaunch"]["thinking"], "low")
+        self.assertEqual(mech["relaunch"]["launch"], FIREWORKS + ":low")
+        self.assertEqual(mech["escalate"]["model"], SOL)
+        self.assertEqual(mech["escalate"]["launch"], SOL + ":low")
+        coder = result["roles"]["coder"]
+        self.assertEqual((coder["plan"]["model"], coder["plan"]["thinking"]), (OLLAMA, "high"))
+        self.assertEqual(coder["escalate"]["launch"], SOL + ":high")
+        self.assertTrue(coder["escalate"]["inheritsMain"])
+        # reviewer's own fallback replaces the "*" list rather than adding to it
+        rev = result["roles"]["reviewer"]
+        self.assertEqual(rev["plan"]["model"], SONNET)
+        self.assertEqual(rev["relaunch"]["launch"], SOL + ":medium")
+
+    def test_first_available_skips_no_credentials(self):
+        self.user_plan({"version": 1, "roles": {"coder": {
+            "model": "openai/gpt-6.1-nocreds", "thinking": "high",
+            "fallback": ["openai/not-in-catalog", OLLAMA, FIREWORKS]}}})
+        result = self.run_plan()
+        coder = result["roles"]["coder"]
+        self.assertEqual(coder["plan"]["model"], OLLAMA)
+        self.assertEqual(coder["relaunch"]["model"], FIREWORKS)
+        nocred = self.findings(result, code="model-no-credentials", role="coder", severity="error")
+        self.assertEqual(len(nocred), 1)
+        self.assertIn("openai/gpt-6.1-nocreds", nocred[0]["message"])
+        self.assertEqual(len(self.findings(result, code="model-not-in-catalog", role="coder", severity="error")), 1)
+
+    def test_fallback_equal_to_binding_is_skipped(self):
+        self.user_plan({"version": 1, "roles": {"coder": {
+            "model": OLLAMA, "fallback": [OLLAMA + ":low", FIREWORKS]}}})
+        coder = self.run_plan()["roles"]["coder"]
+        self.assertEqual(coder["relaunch"]["model"], FIREWORKS)
+
+    def test_no_available_candidate(self):
+        self.user_plan({"version": 1, "roles": {"coder": {"model": "openai/gpt-6.1-nocreds"}}})
+        result = self.run_plan()
+        self.assertIsNone(result["roles"]["coder"]["plan"]["model"])
+        self.assertIsNone(result["roles"]["coder"]["relaunch"])
+        self.assertIn("no-available-candidate", self.codes(result))
+
+    def test_disabled_provider_is_skipped(self):
+        plan = copy.deepcopy(OPERATOR_PLAN)
+        plan["providers"]["ollama-cloud"]["enabled"] = False
+        self.user_plan(plan)
+        result = self.run_plan()
+        self.assertEqual(result["roles"]["coder"]["plan"]["model"], FIREWORKS)
+        self.assertIsNone(result["roles"]["coder"]["relaunch"])
+        self.assertIn("provider-disabled", self.codes(result))
+
+    def test_main_is_inherit(self):
+        self.user_plan(OPERATOR_PLAN)
+        result = self.run_plan(main=SOL)
+        dr = result["roles"]["deep-reasoner"]
+        self.assertEqual(dr["plan"]["setting"], "inherit")
+        self.assertTrue(dr["plan"]["inheritsMain"])
+        self.assertEqual(dr["plan"]["model"], SOL)
+        self.assertEqual(dr["plan"]["thinking"], "xhigh")
+        self.assertEqual(dr["relaunch"]["launch"], OPUS + ":xhigh")
+        result = self.run_plan(main=OPUS)
+        dr = result["roles"]["deep-reasoner"]
+        self.assertEqual(dr["plan"]["model"], OPUS)
+        # the next available candidate that differs from the bound model
+        self.assertEqual(dr["relaunch"]["model"], SOL)
+
+    def test_by_main_provider(self):
+        self.user_plan(OPERATOR_PLAN)
+        rev = self.run_plan(main=OPUS)["roles"]["reviewer"]
+        self.assertEqual((rev["plan"]["model"], rev["plan"]["thinking"]), (SOL, "medium"))
+        self.assertEqual(rev["plan"]["byMainProvider"], "amorphic")
+        rev = self.run_plan(main=SOL)["roles"]["reviewer"]
+        self.assertEqual(rev["plan"]["model"], SONNET)
+        self.assertIsNone(rev["plan"]["byMainProvider"])
+
+    def test_escalate_explicit_target(self):
+        self.user_plan({"version": 1, "roles": {"coder": {"model": OLLAMA, "escalate": OPUS + ":xhigh"}}})
+        esc = self.run_plan()["roles"]["coder"]["escalate"]
+        self.assertEqual((esc["model"], esc["thinking"], esc["inheritsMain"]), (OPUS, "xhigh", False))
+
+    def test_judgment_grade_and_family(self):
+        self.user_plan(OPERATOR_PLAN)
+        roles = self.run_plan()["roles"]
+        self.assertFalse(roles["coder"]["plan"]["judgmentGrade"])
+        self.assertEqual(roles["coder"]["plan"]["family"], "deepseek")
+        self.assertTrue(roles["top-reviewer"]["plan"]["judgmentGrade"])
+        self.assertEqual(roles["top-reviewer"]["plan"]["family"], "claude")
+        self.assertEqual(roles["deep-reasoner"]["plan"]["family"], "gpt")
+
+    def test_family_overrides(self):
+        plan = copy.deepcopy(OPERATOR_PLAN)
+        plan["families"] = {"flash": ["*deepseek*flash*"], "claude": "*claude*"}
+        self.user_plan(plan)
+        roles = self.run_plan()["roles"]
+        self.assertEqual(roles["coder"]["plan"]["family"], "flash")
+        self.assertEqual(roles["top-reviewer"]["plan"]["family"], "claude")
+
+    def test_no_plan_has_effective_only(self):
+        result = self.run_plan()
+        self.assertFalse(result["hasPlan"])
+        mech = result["roles"]["mechanic"]
+        self.assertIsNone(mech["plan"])
+        self.assertIsNone(mech["relaunch"])
+        self.assertIsNone(mech["escalate"])
+        self.assertEqual(mech["effective"]["model"], "anthropic/claude-haiku-5-5")
+        self.assertEqual(mech["effective"]["thinking"], "medium")
+        self.assertTrue(mech["effective"]["modelSource"]["file"].endswith("pi/agents/mechanic.md"))
+        self.assertIn("judgment-floor-unchecked", self.codes(result))
+
+
+class FindingTests(PlanTestCase):
+    def test_clamp_finding(self):
+        self.user_plan({"version": 1, "roles": {
+            "coder": {"model": OLLAMA, "thinking": "xhigh"},
+            "writer": {"model": FIREWORKS, "thinking": "medium"},
+            "top-reviewer": {"model": OPUS, "thinking": "max"}}})
+        result = self.run_plan()
+        coder = self.findings(result, code="thinking-clamped", role="coder")
+        self.assertTrue(coder and coder[0]["severity"] == "warn")
+        self.assertIn("clamped to high", coder[0]["message"])
+        self.assertEqual(result["roles"]["coder"]["plan"]["clampedTo"], "high")
+        self.assertIn("clamped to high", self.findings(result, code="thinking-clamped", role="writer")[0]["message"])
+        self.assertFalse(self.findings(result, code="thinking-clamped", role="top-reviewer"))
+
+    def test_max_tokens_on_coder_and_writer_only(self):
+        self.user_plan(OPERATOR_PLAN)
+        result = self.run_plan()
+        roles = {f["role"] for f in self.findings(result, code="max-tokens-low", severity="warn")}
+        self.assertEqual(roles, {"coder", "writer"})
+
+    def test_router_and_latest_ids(self):
+        self.user_plan({"version": 1, "roles": {"coder": {
+            "model": "fireworks/accounts/fireworks/routers/deepseek-flash-latest",
+            "fallback": ["amorphic/claude-sonnet-latest"]}}})
+        result = self.run_plan()
+        self.assertEqual(len(self.findings(result, code="router-id", role="coder", severity="warn")), 2)
+
+    def test_concurrency(self):
+        self.user_plan(OPERATOR_PLAN)
+        result = self.run_plan()
+        warn = self.findings(result, code="concurrency-above-cap", severity="warn")
+        self.assertEqual(len(warn), 1)
+        self.assertIn("ollama-cloud", warn[0]["message"])
+        self.assertIn("parallel.concurrency", warn[0]["message"])
+        self.assertIn("globalConcurrencyLimit", warn[0]["message"])
+        self.assertEqual(result["concurrency"], {"parallel": 4, "global": 20, "source": None})
+        cfg = self.write_json(self.agent_dir / "extensions" / "subagent" / "config.json",
+                              {"parallel": {"concurrency": 3}, "globalConcurrencyLimit": 3})
+        result = self.run_plan()
+        self.assertFalse(self.findings(result, code="concurrency-above-cap"))
+        self.assertEqual(result["concurrency"]["source"], cfg)
+
+    def test_judgment_floor(self):
+        self.user_plan({"version": 1, "main": {"models": [SOL]},
+                        "judgmentModels": ["openai-codex/gpt-6*", "amorphic/claude-opus-5*"],
+                        "roles": {"*": {"model": OLLAMA, "thinking": "high"}}})
+        result = self.run_plan(main=SONNET)
+        roles = {f["role"] for f in self.findings(result, code="below-judgment-floor", severity="warn")}
+        self.assertTrue({"deep-reasoner", "top-reviewer"} <= roles)
+        self.assertNotIn("coder", roles)
+        self.assertTrue(self.findings(result, code="main-below-judgment-floor", severity="warn"))
+        self.assertTrue(self.findings(result, code="main-not-in-plan", severity="warn"))
+        self.assertFalse(result["main"]["judgmentGrade"])
+        self.assertFalse(result["main"]["inPlan"])
+
+    def test_reviewer_same_family_as_coder(self):
+        self.user_plan({"version": 1, "roles": {"*": {"model": OLLAMA, "thinking": "high"}}})
+        result = self.run_plan()
+        self.assertTrue(self.findings(result, code="reviewer-same-family", role="reviewer", severity="warn"))
+
+    def test_reviewer_main_family_with_by_main_provider(self):
+        self.user_plan({"version": 1, "roles": {
+            "coder": {"model": OLLAMA},
+            "reviewer": {"model": SOL, "byMainProvider": {"amorphic": {"model": SONNET}}}}})
+        result = self.run_plan(main=OPUS)
+        self.assertTrue(self.findings(result, code="reviewer-main-family", role="reviewer"))
+        result = self.run_plan(main=SOL)
+        self.assertFalse(self.findings(result, code="reviewer-main-family"))
+
+    def test_stale_keys(self):
+        path = self.user_settings({"subagents": {
+            "agentOverrides": {"steward.coder-opus-medium": {"model": OLLAMA}},
+            "agentOverridesByProvider": {"amorphic": {"steward.reviewer-fable-xhigh": {"model": OPUS}}}}})
+        result = self.run_plan()
+        stale = self.findings(result, code="stale-override-key", severity="warn")
+        self.assertEqual({f["role"] for f in stale}, {"coder", "top-reviewer"})
+        self.assertTrue(all(f["source"] == path for f in stale))
+        self.assertTrue(any("steward.coder" in f["message"] for f in stale))
+        # stale keys are not applied
+        self.assertEqual(result["roles"]["coder"]["effective"]["model"], "anthropic/claude-opus-5-5")
+
+    def test_model_scope(self):
+        self.user_plan(OPERATOR_PLAN)
+        path = self.user_settings({"subagents": {"modelScope": {
+            "enforce": True, "allow": ["inherit", "amorphic/*", "anthropic/*"]}}})
+        result = self.run_plan()
+        coder = self.findings(result, code="outside-model-scope", role="coder")
+        by_label = {f["message"].split(" ")[1] + " " + f["message"].split(" ")[2]: f["severity"] for f in coder}
+        # binding warns, per-call relaunch and escalation models error
+        self.assertEqual(by_label.get("plan binding"), "warn")
+        self.assertEqual(by_label.get("relaunch model"), "error")
+        self.assertNotIn("escalation model", by_label)  # main:high matches inherit
+        self.assertTrue(all(f["source"] == path for f in coder))
+        # inherit matches the main thread, so deep-reasoner's binding is fine
+        dr = [f for f in self.findings(result, code="outside-model-scope", role="deep-reasoner")
+              if f["severity"] == "warn"]
+        self.assertFalse(dr)
+
+    def test_model_scope_agent_list_and_strict(self):
+        self.user_plan({"version": 1, "roles": {"coder": {"model": OPUS}, "writer": {"model": OPUS}}})
+        self.user_settings({"subagents": {"modelScope": {
+            "enforce": True, "strict": True, "allow": ["amorphic/*"],
+            "agents": {"steward.coder": {"allow": ["amorphic/claude-sonnet*"]}}}}})
+        result = self.run_plan()
+        def plan_hits(role):
+            return [f for f in self.findings(result, code="outside-model-scope", role=role)
+                    if "plan binding" in f["message"]]
+        # the agent list narrows coder; strict turns the binding warning into an error
+        self.assertEqual({f["severity"] for f in plan_hits("coder")}, {"error"})
+        self.assertFalse(plan_hits("writer"))
+        # the frontmatter default (anthropic/...) is outside the global list too
+        self.assertTrue(self.findings(result, code="outside-model-scope", role="writer", severity="error"))
+
+    def test_model_scope_unenforced_is_silent(self):
+        self.user_plan(OPERATOR_PLAN)
+        self.user_settings({"subagents": {"modelScope": {"enforce": False, "allow": ["amorphic/*"]}}})
+        self.assertFalse(self.findings(self.run_plan(), code="outside-model-scope"))
+
+    def test_max_thinking(self):
+        self.user_plan(OPERATOR_PLAN)
+        path = self.project_settings({"subagents": {"maxThinking": "high"}})
+        result = self.run_plan()
+        errs = self.findings(result, code="thinking-above-max", severity="error")
+        roles = {f["role"] for f in errs}
+        self.assertIn("top-reviewer", roles)
+        self.assertIn("deep-reasoner", roles)
+        self.assertNotIn("mechanic", roles)
+        self.assertTrue(all(f["source"] == path for f in errs))
+
+    def test_main_thinking_drift(self):
+        self.user_plan(OPERATOR_PLAN)
+        path = self.user_settings({"defaultThinkingLevel": "xhigh", "modelThinkingLevels": {SOL: "high"}})
+        result = self.run_plan(main=SOL, thinking="high")
+        drift = self.findings(result, code="main-thinking-drift", severity="warn")
+        self.assertEqual(len(drift), 1)
+        self.assertEqual(drift[0]["source"], path)
+        self.assertIn("modelThinkingLevels", drift[0]["message"])
+        st = result["main"]["startupThinking"]
+        self.assertEqual((st["level"], st["key"]), ("high", "modelThinkingLevels[\"%s\"]" % SOL))
+        self.user_settings({"defaultThinkingLevel": "xhigh"})
+        result = self.run_plan(main=SOL)
+        self.assertFalse(self.findings(result, code="main-thinking-drift"))
+        self.assertEqual(result["main"]["startupThinking"]["key"], "defaultThinkingLevel")
+
+    def test_main_startup_thinking_is_clamped(self):
+        plan = copy.deepcopy(OPERATOR_PLAN)
+        plan["main"]["models"].append(OLLAMA)
+        self.user_plan(plan)
+        self.user_settings({"defaultThinkingLevel": "xhigh"})
+        result = self.run_plan(main=OLLAMA, thinking="high")
+        self.assertEqual(result["main"]["startupThinking"]["level"], "high")
+        self.assertEqual(result["main"]["startupThinking"]["requested"], "xhigh")
+        self.assertTrue(self.findings(result, code="main-thinking-drift"))
+
+    def test_binding_drift_names_winning_file(self):
+        self.user_plan(OPERATOR_PLAN)
+        path = self.project_settings({"subagents": {"agentOverrides": {"steward.mechanic": {"model": HAIKU}}}})
+        result = self.run_plan()
+        drift = self.findings(result, code="binding-drift", role="mechanic", severity="warn")
+        self.assertEqual(len(drift), 1)
+        self.assertEqual(drift[0]["source"], path)
+        self.assertIn("project override wins", drift[0]["message"])
+        coder = self.findings(result, code="binding-drift", role="coder")
+        self.assertIn("/steward-models apply", coder[0]["message"])
+
+
+class EffectiveBindingTests(PlanTestCase):
+    def test_frontmatter_then_default_model(self):
+        user = self.user_settings({"subagents": {"defaultModel": OLLAMA, "defaultThinking": "low"}})
+        result = self.run_plan()
+        coder = result["roles"]["coder"]["effective"]
+        # frontmatter outranks subagents.defaultModel and defaultThinking
+        self.assertEqual((coder["model"], coder["thinking"]), ("anthropic/claude-opus-5-5", "medium"))
+        self.assertNotEqual(coder["modelSource"]["file"], user)
+
+    def test_user_then_project_precedence(self):
+        user = self.user_settings({"subagents": {"agentOverrides": {
+            "steward.coder": {"model": OLLAMA, "thinking": "high"},
+            "steward.writer": {"model": FIREWORKS}}}})
+        proj = self.project_settings({"subagents": {"agentOverrides": {"steward.coder": {"model": OPUS}}}})
+        roles = self.run_plan()["roles"]
+        coder = roles["coder"]["effective"]
+        self.assertEqual(coder["model"], OPUS)
+        self.assertEqual(coder["modelSource"], {"file": proj, "key": 'subagents.agentOverrides["steward.coder"].model'})
+        self.assertEqual(coder["thinking"], "high")
+        self.assertEqual(coder["thinkingSource"]["file"], user)
+        self.assertEqual(roles["writer"]["effective"]["model"], FIREWORKS)
+        self.assertEqual(roles["writer"]["effective"]["thinking"], "medium")
+
+    def test_provider_scoped_override(self):
+        user = self.user_settings({"subagents": {
+            "agentOverrides": {"steward.reviewer": {"model": SONNET, "thinking": "high"}},
+            "agentOverridesByProvider": {
+                "amorphic": {"steward.reviewer": {"model": SOL}},
+                "openai-codex": {"steward.reviewer": {"model": OPUS}}}}})
+        rev = self.run_plan(main=OPUS)["roles"]["reviewer"]["effective"]
+        self.assertEqual((rev["model"], rev["thinking"]), (SOL, "high"))
+        self.assertEqual(rev["modelSource"],
+                         {"file": user, "key": 'subagents.agentOverridesByProvider.amorphic["steward.reviewer"].model'})
+        rev = self.run_plan(main=SOL)["roles"]["reviewer"]["effective"]
+        self.assertEqual(rev["model"], OPUS)
+        # no provider entry for the main provider: the plain override applies
+        rev = self.run_plan(main="anthropic/claude-opus-5-5")["roles"]["reviewer"]["effective"]
+        self.assertEqual(rev["model"], SONNET)
+
+    def test_project_plain_beats_user_provider_scoped(self):
+        self.user_settings({"subagents": {"agentOverridesByProvider": {
+            "amorphic": {"steward.reviewer": {"model": SOL}}}}})
+        proj = self.project_settings({"subagents": {"agentOverrides": {"steward.reviewer": {"model": HAIKU}}}})
+        rev = self.run_plan(main=OPUS)["roles"]["reviewer"]["effective"]
+        self.assertEqual(rev["model"], HAIKU)
+        self.assertEqual(rev["modelSource"]["file"], proj)
+
+    def test_untrusted_project_ignored(self):
+        user = self.user_settings({"subagents": {"agentOverrides": {"steward.coder": {"model": OLLAMA}}}})
+        self.project_settings({"subagents": {"agentOverrides": {"steward.coder": {"model": OPUS}},
+                                             "maxThinking": "low"}})
+        result = self.run_plan(trusted=False)
+        coder = result["roles"]["coder"]["effective"]
+        self.assertEqual(coder["model"], OLLAMA)
+        self.assertEqual(coder["modelSource"]["file"], user)
+        self.assertFalse(self.findings(result, code="thinking-above-max"))
+
+    def test_inherit_and_false(self):
+        self.user_settings({"subagents": {"agentOverrides": {
+            "steward.deep-reasoner": {"model": "inherit"},
+            "steward.writer": {"model": False, "thinking": False}}}})
+        roles = self.run_plan(main=SOL)["roles"]
+        dr = roles["deep-reasoner"]["effective"]
+        self.assertEqual(dr["model"], SOL)
+        self.assertTrue(dr["inheritsMain"])
+        self.assertEqual(dr["thinking"], "xhigh")
+        writer = roles["writer"]["effective"]
+        # false clears the frontmatter value, so the parent model applies
+        self.assertEqual(writer["model"], SOL)
+        self.assertTrue(writer["inheritsMain"])
+        self.assertIsNone(writer["thinking"])
+
+    def test_project_root_found_from_subdirectory(self):
+        proj = self.project_settings({"subagents": {"agentOverrides": {"steward.coder": {"model": HAIKU}}}})
+        sub = self.project / "src" / "deep"
+        sub.mkdir(parents=True)
+        coder = self.run_plan(cwd=sub)["roles"]["coder"]["effective"]
+        self.assertEqual(coder["model"], HAIKU)
+        self.assertEqual(coder["modelSource"]["file"], proj)
+
+    def test_home_is_never_a_project(self):
+        # ~/.pi exists (it holds the agent dir), but home is not a project.
+        self.write_json(self.home / ".pi" / "settings.json",
+                        {"subagents": {"agentOverrides": {"steward.coder": {"model": HAIKU}}}})
+        cwd = self.home / "scratch"
+        cwd.mkdir()
+        coder = self.run_plan(cwd=cwd)["roles"]["coder"]["effective"]
+        self.assertEqual(coder["model"], "anthropic/claude-opus-5-5")
+
+    def test_effective_available_flag(self):
+        self.user_settings({"subagents": {"agentOverrides": {"steward.coder": {"model": "openai/gpt-6.1-nocreds"}}}})
+        result = self.run_plan()
+        self.assertFalse(result["roles"]["coder"]["effective"]["available"])
+        self.assertTrue(self.findings(result, code="effective-model-unavailable", role="coder"))
+
+
+class ProjectPlanTests(PlanTestCase):
+    def test_project_plan_merges_over_user_plan(self):
+        user = self.user_plan(OPERATOR_PLAN)
+        proj = self.project_plan({"version": 1, "roles": {
+            "coder": {"thinking": "medium"},
+            "*": {"model": FIREWORKS}}})
+        roles = self.run_plan()["roles"]
+        coder = roles["coder"]["plan"]
+        self.assertEqual(coder["model"], FIREWORKS)
+        self.assertEqual(coder["source"], proj)
+        self.assertEqual(coder["thinking"], "medium")
+        self.assertEqual(coder["thinkingSource"], proj)
+        # project "*" outranks the user's own reviewer entry
+        self.assertEqual(roles["reviewer"]["plan"]["model"], FIREWORKS)
+        # user-only fields survive
+        self.assertEqual(roles["mechanic"]["plan"]["thinking"], "low")
+        self.assertEqual(roles["mechanic"]["plan"]["thinkingSource"], user)
+
+    def test_project_plan_ignored_when_untrusted(self):
+        user = self.user_plan(OPERATOR_PLAN)
+        self.project_plan({"version": 1, "roles": {"*": {"model": OPUS}}})
+        result = self.run_plan(trusted=False)
+        self.assertEqual(result["roles"]["coder"]["plan"]["model"], OLLAMA)
+        self.assertEqual(result["roles"]["coder"]["plan"]["source"], user)
+        self.assertIsNone(result["planFiles"]["project"])
+
+    def test_deny_providers(self):
+        self.user_plan(OPERATOR_PLAN)
+        proj = self.project_plan({"version": 1, "denyProviders": ["ollama-cloud"]})
+        result = self.run_plan()
+        coder = result["roles"]["coder"]
+        self.assertEqual(coder["plan"]["model"], FIREWORKS)
+        self.assertIsNone(coder["relaunch"])
+        errs = self.findings(result, code="provider-denied", role="coder", severity="error")
+        self.assertTrue(errs)
+        self.assertEqual(errs[0]["source"], proj)
+
+    def test_deny_escalation_target(self):
+        self.user_plan(OPERATOR_PLAN)
+        self.project_plan({"version": 1, "denyProviders": ["openai-codex"]})
+        result = self.run_plan(main=SOL)
+        self.assertIsNone(result["roles"]["coder"]["escalate"])
+        self.assertTrue(self.findings(result, code="provider-denied", role="coder"))
+        # main is denied, so deep-reasoner binds its first allowed fallback
+        self.assertEqual(result["roles"]["deep-reasoner"]["plan"]["model"], OPUS)
+
+    def test_allow_list_never_resolves_flash(self):
+        self.user_plan(OPERATOR_PLAN)
+        self.project_plan({"version": 1, "allowProviders": ["amorphic", "anthropic"]})
+        for main in (SOL, OPUS):
+            result = self.run_plan(main=main)
+            for role, row in result["roles"].items():
+                for key in ("plan", "relaunch", "escalate"):
+                    value = row.get(key)
+                    if value and value.get("model"):
+                        self.assertNotIn("deepseek", value["model"], (main, role, key))
+                        self.assertTrue(value["model"].split("/")[0] in ("amorphic", "anthropic"),
+                                        (main, role, key, value["model"]))
+            self.assertTrue(self.findings(result, code="provider-not-allowed", severity="error"))
+            self.assertTrue(self.findings(result, code="no-available-candidate", role="coder"))
+
+    def test_effective_binding_on_denied_provider_errors(self):
+        self.project_plan({"version": 1, "denyProviders": ["ollama-cloud"]})
+        proj_settings = self.project_settings({})
+        self.user_settings({"subagents": {"agentOverrides": {"steward.coder": {"model": OLLAMA}}}})
+        result = self.run_plan()
+        errs = [f for f in self.findings(result, code="provider-denied", role="coder") if "effective" in f["message"]]
+        self.assertTrue(errs)
+        self.assertNotEqual(errs[0]["source"], proj_settings)
+
+
+class ReadOnlyTests(PlanTestCase):
+    def test_never_writes(self):
+        self.user_plan(OPERATOR_PLAN)
+        self.project_plan({"version": 1, "denyProviders": ["fireworks"]})
+        self.user_settings({"subagents": {"agentOverrides": {"steward.coder-opus-medium": {"model": OLLAMA}}}})
+
+        def snapshot():
+            out = {}
+            for p in sorted(self.tmp.rglob("*")):
+                st = p.stat()
+                out[str(p)] = (st.st_mtime_ns, st.st_size)
+            return out
+
+        before = snapshot()
+        self.run_plan()
+        self.assertEqual(before, snapshot())
+
+    def test_result_is_json_serialisable(self):
+        self.user_plan(OPERATOR_PLAN)
+        result = self.run_plan()
+        json.dumps(result)
+        for f in result["findings"]:
+            self.assertEqual(set(f), {"severity", "code", "role", "message", "source"})
+            self.assertIn(f["severity"], ("error", "warn", "info"))
+
+
+if __name__ == "__main__":
+    unittest.main()
