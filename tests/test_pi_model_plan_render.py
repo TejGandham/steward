@@ -96,7 +96,7 @@ class OperatorCaseTests(RenderCase):
         block = self.block(main=SOL)
         self.assert_clean(block)
         lines = block.splitlines()
-        self.assertEqual(lines[0], "## Model plan on this machine (generated at session start; rebuilt on model switch)")
+        self.assertEqual(lines[0], "## Model plan on this machine (generated at session start; rebuilt on a model or thinking switch)")
         self.assertIn("Main thread: openai-codex/gpt-6.1-sol at xhigh. In the plan: yes. Judgment-grade: yes.", lines)
         self.assertNotIn("STEWARD WARNING", block)
         self.assertEqual(len(header_cells(block)), 7)

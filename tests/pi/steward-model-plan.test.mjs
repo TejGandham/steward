@@ -10,7 +10,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import steward, { createSteward, gatherModelFacts, runHook } from "../../pi/extensions/steward/index.ts";
+import steward, { createSteward, FACTS_TIMEOUT_MS, gatherModelFacts, HOOK_TIMEOUT_MS, runHook } from "../../pi/extensions/steward/index.ts";
 
 const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_HOOK_LOG"];
 const ALL_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -72,7 +72,7 @@ function load(opts = {}) {
 	const registry = pick("registry", fakeRegistry());
 	const model = pick("model", REGISTRY_MODELS[3]);
 	const thinkingLevel = pick("thinkingLevel", "xhigh");
-	const { cwd, factory, hookTimeoutMs } = opts;
+	const { cwd, factory, hookTimeoutMs, factsTimeoutMs } = opts;
 	const handlers = {};
 	const commands = {};
 	const sent = [];
@@ -98,7 +98,7 @@ function load(opts = {}) {
 		getAllTools: () => ["read", "bash", "edit", "write", "subagent"].map((name) => ({ name })),
 		getActiveTools: () => ["read", "bash", "edit", "write", "subagent"],
 	};
-	const make = factory ?? createSteward({ hookTimeoutMs, loadPiAi: async () => {
+	const make = factory ?? createSteward({ hookTimeoutMs, factsTimeoutMs, loadPiAi: async () => {
 		if (piAi instanceof Error) throw piAi;
 		return piAi;
 	} });
@@ -422,7 +422,7 @@ test("before_agent_start during a slow rebuild shares the in-flight load and get
 	assert.equal(sessionStartPayloads().length - calls, 1);
 });
 
-for (const [name, prelude, hookTimeoutMs] of [
+for (const [name, prelude, factsTimeoutMs] of [
 	["times out", "sleep 3", 300],
 	["prints bad JSON", "echo 'not json'; exit 0", undefined],
 	["crashes", "echo 'Traceback' >&2; exit 1", undefined],
@@ -430,12 +430,12 @@ for (const [name, prelude, hookTimeoutMs] of [
 	test(`a facts-bearing session-start that ${name} falls back to the plain edict, once per switch`, async () => {
 		const reallyPlain = await plainEdict();
 		process.env.STEWARD_PYTHON = wrapPython(`case "$input" in *'"model_facts"'*) ${prelude} ;; esac`);
-		const env = load({ hookTimeoutMs });
+		const env = load({ factsTimeoutMs });
 		const text = await sectionAfterStart(env);
 		assert.equal(text, reallyPlain);
 		const payloads = sessionStartPayloads().slice(1); // [0] is plainEdict() above
 		assert.deepEqual(payloads.map((p) => "model_facts" in p), [true, false]);
-		if (hookTimeoutMs) assert.ok(hookLog().some((e) => e.kind === "hook" && e.timedOut === true));
+		if (factsTimeoutMs) assert.ok(hookLog().some((e) => e.kind === "hook" && e.timedOut === true));
 		// Later prompts do not retry with facts.
 		await env.fire("agent_settled", { type: "agent_settled" });
 		assert.equal(await sectionNow(env), reallyPlain);
@@ -463,6 +463,17 @@ test("a hook that cannot start is logged", async () => {
 	const { missingPython } = await runHook("session-start", { session_id: "pi-x" });
 	assert.equal(missingPython, true);
 	assert.ok(hookLog().some((e) => e.kind === "hook" && e.subcommand === "session-start" && e.error === "ENOENT"));
+});
+
+test("STEWARD_HOOK_LOG records session-start and model-plan calls only, never gate inputs or replies", async () => {
+	await runHook("gate", { session_id: "pi-x", tool_name: "Bash", tool_input: { command: "echo secret-gate-input" } });
+	await runHook("prose-gate", { session_id: "pi-x", last_assistant_message: "secret-reply-text" });
+	await runHook("delegated", { session_id: "pi-x" });
+	await runHook("session-start", { session_id: "pi-x" });
+	const subcommands = hookLog().filter((e) => e.kind === "hook").map((e) => e.subcommand);
+	assert.deepEqual(subcommands, ["session-start"]);
+	const raw = existsSync(process.env.STEWARD_HOOK_LOG) ? readFileSync(process.env.STEWARD_HOOK_LOG, "utf8") : "";
+	assert.ok(!raw.includes("secret-gate-input") && !raw.includes("secret-reply-text"));
 });
 
 test("/steward-models check is display-only: an entry, never a message in the model's context", async () => {
@@ -509,4 +520,74 @@ test("model_select and thinking_level_select return without waiting for a slow h
 		assert.ok(Date.now() - started < 500, `${name} handler took ${Date.now() - started} ms`);
 	}
 	assert.equal(mainLine(await sectionNow(env, at)), "Main thread: openai-codex/gpt-6.1-sol at high.");
+});
+
+// ---- Release review N9: a failed load is not retried on every prompt, and session start is
+// bounded by one hook budget.
+
+/** Times one before_agent_start; returns the section and the elapsed ms. */
+async function timedSection(env, at) {
+	const started = Date.now();
+	const text = await sectionNow(env, at);
+	return { text, ms: Date.now() - started };
+}
+
+test("the defaults: the facts call gets 5 s inside the 15 s hook budget", () => {
+	assert.equal(FACTS_TIMEOUT_MS, 5_000);
+	assert.equal(HOOK_TIMEOUT_MS, 15_000);
+});
+
+test("after a switch whose load hangs, later prompts start no load and do not wait; the next switch starts one", async () => {
+	const env = load({ hookTimeoutMs: 1000, factsTimeoutMs: 200 });
+	const before = await sectionAfterStart(env);
+	assert.ok(before);
+	// Every call from here hangs until killed (exec, so the kill reaches the sleep).
+	process.env.STEWARD_PYTHON = wrapPython("exec sleep 30");
+	const at = { ...env.ctx, model: SOL, thinkingLevel: "high" };
+	await env.fire("model_select", { type: "model_select", model: SOL, previousModel: env.ctx.model, source: "set" }, at);
+	// The first prompt shares the switch's load, which fails within the budget.
+	const first = await timedSection(env, at);
+	assert.equal(first.text, before, "the last good edict");
+	assert.ok(first.ms < 1500, `first prompt took ${first.ms} ms`);
+	const calls = sessionStartPayloads().length;
+	for (let i = 0; i < 4; i++) {
+		const later = await timedSection(env, at);
+		assert.equal(later.text, before);
+		assert.ok(later.ms < 150, `prompt ${i} took ${later.ms} ms`);
+	}
+	assert.equal(sessionStartPayloads().length, calls, "no prompt started a load");
+	// The next switch starts exactly one load: one facts call, then the plain retry.
+	await env.fire("thinking_level_select", { type: "thinking_level_select", level: "low", previousLevel: "high" }, at);
+	assert.equal((await timedSection(env, at)).text, before);
+	assert.deepEqual(sessionStartPayloads().slice(calls).map((p) => "model_facts" in p), [true, false]);
+});
+
+test("session start with a hanging facts call: the facts call is killed at the facts timeout and the plain retry lands within the budget", async () => {
+	const reallyPlain = await plainEdict();
+	process.env.STEWARD_PYTHON = wrapPython(`case "$input" in *'"model_facts"'*) exec sleep 30 ;; esac`);
+	const env = load({ hookTimeoutMs: 1500, factsTimeoutMs: 300 });
+	const started = Date.now();
+	await env.fire("session_start", { type: "session_start", reason: "startup" });
+	const total = Date.now() - started;
+	assert.equal(await sectionNow(env), reallyPlain);
+	const calls = hookLog().filter((e) => e.kind === "hook" && e.subcommand === "session-start").slice(1);
+	assert.deepEqual(calls.map((e) => "model_facts" in e.payload), [true, false]);
+	assert.equal(calls[0].timedOut, true);
+	assert.ok(calls[0].ms < 800, `facts call ran ${calls[0].ms} ms`);
+	assert.ok(total < 1500, `session start took ${total} ms`);
+});
+
+test("session start where both calls hang stays within the budget, then behaves as 0.10.0: no edict, the next prompt retries the plain call", async () => {
+	const reallyPlain = await plainEdict();
+	process.env.STEWARD_PYTHON = wrapPython("exec sleep 30");
+	const env = load({ hookTimeoutMs: 1000, factsTimeoutMs: 200 });
+	const started = Date.now();
+	await env.fire("session_start", { type: "session_start", reason: "startup" });
+	const total = Date.now() - started;
+	assert.ok(total < 1300, `session start took ${total} ms`);
+	assert.equal(await sectionNow(env), undefined);
+	delete process.env.STEWARD_PYTHON;
+	const calls = sessionStartPayloads().length;
+	assert.equal(await sectionNow(env), reallyPlain);
+	assert.deepEqual(sessionStartPayloads().slice(calls).map((p) => "model_facts" in p), [false]);
 });

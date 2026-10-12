@@ -1342,13 +1342,16 @@ def _resolve_plan_role(ctx, role, fields):
     return plan, relaunch, escalate, plan_candidates
 
 
-def _effective_relaunch(ctx, role, eff, candidates):
+def _effective_relaunch(ctx, role, eff, candidates, start=None, per_call=None):
     """The relaunch model for the binding a launch really gets: the next
-    usable candidate after the effective model in the role's candidate list.
-    None, with an info finding saying why, when the effective model is not in
-    the list or nothing after it is usable. A candidate below judgmentModels
-    is skipped when the effective model is judgment-grade."""
-    model = eff.get("model")
+    usable candidate after the effective model in the role's candidate list,
+    or after `start` (the model a "pass model X" row passes) when given.
+    None, with an info finding saying why, when that model is not in the
+    list or nothing after it is usable. A candidate below judgmentModels is
+    skipped when the effective model is judgment-grade; a candidate that
+    `per_call(model, thinking)` rejects (it would abort as a per-call model)
+    is skipped too."""
+    model = start or eff.get("model")
     if not model or not candidates:
         return None
     resolved = [ctx.main if ref["main"] else ref["model"] for ref, _, _, _ in candidates]
@@ -1359,9 +1362,9 @@ def _effective_relaunch(ctx, role, eff, candidates):
                              dict.fromkeys(r or "main" for r in resolved))), eff["modelSource"]["file"], "relaunch model")
         return None
     graded = ctx.judgment_grade(model)
-    skipped_weaker = []
+    skipped_weaker, refused = [], []
     for (ref, level, src, what), name in list(zip(candidates, resolved))[resolved.index(model) + 1:]:
-        if name == model:
+        if name == model or name == eff.get("model"):
             continue
         found = _candidate_ok(ctx, role, ref, what, src, "relaunch model", record=False)
         if not found:
@@ -1369,14 +1372,43 @@ def _effective_relaunch(ctx, role, eff, candidates):
         if graded and ctx.judgment_grade(found) is False:
             skipped_weaker.append(found)
             continue
+        problem = per_call(found, level) if per_call else None
+        if problem:
+            refused.append(problem)
+            continue
         return {"model": found, "thinking": level, "launch": _launch(found, level)}
     why = "no later candidate is usable"
     if skipped_weaker:
         why = "%s is judgment-grade and the later candidates (%s) are outside judgmentModels" % (
             model, ", ".join(skipped_weaker))
+    if refused:
+        why += "; a per-call model would abort: %s" % "; ".join(refused)
     ctx.findings.add("info", "effective-relaunch-none", role,
                      "steward.%s runs %s; %s, so no relaunch model is offered after a provider error."
                      % (role, model, why), eff["modelSource"]["file"], "relaunch model")
+    return None
+
+
+def _pass_model(ctx, role, eff, candidates, per_call):
+    """The model a row with an unavailable effective binding tells the main
+    thread to pass: the first usable plan candidate that pi-subagents would
+    accept as a per-call model. None (with a pass-model-none warning when a
+    candidate was refused) when there is none."""
+    refused = []
+    for ref, level, src, what in candidates:
+        found = _candidate_ok(ctx, role, ref, what, src, "pass model", record=False)
+        if not found or found == eff.get("model"):
+            continue
+        problem = per_call(found, level)
+        if problem:
+            refused.append(problem)
+            continue
+        return {"model": found, "thinking": level, "launch": _launch(found, level)}
+    if refused:
+        ctx.findings.add("warn", "pass-model-none", role,
+                         "steward.%s runs %s, which is unavailable, and no plan candidate can be passed as a per-call "
+                         "model (%s); do not launch it." % (role, eff["model"], "; ".join(refused)),
+                         eff["modelSource"]["file"], "pass model")
     return None
 
 
@@ -1956,9 +1988,24 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                     plan["clampedTo"] = level if level != plan["thinking"] else None
                 plan["judgmentGrade"] = ctx.judgment_grade(plan["model"])
                 plan["family"] = ctx.family(plan["model"])
+        def per_call(model, thinking, role=role, effective=effective):
+            return _per_call_problem(ctx, role, model, thinking or effective.get("thinking"), scope, max_thinking)
+
+        pass_model = None
+        if effective.get("model") and not effective.get("available") and candidates:
+            pass_model = _pass_model(ctx, role, effective, candidates, per_call)
+        if escalate and not escalate["role"]:
+            problem = per_call(escalate["model"], escalate["thinking"])
+            if problem:
+                findings.add("info", "escalation-none", role,
+                             "The escalation model for steward.%s is not offered: a per-call model would abort "
+                             "(%s)." % (role, problem), plan and plan["source"], "escalation model")
+                escalate = None
         roles[role] = {"runtimeName": "steward." + role, "plan": plan, "effective": effective,
-                       "relaunch": relaunch,
-                       "effectiveRelaunch": _effective_relaunch(ctx, role, effective, candidates),
+                       "relaunch": relaunch, "passModel": pass_model,
+                       "effectiveRelaunch": _effective_relaunch(
+                           ctx, role, effective, candidates, start=pass_model and pass_model["model"],
+                           per_call=per_call),
                        "escalate": escalate,
                        "judgmentGrade": effective["judgmentGrade"], "family": effective["family"]}
 
@@ -2039,9 +2086,10 @@ def _evaluate(facts, env, agent_dir, agents_dir):
             _check_router(ctx, role, eff["model"], eff["modelSource"]["file"])
         if eff["model"] and not eff["available"]:
             why = "is not in pi's model catalog" if eff["model"] not in ctx.catalog else "has no configured credentials"
+            todo = "pass the model its row names until fixed" if row.get("passModel") else "fix the binding"
             findings.add("warn", "effective-model-unavailable", role,
-                         "The effective binding %s for %s %s; pass the next available candidate as model until fixed."
-                         % (eff["model"], role, why), eff["modelSource"]["file"], "effective binding")
+                         "The effective binding %s for %s %s; %s."
+                         % (eff["model"], role, why, todo), eff["modelSource"]["file"], "effective binding")
 
         if plan:
             if model_differs or thinking_differs:
@@ -2054,7 +2102,8 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                     hint = "the plan value comes from the project plan; set it in %s" % os.path.join(
                         project_root, ".pi", "settings.json")
                 else:
-                    hint = "run /steward-models apply"
+                    # 0.11.0 has no apply: the README's Phase 0 recipe sets it by hand.
+                    hint = "set subagents.agentOverrides by hand (README Phase 0 recipe)"
                 plan_model = plan["setting"] or plan["model"]
                 wanted = "%s at %s" % (plan_model, plan["thinking"]) if plan_model else "thinking %s" % plan["thinking"]
                 findings.add("warn", "binding-drift", role,
@@ -2175,14 +2224,15 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     }
 
 
-def _check_scope(ctx, role, label, model, explicit, scope, source, warn_ok=True):
-    """Mirror resolveModelScopesForAgent and checkModelScope
-    (PS/src/runs/shared/model-scope.js:40-64,115-145): the model must pass the
-    global list and the agent list; `inherit` and `scoped` expand to the main
-    model (the scoped set is not in the facts, so an empty set is assumed);
-    explicit per-call models error, others warn unless strict."""
+def _scope_misses(ctx, role, model, scope):
+    """(allow, strict, origin) for each enforced modelScope list that
+    `model` fails, mirroring resolveModelScopesForAgent and checkModelScope
+    (PS/src/runs/shared/model-scope.js:40-64,115-145): the model must pass
+    the global list and the agent list; `inherit` and `scoped` expand to the
+    main model (the scoped set is not in the facts, so an empty set is
+    assumed)."""
     if not isinstance(scope, dict):
-        return
+        return []
     rules = []
     if isinstance(scope.get("allow"), list):
         rules.append((scope.get("allow"), scope.get("enforce"), scope.get("strict"), "modelScope"))
@@ -2193,13 +2243,37 @@ def _check_scope(ctx, role, label, model, explicit, scope, source, warn_ok=True)
                       agent_rule.get("enforce", scope.get("enforce")),
                       agent_rule.get("strict", scope.get("strict")),
                       "modelScope.agents.steward.%s" % role))
+    misses = []
     for allow, enforce, strict, origin in rules:
         if enforce is not True:
             continue
         allow = [pattern for pattern in allow if isinstance(pattern, str)]
         patterns = [(ctx.main or pattern) if pattern in ("inherit", "scoped") else pattern for pattern in allow]
-        if any(glob_match(model, p) for p in patterns):
-            continue
+        if not any(glob_match(model, p) for p in patterns):
+            misses.append((allow, strict, origin))
+    return misses
+
+
+def _per_call_problem(ctx, role, model, thinking, scope, max_thinking):
+    """Why pi-subagents would refuse `model` at `thinking` passed as the
+    per-call `model` of a steward.<role> launch, or None. An explicit model
+    outside an enforced modelScope aborts the run (PS/docs/models.md "Model
+    scope enforcement"); a level above subagents.maxThinking fails before
+    start (PS/docs/models.md "Thinking ceiling")."""
+    if max_thinking in THINKING_LEVELS and thinking in THINKING_LEVELS \
+            and THINKING_LEVELS.index(thinking) > THINKING_LEVELS.index(max_thinking):
+        return "%s at %s is above subagents.maxThinking %s" % (model, thinking, max_thinking)
+    misses = _scope_misses(ctx, role, model, scope)
+    if misses:
+        allow, _, origin = misses[0]
+        return "%s is outside %s (%s)" % (model, origin, ", ".join(allow))
+    return None
+
+
+def _check_scope(ctx, role, label, model, explicit, scope, source, warn_ok=True):
+    """Record outside-model-scope for `model`: explicit per-call models
+    error, others warn unless strict."""
+    for allow, strict, origin in _scope_misses(ctx, role, model, scope):
         severity = "error" if explicit or strict is True else "warn"
         if severity == "warn" and not warn_ok:
             continue

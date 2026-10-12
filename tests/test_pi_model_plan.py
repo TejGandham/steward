@@ -538,7 +538,7 @@ class FindingTests(PlanTestCase):
         self.assertEqual(drift[0]["source"], path)
         self.assertIn("project override wins", drift[0]["message"])
         coder = self.findings(result, code="binding-drift", role="coder")
-        self.assertIn("/steward-models apply", coder[0]["message"])
+        self.assertIn("set subagents.agentOverrides by hand", coder[0]["message"])
 
 
 class EffectiveBindingTests(PlanTestCase):
