@@ -7,6 +7,14 @@
  * and maps its answers back onto pi's event results. Like the Claude Code hooks, it fails open:
  * if python3 is missing or the script errors, the tool call or reply goes through.
  *
+ * For the model plan (docs/roadmap/pi-model-plan.md) it also reads pi's model registry and sends
+ * those facts with the session-start payload, rebuilds the edict when the main model changes, and
+ * adds the /steward-models command, which runs the hook's `model-plan` subcommand.
+ *
+ * Debugging: with STEWARD_HOOK_LOG=<file>, every hook call appends one JSON line to that file
+ * ({kind: "hook", subcommand, payload, stdout, ms}), and each facts gathering one line
+ * ({kind: "facts", ms, models, bytes}). Unset, nothing is written.
+ *
  * Delegation runs through the pi-subagents extension's `subagent` tool. Its foreground children
  * never load ambient extensions, and its background runner sets PI_SUBAGENT_CHILD=1, so this file
  * registers nothing in a child: the edict and its gates apply to the main thread only.
@@ -14,6 +22,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +40,10 @@ const SECTION = "steward";
 const PROSE_GATE_MESSAGE_TYPE = "steward-prose-gate";
 const EDICT_MESSAGE_TYPE = "steward-edict";
 const DELEGATION_GATE_PREFIX = "steward delegation gate";
+const MODELS_COMMAND = "steward-models";
+const MODELS_MESSAGE_TYPE = "steward-models";
+const MODELS_PLAN_SUBCOMMAND = "model-plan";
+const MODELS_USAGE = "Usage: /steward-models [check|apply|stats]";
 
 type HookOutput = Record<string, any> | undefined;
 
@@ -38,6 +51,17 @@ interface HookResult {
 	output: HookOutput;
 	/** Set when the python interpreter itself could not be started. */
 	missingPython?: boolean;
+}
+
+/** Appends one JSON line to $STEWARD_HOOK_LOG when it is set. Never throws. */
+function debugLog(entry: Record<string, unknown>): void {
+	const path = process.env.STEWARD_HOOK_LOG;
+	if (!path) return;
+	try {
+		appendFileSync(path, `${JSON.stringify({ time: new Date().toISOString(), pid: process.pid, ...entry })}\n`);
+	} catch {
+		// debugging only
+	}
 }
 
 export function runHook(subcommand: string, payload: Record<string, unknown>): Promise<HookResult> {
@@ -48,6 +72,11 @@ export function runHook(subcommand: string, payload: Record<string, unknown>): P
 				settled = true;
 				done(result);
 			}
+		};
+		const started = Date.now();
+		const logged = (result: HookResult, stdout: string) => {
+			debugLog({ kind: "hook", subcommand, payload, stdout, ms: Date.now() - started });
+			finish(result);
 		};
 		let child;
 		try {
@@ -74,12 +103,12 @@ export function runHook(subcommand: string, payload: Record<string, unknown>): P
 		child.on("close", () => {
 			clearTimeout(timer);
 			const text = Buffer.concat(chunks).toString("utf8").trim();
-			if (!text) return finish({ output: undefined });
+			if (!text) return logged({ output: undefined }, text);
 			try {
 				const parsed = JSON.parse(text);
-				finish({ output: parsed && typeof parsed === "object" ? parsed : undefined });
+				logged({ output: parsed && typeof parsed === "object" ? parsed : undefined }, text);
 			} catch {
-				finish({ output: undefined });
+				logged({ output: undefined }, text);
 			}
 		});
 		child.stdin.on("error", () => {});
@@ -131,6 +160,67 @@ export function isProseRevision(messages: readonly unknown[]): boolean {
 	return false;
 }
 
+/** What the extension needs from `@earendil-works/pi-ai`. */
+export interface PiAi {
+	getSupportedThinkingLevels?: (model: any) => unknown;
+}
+
+/** pi's extension loader aliases pi packages, so this import works without node_modules. */
+const defaultLoadPiAi = () => import("@earendil-works/pi-ai") as Promise<PiAi>;
+
+function nonEmpty(value: unknown): value is string {
+	return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * The registry facts hooks/model_plan.py reads (its docstring is the contract): main model and
+ * thinking level, every catalog model with whether its provider has configured auth, supported
+ * thinking levels and max output tokens, project trust and the absolute cwd. Returns undefined
+ * when anything is missing or throws, so the caller sends no facts and the hook falls back to the
+ * plain edict.
+ */
+export function gatherModelFacts(ctx: ExtensionContext, piAi: PiAi | undefined): Record<string, unknown> | undefined {
+	try {
+		const levelsOf = piAi?.getSupportedThinkingLevels;
+		if (typeof levelsOf !== "function") return undefined;
+		const registry = ctx.modelRegistry;
+		if (!registry || typeof registry.getAll !== "function" || typeof registry.hasConfiguredAuth !== "function") {
+			return undefined;
+		}
+		const all = registry.getAll();
+		if (!Array.isArray(all)) return undefined;
+		const auth = new Map<string, boolean>();
+		const models: Record<string, unknown>[] = [];
+		for (const model of all) {
+			if (!model || !nonEmpty(model.provider) || !nonEmpty(model.id)) continue;
+			let available = auth.get(model.provider);
+			if (available === undefined) {
+				available = registry.hasConfiguredAuth(model) === true;
+				auth.set(model.provider, available);
+			}
+			const entry: Record<string, unknown> = { provider: model.provider, id: model.id, available };
+			const levels = levelsOf(model);
+			if (Array.isArray(levels) && levels.every((level) => typeof level === "string")) entry.thinkingLevels = [...levels];
+			if (Number.isInteger(model.maxTokens) && model.maxTokens > 0) entry.maxTokens = model.maxTokens;
+			models.push(entry);
+		}
+		if (models.length === 0) return undefined;
+		let main: Record<string, string> | null = null;
+		const current = ctx.model;
+		if (current) {
+			const thinkingLevel = ctx.thinkingLevel;
+			if (!nonEmpty(current.provider) || !nonEmpty(current.id) || !nonEmpty(thinkingLevel)) return undefined;
+			main = { provider: current.provider, id: current.id, thinkingLevel };
+		}
+		const projectTrusted = ctx.isProjectTrusted();
+		if (typeof projectTrusted !== "boolean") return undefined;
+		if (!nonEmpty(ctx.cwd)) return undefined;
+		return { main, models, projectTrusted, cwd: resolve(ctx.cwd) };
+	} catch {
+		return undefined;
+	}
+}
+
 function sessionId(ctx: ExtensionContext): string {
 	try {
 		const id = ctx.sessionManager.getSessionId();
@@ -155,7 +245,19 @@ const SUBAGENT_NOT_ACTIVE_WARNING =
 	"/reload, or starting a new session, makes it available. Restarting pi and resuming this " +
 	"conversation does not, because pi restores the conversation's recorded tools on resume.";
 
-export default function steward(pi: ExtensionAPI): void {
+export interface StewardOptions {
+	/** Loads `@earendil-works/pi-ai`; tests pass a stand-in. */
+	loadPiAi?: () => Promise<PiAi>;
+}
+
+export function createSteward(options: StewardOptions = {}): (pi: ExtensionAPI) => void {
+	return (pi) => register(pi, options.loadPiAi ?? defaultLoadPiAi);
+}
+
+const steward = createSteward();
+export default steward;
+
+function register(pi: ExtensionAPI, loadPiAi: () => Promise<PiAi>): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 
 	let edict: string | undefined;
@@ -197,8 +299,36 @@ export default function steward(pi: ExtensionAPI): void {
 		return subagentsInstalled() ? SUBAGENT_NOT_ACTIVE_WARNING : MISSING_SUBAGENTS_WARNING;
 	}
 
+	let piAi: Promise<PiAi | undefined> | undefined;
+	function piAiModule(): Promise<PiAi | undefined> {
+		piAi ??= loadPiAi().catch(() => undefined);
+		return piAi;
+	}
+
+	/** Registry facts for the hook, or undefined (the hook then gives the plain edict). */
+	async function modelFacts(ctx: ExtensionContext): Promise<Record<string, unknown> | undefined> {
+		try {
+			const started = Date.now();
+			const facts = gatherModelFacts(ctx, await piAiModule());
+			if (facts && process.env.STEWARD_HOOK_LOG) {
+				debugLog({
+					kind: "facts",
+					ms: Date.now() - started,
+					models: (facts.models as unknown[]).length,
+					bytes: Buffer.byteLength(JSON.stringify(facts)),
+				});
+			}
+			return facts;
+		} catch {
+			return undefined;
+		}
+	}
+
 	async function loadEdict(ctx: ExtensionContext): Promise<string | undefined> {
-		const { output, missingPython } = await runHook("session-start", { session_id: sessionId(ctx) });
+		const payload: Record<string, unknown> = { session_id: sessionId(ctx) };
+		const facts = await modelFacts(ctx);
+		if (facts) payload.model_facts = facts;
+		const { output, missingPython } = await runHook("session-start", payload);
 		if (missingPython && ctx.hasUI && !warnedMissingPython) {
 			warnedMissingPython = true;
 			ctx.ui.notify("steward: python3 was not found, so the edict and its gates are off.", "warning");
@@ -213,6 +343,18 @@ export default function steward(pi: ExtensionAPI): void {
 		try {
 			softNotes.clear();
 			edictInPrompt = false;
+			edict = await loadEdict(ctx);
+		} catch {
+			edict = undefined;
+		}
+	});
+
+	// The main model changed (set, cycle or restore): rebuild so the next run's system prompt
+	// carries a block for the new model. pi sets the model and its thinking level before it emits
+	// this event, so ctx reads the new values.
+	pi.on("model_select", async (_event, ctx) => {
+		try {
+			edict = undefined;
 			edict = await loadEdict(ctx);
 		} catch {
 			edict = undefined;
@@ -348,4 +490,49 @@ export default function steward(pi: ExtensionAPI): void {
 		// Notes for calls that never produced a result (blocked by another extension, aborted).
 		softNotes.clear();
 	});
+
+	function show(text: string): void {
+		pi.sendMessage({ customType: MODELS_MESSAGE_TYPE, content: text, display: true });
+	}
+
+	async function checkReport(ctx: ExtensionContext): Promise<string> {
+		const facts = await modelFacts(ctx);
+		if (!facts) return "steward: /steward-models check could not read pi's model registry, so no check ran.";
+		const { output, missingPython } = await runHook(MODELS_PLAN_SUBCOMMAND, { model_facts: facts, cwd: facts.cwd });
+		if (missingPython) return "steward: /steward-models check failed: python3 was not found.";
+		if (typeof output?.report === "string" && output.report) return output.report;
+		const reason = typeof output?.error === "string" && output.error ? output.error.slice(0, 200) : "the hook gave no report";
+		return `steward: /steward-models check failed: ${reason}`;
+	}
+
+	// A host without commands (or a registration error) leaves the edict and gates as they are.
+	try {
+		registerModelsCommand();
+	} catch {
+		// no command
+	}
+
+	function registerModelsCommand(): void {
+		if (typeof pi.registerCommand !== "function") return;
+		pi.registerCommand(MODELS_COMMAND, {
+			description: "Check the steward model plan: what each steward profile runs on, and every warning",
+			getArgumentCompletions: (prefix: string) =>
+				["check", "apply", "stats"].filter((sub) => sub.startsWith(prefix.trim())).map((sub) => ({ value: sub, label: sub })),
+			handler: async (args, ctx) => {
+				try {
+					const sub = (args ?? "").trim() || "check";
+					if (sub === "check") show(await checkReport(ctx));
+					else if (sub === "apply" || sub === "stats") {
+						show(`steward: /steward-models ${sub} arrives in a later phase (${sub === "apply" ? "Phase 3" : "Phase 4"}); only check works now.`);
+					} else show(MODELS_USAGE);
+				} catch {
+					try {
+						show("steward: /steward-models failed with an internal error.");
+					} catch {
+						// never crash the command
+					}
+				}
+			},
+		});
+	}
 }
