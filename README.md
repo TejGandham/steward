@@ -123,7 +123,7 @@ The model delegates with pi-subagents' `subagent` tool, for example `subagent({ 
 
 ### Profiles on pi
 
-Each profile pins a full model ID and a thinking level:
+Each profile ships with a default model ID and thinking level. Settings override them (recipes below), and the [model plan](#model-plan-on-pi) shows what each profile really runs on:
 
 | Profile | Model | Thinking |
 |-|-|-|
@@ -135,7 +135,7 @@ Each profile pins a full model ID and a thinking level:
 | `steward.mechanic` | `anthropic/claude-haiku-5-5` | medium |
 | `steward.top-reviewer` | `anthropic/claude-opus-5-5` | max |
 
-Version 0.10.0 renamed the pi profiles to role-only names. The old names, such as `steward.coder-opus-medium`, still launch the same profile through pi-subagents aliases, and `steward.reviewer-fable-xhigh` launches `steward.top-reviewer`. Settings are different: pi-subagents reads config such as `subagents.agentOverrides` under the new name only, so rename any override keys you saved under an old name.
+Version 0.11.0 added the model plan (see [Model plan on pi](#model-plan-on-pi)). Version 0.10.0 renamed the pi profiles to role-only names. The old names, such as `steward.coder-opus-medium`, still launch the same profile through pi-subagents aliases, and `steward.reviewer-fable-xhigh` launches `steward.top-reviewer`. Settings are different: pi-subagents reads config such as `subagents.agentOverrides` under the new name only, so rename any override keys you saved under an old name.
 
 A bare `agent: "coder"`, without the `steward.` prefix, now launches `steward.coder` instead of pi-subagents' builtin `worker` agent. pi-subagents lists `coder` as an alias of `worker`, but it matches an agent's own short name before it looks at aliases. To run `worker`, call it by its own name.
 
@@ -183,6 +183,70 @@ Here `inherit` makes the deep-reasoner run on whatever model the main thread use
 A repository's committed `.pi/settings.json` overrides your user settings field by field. This repo's own file pins every profile to `amorphic/claude-*`, so inside it the `model` values above lose, and `/subagents-models` shows what actually applies. If you decline project trust, pi-subagents 0.77.0 and later ignores that file.
 
 Subagents see your `AGENTS.md` files and your skills catalog. A foreground subagent does not load your pi extensions; a background one does. Steward's gates never apply inside a subagent.
+
+### Model plan on pi
+
+Version 0.11.0 adds a model plan. **In 0.11.0 the plan is checked and shown, not applied.** Profiles still launch on what pi-subagents settings (`subagents.agentOverrides`) and the profile defaults say. The block warns where those differ from your plan. To make launches follow the plan today, set the overrides by hand as in the recipe under [Profiles on pi](#profiles-on-pi). An `apply` command that writes them for you comes in a later release.
+
+You write which model and thinking level each profile should use, plus fallbacks and escalations. At session start, and again after you switch model or thinking level, steward adds a "Model plan" block to the main thread's instructions. The block shows:
+- what each profile really runs on;
+- what to relaunch with after a provider error;
+- what to escalate to after a failed check;
+- which profiles are blocked.
+
+Without a plan file the block still lists what each profile runs on.
+
+**Where the plan lives**
+- `~/.pi/agent/steward/model-plan.json`, or `$PI_CODING_AGENT_DIR/steward/model-plan.json`.
+- Per repo: `.pi/steward-model-plan.json`. In a trusted repo it wins over your user plan.
+- A repo's `allowProviders` and `denyProviders` apply even when you decline project trust. If a list cannot be read, every profile is blocked.
+
+A small plan:
+
+```json
+{
+  "version": 1,
+  "roles": {
+    "*": {
+      "model": "anthropic/claude-sonnet-5-5",
+      "thinking": "medium",
+      "fallback": ["openrouter/anthropic/claude-sonnet-5.5"],
+      "escalate": "main:high"
+    },
+    "reviewer": {
+      "thinking": "high",
+      "escalate": "role:deep-reasoner"
+    },
+    "deep-reasoner": {
+      "model": "anthropic/claude-opus-5-5",
+      "thinking": "xhigh",
+      "escalate": null
+    }
+  }
+}
+```
+
+Every role inherits the `"*"` entry. The reviewer escalates to the `steward.deep-reasoner` profile, which keeps its own model and thinking. Deep-reasoner clears the escalation, so a failed check there stays on the main thread. [docs/roadmap/pi-model-plan.md](docs/roadmap/pi-model-plan.md) describes every field.
+
+**How the main thread uses the block**
+- It passes `model` only to relaunch after a provider error, to escalate after a failed check, or when you ask. Fable by name still works.
+- A row that says "pass model X" gets `model: "X"` on every launch.
+- If there is no relaunch model, it does not relaunch and tells you.
+- It never launches a blocked profile.
+- When no profile is above the judgment floor, judgment work stays on the main thread.
+
+**The seven guardrails** the block states:
+1. Judgment floor: architecture, plans, security review and final synthesis go only to a judgment-grade profile, or stay on the main thread.
+2. Cheap models get bounded tasks with a done-condition that a test, type check, lint or command can prove.
+3. One failed check gets one relaunch on the escalation model. A second failure goes to the main thread or `steward.deep-reasoner`.
+4. Fallback is not escalation: a provider error gets one relaunch on the fallback model, never the same model twice.
+5. Cross-family review: a child's output is reviewed by a profile from a different model family.
+6. Respect provider caps: never more children at once on a provider than its stated cap.
+7. Thinking where it pays: high thinking goes to the main thread and the judgment roles; cheap roles stay at `medium` or lower.
+
+**How the main thread delegates.** For independent children it uses the built-in `parallel` workflow. For dependent steps it makes separate `subagent` calls, one after another. It uses a workflow script only as a file path. A script written in the reply never reaches pi-subagents on pi 1.1.0 with pi-subagents 0.77.0, so the edict does not use that form.
+
+**Checking and debugging.** `/steward-models check` prints the full report on screen. It does not go into the model's context. To debug the hook, start pi with `STEWARD_HOOK_LOG=<file>`; every hook call then appends one JSON line to that file.
 
 ### Gates on pi
 
