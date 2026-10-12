@@ -33,10 +33,19 @@ Rules
   ``thinking-not-in-plan``). A role with no available candidate is left
   unchanged, with a ``no-available-candidate`` finding. Nothing that is not a
   steward key is ever removed.
+- The one exception (0.12.0 release review, B1): for a role the plan names,
+  ``agentOverridesByProvider.<p>["steward.<role>"]`` is removed for every
+  provider the plan does not list for it (the provider object stays, ``{}``
+  when emptied), and a provider entry with a model always carries thinking.
+  pi-subagents lays provider entries over agentOverrides, so a stale one would
+  beat the plan while the check reports drift.
+- The profile leaves out entries pi-subagents' profile validator rejects
+  (``profile-entry-skipped``), so it always loads.
 - Refusals (``Refused``, nothing written): no user plan, a plan that is not
-  JSON or has any schema error, settings that are not JSON or have a
+  JSON or has any schema error, settings that are not JSON (NaN, Infinity
+  and overflowing numbers included) or have a
   ``subagents`` shape pi-subagents would reject, a file changed since the
-  preview (``expect`` hashes) or between the first read and the write, or a
+  preview (``expect`` hashes of the plan, settings and profile) or between the first read and the write, or a
   settings lock held by another writer.
 
 Writing
@@ -45,7 +54,9 @@ Read, compute, then under pi's settings lock (``settings.json.lock``,
 proper-lockfile) and pi-subagents' lease (``<real path>.write-lock``) re-read
 and refuse on any change (sha256 of the bytes), back up once per changing
 run to ``settings.json.bak-<YYYYMMDD-HHMMSS>``, write a temp file in the
-same directory, fsync, rename over the real file (a symlinked settings file
+same directory, fsync, rename over the real file (both temp files and both
+backups are ready before the first rename; a failed profile rename after the
+settings rename is a reported partial write, ``partial: true``) (a symlinked settings file
 stays a symlink) and fsync the directory. Mode is kept. Formatting follows
 the file: its indent unit (pi writes two spaces), its trailing newline
 (pi writes none) and its key order. A run that changes nothing writes
@@ -122,7 +133,8 @@ def _style(text):
 
 
 def _dump(value, indent, newline, bom=False):
-    text = json.dumps(value, indent=indent, ensure_ascii=False)
+    # allow_nan=False: Infinity and NaN are not JSON, and pi could not read the file.
+    text = json.dumps(value, indent=indent, ensure_ascii=False, allow_nan=False)
     return ("\ufeff" if bom else "") + text + ("\n" if newline else "")
 
 
@@ -145,7 +157,7 @@ def _read_user_plan(agent_dir):
         raise Refused("no user plan at %s; write one first (README \"Model plan on pi\")" % path)
     text, _ = _decode(data, path)
     try:
-        parsed = json.loads(text)
+        parsed = _loads(text)
     except (ValueError, RecursionError) as exc:
         raise Refused("the user plan %s is not valid JSON (%s)" % (path, str(exc)[:200]))
     plan, found = mp.parse_plan(parsed, path, False)
@@ -155,7 +167,27 @@ def _read_user_plan(agent_dir):
         more = " and %d more" % (len(errors) - 3) if len(errors) > 3 else ""
         raise Refused("the user plan %s has %d schema error(s): %s%s. Fix them (/steward-models check lists "
                       "them); nothing was written" % (path, len(errors), shown, more))
-    return path, plan
+    return path, plan, data
+
+
+class _NonFinite(ValueError):
+    pass
+
+
+def _finite_float(text):
+    value = float(text)
+    if value != value or value in (float("inf"), float("-inf")):
+        raise _NonFinite("the number %s is out of range" % text[:40])
+    return value
+
+
+def _no_constant(name):
+    raise _NonFinite("%s is not JSON" % name)
+
+
+def _loads(text):
+    """json.loads that refuses NaN, Infinity and numbers too large for a double."""
+    return json.loads(text, parse_float=_finite_float, parse_constant=_no_constant)
 
 
 def _read_settings(path):
@@ -165,12 +197,13 @@ def _read_settings(path):
         return None, {}, ("  ", False, False)
     text, bom = _decode(raw, path)
     try:
-        data = json.loads(text) if text.strip() else {}
+        data = _loads(text) if text.strip() else {}
     except (ValueError, RecursionError) as exc:
         raise Refused("%s is not valid JSON (%s); nothing was written" % (path, str(exc)[:200]))
     if not isinstance(data, dict):
         raise Refused("%s must hold a JSON object; nothing was written" % path)
     sub = data.get("subagents")
+    # null sections are valid for pi-subagents and mean "none"
     if sub is not None:
         if not isinstance(sub, dict):
             raise Refused("%s: subagents must be an object; nothing was written" % path)
@@ -243,7 +276,8 @@ def compile_plan(plan, plan_path, models):
             return item[2] if item else -1
 
         model_ref, thinking, fallback = value("model"), value("thinking"), value("fallback") or []
-        target = {"overrides": {}, "byProvider": {}, "unchanged": False}
+        target = {"overrides": {}, "byProvider": {}, "byProviderDrop": {}, "byProviderKeep": set(),
+                  "unchanged": False}
 
         def candidates(first, level):
             out = [(first, level, False)] if first else []
@@ -282,13 +316,21 @@ def compile_plan(plan, plan_path, models):
                     findings.add("warn", "no-available-candidate", role,
                                  "No candidate for %s is available; agentOverridesByProvider.%s is left unchanged."
                                  % (where, prov))
+                    target["byProviderKeep"].add(prov)
                     continue
                 setting, bound_level, _ = bound
                 entry["model"] = setting
+                # Always carry thinking: pi-subagents lays a byProvider entry over
+                # agentOverrides, so a stale level here would win over the plan's.
+                if bound_level is None:
+                    bound_level = thinking
                 if bound_level is not None:
                     entry["thinking"] = bound_level
             elif use_thinking:
                 entry["thinking"] = level
+                if "model" in target["overrides"]:
+                    # The role's own model applies on this provider; a stale byProvider model would beat it.
+                    target["byProviderDrop"][prov] = ["model"]
             if entry:
                 target["byProvider"][prov] = entry
         target["named"] = bool(target["overrides"] or target["byProvider"] or target["unchanged"])
@@ -340,10 +382,12 @@ def build_settings(data, targets, findings):
     def section(*keys):
         nonlocal sub
         if sub is None:
-            sub = new.setdefault("subagents", {})
+            sub = new["subagents"] = {}
         node = sub
         for key in keys:
-            node = node.setdefault(key, {})
+            if not isinstance(node.get(key), dict):
+                node[key] = {}  # absent or null: pi-subagents reads null as none
+            node = node[key]
         return node
 
     for role in ROLES:
@@ -366,6 +410,11 @@ def build_settings(data, targets, findings):
                     changes.append("agentOverridesByProvider.%s %s %s: %s -> %s"
                                    % (prov, key, field, _show(entry.get(field)), _show(value)))
                     entry[field] = value
+            for field in target["byProviderDrop"].get(prov, ()):
+                if field in entry:
+                    changes.append("agentOverridesByProvider.%s %s %s: %s -> (unset)"
+                                   % (prov, key, field, _show(entry[field])))
+                    del entry[field]
 
         current = sub or {}
         existing = (current.get("agentOverrides") or {}).get(key) or {}
@@ -374,19 +423,69 @@ def build_settings(data, targets, findings):
                          "%s is not in the plan; its settings (%s) are left as they are." % (
                              key, ", ".join("%s %s" % (f, _show(existing[f])) for f in ("model", "thinking") if f in existing)))
         for prov, entries in (current.get("agentOverridesByProvider") or {}).items():
-            if key in entries and prov not in target["byProvider"]:
+            if key not in entries or prov in target["byProvider"] or prov in target["byProviderKeep"]:
+                continue
+            if target["named"]:
+                # The one exception to the leftover rule: for a role the plan
+                # names, a byProvider entry for a provider the plan does not
+                # list would override the plan's binding on that provider.
+                # The emptied provider object stays as {}.
+                changes.append("agentOverridesByProvider.%s %s: removed (%s); the plan lists no binding for "
+                               "this provider" % (prov, key, json.dumps(entries[key], ensure_ascii=False)))
+                del entries[key]
+            else:
                 findings.add("info", "leftover-override", role,
                              "agentOverridesByProvider.%s %s is not in the plan; it is left as it is." % (prov, key))
     return new, changes
 
 
-def build_profile(settings):
-    """pi-subagents profile data carrying the whole mapping after apply."""
+def profile_entry_problem(value):
+    """Why pi-subagents 0.77.0 would reject this agentOverrides entry in a
+    profile, or None. Mirrors validateSubagentProfile and
+    validateOptionalMachine (PS/src/profiles/profiles.js:39-65,
+    PS/src/agents/agents.js:743-754); settings accept more (model: false)."""
+    if not isinstance(value, dict):
+        return "expected an object"
+    model = value.get("model")
+    if "model" in value and not isinstance(model, str):
+        return "model must be a string in a profile (settings allow %s)" % _show(model)
+    thinking = value.get("thinking")
+    if "thinking" in value and thinking is not False and not isinstance(thinking, str):
+        return "thinking must be a string or false"
+    machine = value.get("machine", False)
+    if machine is not False:
+        if not isinstance(machine, str) or not machine.strip():
+            return "machine must be a non-empty string or false"
+        trimmed = machine.strip()
+        if len(trimmed) > 128:
+            return "machine must be 128 characters or fewer"
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in trimmed):
+            return "machine contains control characters"
+    if "fallbackModels" in value:
+        return "fallbackModels was removed from pi-subagents"
+    return None
+
+
+def build_profile(settings, findings=None):
+    """pi-subagents profile data carrying the whole mapping after apply.
+    An entry pi-subagents' profile validator would reject is left out (with
+    a warn finding), so the profile always loads."""
     sub = settings.get("subagents") if isinstance(settings.get("subagents"), dict) else {}
-    out = {"agentOverrides": copy.deepcopy(sub.get("agentOverrides") or {})}
-    by_provider = sub.get("agentOverridesByProvider")
-    if by_provider:
-        out["agentOverridesByProvider"] = copy.deepcopy(by_provider)
+    overrides = {}
+    for name, value in (sub.get("agentOverrides") or {}).items():
+        problem = profile_entry_problem(value)
+        if problem is None:
+            overrides[name] = copy.deepcopy(value)
+        elif findings is not None:
+            role = name[len("steward."):] if name.startswith("steward.") else None
+            findings.add("warn", "profile-entry-skipped", role if role in ROLES else None,
+                         "agentOverrides[%s] is left out of the steward profile: %s. pi-subagents would refuse to "
+                         "load the profile with it; settings keep it, but loading the steward profile drops it."
+                         % (json.dumps(name, ensure_ascii=False), problem))
+    # Always written, even empty: loading the profile then clears byProvider
+    # entries another profile added.
+    out = {"agentOverrides": overrides,
+           "agentOverridesByProvider": copy.deepcopy(sub.get("agentOverridesByProvider") or {})}
     return {"subagents": out}
 
 
@@ -402,9 +501,74 @@ def _proc_start(pid):
         return None
 
 
+def _read_owner(path):
+    """A lease's owner.json as pi-subagents validates it (file-lease.js:18-27), or None."""
+    try:
+        with open(os.path.join(path, "owner.json"), "r", encoding="utf-8") as handle:
+            owner = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(owner, dict):
+        return None
+    token, pid = owner.get("token"), owner.get("pid")
+    if not isinstance(token, str) or not token or len(token) > 64 \
+            or not all(ch.isascii() and (ch.isalnum() or ch == "-") for ch in token):
+        return None
+    if not isinstance(owner.get("hostname"), str) or isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return None
+    return owner
+
+
+def _dead_owner(owner):
+    """pi-subagents' rule (file-lease.js:29-40): same host and the pid is gone
+    or now belongs to another process."""
+    if owner["hostname"] != socket.gethostname():
+        return False
+    try:
+        os.kill(owner["pid"], 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    current = _proc_start(owner["pid"])
+    return owner.get("processStart") is not None and current is not None and owner["processStart"] != current
+
+
 class _Locks:
     """pi's proper-lockfile lock and pi-subagents' settings lease, both
-    mkdir-based. Never removes a lock another process holds."""
+    mkdir-based. A lock another live process holds is never removed. Stale
+    locks follow their owners' rules: pi's lock is stale when its mtime is
+    older than PI_LOCK_STALE_S (proper-lockfile), the lease when its owner is
+    a dead process on this host (it is moved aside as pi-subagents does)."""
+
+    def _reclaim(self, path, owner):
+        """True when a stale lock at path was cleared and the take can retry."""
+        if not owner:
+            try:
+                age = time.time() - os.stat(path).st_mtime
+            except FileNotFoundError:
+                return True
+            except OSError:
+                return False
+            if age <= PI_LOCK_STALE_S:
+                return False
+            try:
+                os.rmdir(path)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                return False
+            return True
+        previous = _read_owner(path)
+        if previous is None or not _dead_owner(previous):
+            return False
+        try:
+            os.rename(path, "%s.retired-%s" % (path, previous["token"]))
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return False
+        return True
 
     def __init__(self, settings_path, wait):
         self.pi_lock = os.path.abspath(settings_path) + ".lock"
@@ -420,18 +584,37 @@ class _Locks:
             try:
                 os.mkdir(path, 0o700)
             except FileExistsError:
+                if self._reclaim(path, owner):
+                    continue
                 if time.monotonic() >= deadline:
+                    if owner and _read_owner(path) is None:
+                        raise Refused("the settings lock %s has no readable owner, so pi-subagents never clears it; "
+                                      "if no pi is writing settings, remove %s and run /steward-models apply again "
+                                      "(nothing was written)" % (path, path))
                     raise Refused("another process holds the settings lock %s; try again in a moment "
                                   "(nothing was written)" % path)
                 time.sleep(0.02)
                 continue
-            self.held.append(path)
             if owner:
                 body = json.dumps({"token": self.token, "pid": os.getpid(), "hostname": socket.gethostname(),
                                    "processStart": _proc_start(os.getpid())})
-                fd = os.open(os.path.join(path, "owner.json"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(fd, "w") as handle:
-                    handle.write(body)
+                owner_file = os.path.join(path, "owner.json")
+                try:
+                    fd = os.open(owner_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    with os.fdopen(fd, "w") as handle:
+                        handle.write(body)
+                except BaseException as exc:
+                    # An ownerless lease is never evicted by pi-subagents: remove it.
+                    for cleanup in (lambda: os.unlink(owner_file), lambda: os.rmdir(path)):
+                        try:
+                            cleanup()
+                        except OSError:
+                            pass
+                    if isinstance(exc, OSError):
+                        raise Refused("could not take the settings lock %s (%s); nothing was written"
+                                      % (path, exc.strerror or type(exc).__name__))
+                    raise
+            self.held.append(path)
             return
 
     def __enter__(self):
@@ -483,11 +666,18 @@ def _backup(path, data, mode, now):
         except FileExistsError:
             n += 1
             candidate = "%s-%d" % (base, n)
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(data)
-        handle.flush()
-        os.fsync(handle.fileno())
-    os.chmod(candidate, mode)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(candidate, mode)
+    except BaseException:
+        try:
+            os.unlink(candidate)  # no partial backup left behind
+        except OSError:
+            pass
+        raise
     return candidate
 
 
@@ -497,8 +687,10 @@ def _default_mode():
     return 0o666 & ~umask
 
 
-def _atomic_write(path, text):
-    """Temp file beside the real file, fsync, rename. Keeps a symlink and the mode."""
+def _prepare_write(path, text):
+    """Temp file beside the real file, written and fsynced, with the real
+    file's mode and owner. Returns (temp path, rename target); the caller
+    renames with _commit_write or removes the temp file with _discard."""
     target = os.path.realpath(path)
     directory = os.path.dirname(target)
     os.makedirs(directory, exist_ok=True)
@@ -507,10 +699,11 @@ def _atomic_write(path, text):
         mode, owner = st.st_mode & 0o7777, (st.st_uid, st.st_gid)
     except FileNotFoundError:
         mode, owner = _default_mode(), None
+    data = text.encode("utf-8")
     fd, tmp = tempfile.mkstemp(dir=directory, prefix="." + os.path.basename(target) + ".steward-", suffix=".tmp")
     try:
         with os.fdopen(fd, "wb") as handle:
-            handle.write(text.encode("utf-8"))
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp, mode)
@@ -519,14 +712,27 @@ def _atomic_write(path, text):
                 os.chown(tmp, *owner)
             except OSError:
                 pass
+    except BaseException:
+        _discard(tmp)
+        raise
+    return tmp, target
+
+
+def _commit_write(prepared):
+    tmp, target = prepared
+    try:
         os.replace(tmp, target)
     except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        _discard(tmp)
         raise
-    _fsync_dir(directory)
+    _fsync_dir(os.path.dirname(target))
+
+
+def _discard(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def _mode_of(path):
@@ -547,15 +753,17 @@ def apply(facts, env=None, dry_run=True, expect=None, now=None, before_write=Non
     env = dict(os.environ if env is None else env)
     models = _clean_models(facts)
     agent_dir = mp.agent_dir_from_env(env)
-    plan_path, plan = _read_user_plan(agent_dir)
+    plan_path, plan, plan_raw = _read_user_plan(agent_dir)
     settings_path = os.path.join(agent_dir, "settings.json")
     profile_path = os.path.join(agent_dir, "profiles", "pi-subagents", PROFILE_NAME + ".json")
 
     settings_raw, settings, (indent, newline, bom) = _read_settings(settings_path)
     profile_raw = _read_bytes(profile_path)
-    hashes = {"settings": content_hash(settings_raw), "profile": content_hash(profile_raw)}
+    # The plan is hashed too: the confirmed write must compile the plan the preview showed.
+    hashes = {"settings": content_hash(settings_raw), "profile": content_hash(profile_raw),
+              "plan": content_hash(plan_raw)}
     if expect is not None:
-        for key, path in (("settings", settings_path), ("profile", profile_path)):
+        for key, path in (("plan", plan_path), ("settings", settings_path), ("profile", profile_path)):
             if key in expect and expect[key] != hashes[key]:
                 raise Refused("%s changed since the preview; run /steward-models apply again (nothing was written)" % path)
 
@@ -564,7 +772,7 @@ def apply(facts, env=None, dry_run=True, expect=None, now=None, before_write=Non
     settings_changed = new_settings != settings
     settings_text = _dump(new_settings, indent, newline, bom) if settings_changed else None
 
-    profile_text = _dump(build_profile(new_settings), 2, True)
+    profile_text = _dump(build_profile(new_settings, findings), 2, True)
     profile_changed = profile_raw is None or profile_raw.decode("utf-8", "replace") != profile_text
     if profile_changed:
         changes.append("profile %s: %s" % (profile_path, "create" if profile_raw is None else "update"))
@@ -574,7 +782,7 @@ def apply(facts, env=None, dry_run=True, expect=None, now=None, before_write=Non
         "settingsChanged": settings_changed, "profileChanged": profile_changed,
         "planFile": plan_path, "settingsFile": settings_path, "profileFile": profile_path,
         "changes": changes, "findings": findings.items, "backups": [], "hashes": hashes,
-        "newSettings": new_settings,
+        "newSettings": new_settings, "partial": False,
     }
     if dry_run or not result["changed"]:
         result["report"] = render(result)
@@ -583,6 +791,8 @@ def apply(facts, env=None, dry_run=True, expect=None, now=None, before_write=Non
     now = now or datetime.datetime.now()
     if before_write:
         before_write()
+    # Everything happens inside both locks. Backups and both temp files are
+    # ready before the first rename, so a failure up to there writes nothing.
     with _Locks(settings_path, lock_wait):
         if content_hash(_read_bytes(settings_path)) != hashes["settings"]:
             raise Refused("%s changed while apply was running; run /steward-models apply again "
@@ -590,14 +800,36 @@ def apply(facts, env=None, dry_run=True, expect=None, now=None, before_write=Non
         if content_hash(_read_bytes(profile_path)) != hashes["profile"]:
             raise Refused("%s changed while apply was running; run /steward-models apply again "
                           "(nothing was written)" % profile_path)
-        if settings_changed:
-            if settings_raw is not None:
+        prepared = []
+        try:
+            if settings_changed and settings_raw is not None:
                 result["backups"].append(_backup(settings_path, settings_raw, _mode_of(settings_path), now))
-            _atomic_write(settings_path, settings_text)
-    if profile_changed:
-        if profile_raw is not None:
-            result["backups"].append(_backup(profile_path, profile_raw, _mode_of(profile_path), now))
-        _atomic_write(profile_path, profile_text)
+            if profile_changed and profile_raw is not None:
+                result["backups"].append(_backup(profile_path, profile_raw, _mode_of(profile_path), now))
+            if settings_changed:
+                prepared.append(("settings", _prepare_write(settings_path, settings_text)))
+            if profile_changed:
+                prepared.append(("profile", _prepare_write(profile_path, profile_text)))
+        except (OSError, UnicodeError) as exc:
+            for _, (tmp, _target) in prepared:
+                _discard(tmp)
+            for path in result["backups"]:
+                _discard(path)
+            reason = exc.strerror if isinstance(exc, OSError) and exc.strerror else type(exc).__name__
+            raise Refused("could not prepare the write (%s); nothing was written" % reason)
+        for index, (which, item) in enumerate(prepared):
+            try:
+                _commit_write(item)
+            except OSError as exc:
+                for _, (tmp, _target) in prepared[index + 1:]:
+                    _discard(tmp)
+                if index == 0:
+                    raise Refused("could not write %s (%s); nothing was written"
+                                  % (item[1], exc.strerror or type(exc).__name__))
+                # Settings are written, the profile is not: report it, do not hide it.
+                result["partial"] = True
+                result["partialError"] = "%s was not written (%s)" % (
+                    profile_path, exc.strerror or type(exc).__name__)
     result["report"] = render(result)
     return result
 
@@ -606,6 +838,8 @@ def render(result):
     """Plain-text summary for the /steward-models apply preview and result."""
     if not result["changed"]:
         head = "steward model plan apply: nothing to change"
+    elif result.get("partial"):
+        head = "steward model plan apply: PARTLY written (settings yes, steward profile no)"
     elif result["dryRun"]:
         head = "steward model plan apply: preview (nothing written yet)"
     else:
@@ -615,8 +849,14 @@ def render(result):
              "Profile: %s%s" % (result["profileFile"], "" if result["profileChanged"] else " (no change)")]
     if result["changes"]:
         lines += ["", "Changes:"] + ["- %s" % line for line in result["changes"]]
+    elif any(f["severity"] in ("error", "warn") for f in result["findings"]):
+        lines += ["", "Nothing to write, but the plan is not fully applied: see the findings below."]
     else:
         lines += ["", "Settings and the steward profile already match the plan."]
+    if result.get("partial"):
+        lines += ["", "The settings were written, but %s. Settings now follow the plan; the steward profile still "
+                  "holds the old mapping, so do not run /subagents-load-profile steward until /steward-models apply "
+                  "has run again. Restore from the backups below to undo." % result["partialError"]]
     if result["backups"]:
         lines += ["", "Backups:"] + ["- %s" % path for path in result["backups"]]
     shown = [f for f in result["findings"] if f["severity"] in ("error", "warn")]

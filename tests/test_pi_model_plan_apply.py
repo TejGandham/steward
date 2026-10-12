@@ -209,7 +209,8 @@ class CompileTests(ApplyTestCase):
         self.assertEqual(sub["agentOverridesByProvider"], {
             "amorphic": {"steward.coder": {"model": OPUS, "thinking": "medium"}},
             "openai-codex": {"steward.coder": {"thinking": "low"}},
-            "anthropic": {"steward.coder": {"model": "inherit"}},
+            # a byProvider model always carries thinking: the role's when the entry names none
+            "anthropic": {"steward.coder": {"model": "inherit", "thinking": "high"}},
         })
 
     def test_star_by_main_provider_does_not_beat_role_model(self):
@@ -223,7 +224,7 @@ class CompileTests(ApplyTestCase):
         sub = self.settings()["subagents"]
         amorphic = sub["agentOverridesByProvider"]["amorphic"]
         self.assertNotIn("steward.coder", amorphic)
-        self.assertEqual(amorphic["steward.writer"], {"model": OPUS})
+        self.assertEqual(amorphic["steward.writer"], {"model": OPUS, "thinking": "high"})
         self.assertEqual(sorted(amorphic), sorted("steward." + r for r in mpa.mp.ROLES if r != "coder"))
         self.assertEqual(sub["agentOverrides"]["steward.writer"], {"thinking": "high"})
 
@@ -285,18 +286,22 @@ class CompileTests(ApplyTestCase):
         self.assertTrue(any("steward.coder-opus-medium" in c for c in result["changes"]))
 
     def test_leftovers_are_reported_not_deleted(self):
+        # One exception (review B1): a named role's byProvider entry for a
+        # provider the plan does not list is removed; an unnamed role's stays.
         self.user_plan({"version": 1, "roles": {"coder": {"model": OPUS}}})
         self.user_settings({"subagents": {
             "agentOverrides": {"steward.coder": {"model": HAIKU, "thinking": "low"},
                                "steward.writer": {"model": SONNET, "thinking": "high"}},
-            "agentOverridesByProvider": {"openai-codex": {"steward.coder": {"model": SOL}}}}})
+            "agentOverridesByProvider": {"openai-codex": {"steward.coder": {"model": SOL},
+                                                          "steward.writer": {"model": OPUS}}}}})
         result = self.apply()
         sub = self.settings()["subagents"]
         self.assertEqual(sub["agentOverrides"]["steward.coder"], {"model": OPUS, "thinking": "low"})
         self.assertEqual(sub["agentOverrides"]["steward.writer"], {"model": SONNET, "thinking": "high"})
-        self.assertEqual(sub["agentOverridesByProvider"], {"openai-codex": {"steward.coder": {"model": SOL}}})
-        self.assertTrue(self.finding(result, "leftover-override", "writer"))
-        self.assertTrue(self.finding(result, "leftover-override", "coder"))
+        self.assertEqual(sub["agentOverridesByProvider"], {"openai-codex": {"steward.writer": {"model": OPUS}}})
+        self.assertTrue(any("openai-codex steward.coder: removed" in c for c in result["changes"]))
+        self.assertEqual(len(self.finding(result, "leftover-override", "writer")), 2)
+        self.assertFalse(self.finding(result, "leftover-override", "coder"))
         self.assertTrue(self.finding(result, "thinking-not-in-plan", "coder"))
 
     def test_project_plan_and_cwd_have_no_effect(self):
