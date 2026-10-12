@@ -1,7 +1,8 @@
 """Steward model plan core for pi (Phase 2a of docs/roadmap/pi-model-plan.md).
 
 Pure Python, standard library only. It reads files and never writes any.
-The hook imports it only for harness pi; nothing here renders text (2b).
+The hook imports it only for harness pi; model_plan_render.py renders the
+result (2b).
 
 Inputs
 ------
@@ -53,7 +54,7 @@ Output
           "plan": None | {"setting", "model", "thinking", "inheritsMain",
                           "source", "thinkingSource", "byMainProvider",
                           "fromFallback", "available", "clampedTo",
-                          "judgmentGrade", "family"},
+                          "judgmentGrade", "family", "escalateCleared"},
           "effective": {"model", "requested", "exact", "thinking",
                         "inheritsMain", "available",
                         "modelSource": {"file", "key"},
@@ -1267,6 +1268,8 @@ def _resolve_plan_role(ctx, role, fields):
 
     escalate = None
     esc_ref, esc_src = value("escalate")
+    # An explicit "escalate": null: a failed check stays on the main thread.
+    plan["escalateCleared"] = "escalate" in fields and esc_ref is None
     if esc_ref and esc_ref.get("role"):
         if esc_ref["role"] == role:
             # Reached through "*": the named-role check in parse_escalate cannot see it.
