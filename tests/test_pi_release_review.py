@@ -210,16 +210,15 @@ class PassModelRelaunchTests(PlanTestCase):
 
 
 class DriftHintTests(PlanTestCase):
-    """S5: 0.11.0 has no apply; the hint names the setting to change by hand."""
+    """S5, updated in 0.12.0: apply exists, so user-plan drift names it."""
 
-    def test_hint_names_agent_overrides(self):
+    def test_hint_names_apply(self):
         self.user_plan({"version": 1, "roles": {"coder": {"model": OPUS}}})
         result = self.run_plan(main=OPUS)
         drift = self.findings(result, code="binding-drift", role="coder")
         self.assertEqual(len(drift), 1)
-        self.assertNotIn("/steward-models apply", drift[0]["message"])
-        self.assertIn("subagents.agentOverrides", drift[0]["message"])
-        self.assertNotIn("/steward-models apply", render.render_block(result))
+        self.assertIn("run /steward-models apply", drift[0]["message"])
+        self.assertNotIn("by hand", drift[0]["message"])
 
 
 class HeadingTests(PlanTestCase):

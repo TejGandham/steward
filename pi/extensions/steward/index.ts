@@ -9,10 +9,13 @@
  *
  * For the model plan (docs/roadmap/pi-model-plan.md) it also reads pi's model registry and sends
  * those facts with the session-start payload, rebuilds the edict when the main model or its
- * thinking level changes, and adds the /steward-models command, which runs the hook's
- * `model-plan` subcommand and shows its report as a display-only session entry.
+ * thinking level changes, and adds the /steward-models command. `check` runs the hook's
+ * `model-plan` subcommand and shows its report as a display-only session entry. `apply` runs
+ * `model-plan-apply` as a dry run, shows the changes and asks (or needs `--yes` without a UI),
+ * runs it again to write, then calls ctx.reload(); the reloaded instance shows a fresh check.
  *
- * Debugging: with STEWARD_HOOK_LOG=<file>, every session-start and model-plan hook call appends
+ * Debugging: with STEWARD_HOOK_LOG=<file>, every session-start, model-plan and model-plan-apply
+ * hook call appends
  * one JSON line to that file ({kind: "hook", subcommand, payload, stdout, ms}, plus
  * `timedOut: true` or `error: <code>` when the call never finished), and each facts gathering one
  * line ({kind: "facts", ms, models, bytes}). Gate calls are never logged: their payloads carry
@@ -23,7 +26,7 @@
  * registers nothing in a child: the edict and its gates apply to the main thread only.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -50,10 +53,19 @@ const MODELS_COMMAND = "steward-models";
 /** Custom entry type of the /steward-models report: shown in the transcript, never sent to the model. */
 const MODELS_ENTRY_TYPE = "steward-models";
 const MODELS_PLAN_SUBCOMMAND = "model-plan";
-const MODELS_USAGE = "Usage: /steward-models [check|apply|stats]";
+const MODELS_APPLY_SUBCOMMAND = "model-plan-apply";
+const MODELS_USAGE = "Usage: /steward-models [check|apply [--yes]|stats]";
+/** Kill time for the writing apply call: long, so a slow disk never kills it mid-write. */
+const APPLY_WRITE_TIMEOUT_MS = 60_000;
+/**
+ * Hand-off across ctx.reload(): the old extension instance is stale after reload, so it leaves
+ * this process-wide note and the reloaded instance shows the fresh check at its session_start.
+ */
+const PENDING_CHECK_KEY = Symbol.for("steward.pi.pendingModelsCheck");
+const PENDING_CHECK_MAX_AGE_MS = 120_000;
 
 /** Hook calls STEWARD_HOOK_LOG records; gate payloads carry commands, file contents and replies. */
-const LOGGED_SUBCOMMANDS = new Set(["session-start", MODELS_PLAN_SUBCOMMAND]);
+const LOGGED_SUBCOMMANDS = new Set(["session-start", MODELS_PLAN_SUBCOMMAND, MODELS_APPLY_SUBCOMMAND]);
 
 type HookOutput = Record<string, any> | undefined;
 
@@ -451,11 +463,12 @@ function register(
 		for (let i = 0; inflight && i < 8; i++) await inflight;
 	}
 
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
 		softNotes.clear();
 		edictInPrompt = false;
 		factsFailed = false;
 		await rebuild(ctx);
+		if ((event as { reason?: string } | undefined)?.reason === "reload") await showPendingCheck(ctx);
 	});
 
 	// The main model changed (set, cycle or restore), or its thinking level did: rebuild so the
@@ -650,6 +663,83 @@ function register(
 		return `steward: /steward-models check failed: ${reason}`;
 	}
 
+	/** After `apply` reloaded pi: the fresh check, shown by the new instance with the new ctx. */
+	async function showPendingCheck(ctx: ExtensionContext): Promise<void> {
+		const store = globalThis as Record<symbol, unknown>;
+		const pending = store[PENDING_CHECK_KEY] as { at?: number } | undefined;
+		if (!pending) return;
+		delete store[PENDING_CHECK_KEY];
+		if (typeof pending.at !== "number" || Date.now() - pending.at > PENDING_CHECK_MAX_AGE_MS) return;
+		try {
+			show(ctx, `steward: pi reloaded after /steward-models apply. Fresh check:\n\n${await checkReport(ctx)}`);
+		} catch {
+			// display only
+		}
+	}
+
+	function applyFailed(output: HookOutput, missingPython: boolean | undefined): string {
+		if (missingPython) return "steward: /steward-models apply failed: python3 was not found; nothing was written.";
+		const reason = typeof output?.error === "string" && output.error ? output.error.slice(0, 300) : "the hook gave no result";
+		return `steward: /steward-models apply failed: ${reason}`;
+	}
+
+	/**
+	 * `apply`: a dry run first, shown in full; then confirmation through pi's UI (or `--yes`
+	 * when there is no UI); then the writing call, which refuses when either file changed since
+	 * the dry run; then ctx.reload(). All decisions and every write are in the hook.
+	 */
+	async function applyPlan(ctx: ExtensionCommandContext, yes: boolean): Promise<void> {
+		const facts = await modelFacts(ctx);
+		if (!facts) {
+			show(ctx, "steward: /steward-models apply could not read pi's model registry, so nothing was written.");
+			return;
+		}
+		const preview = await runHook(MODELS_APPLY_SUBCOMMAND, { model_facts: facts, dryRun: true }, hookTimeoutMs);
+		const draft = preview.output;
+		if (typeof draft?.report !== "string" || draft.error || typeof draft.hashes !== "object") {
+			show(ctx, applyFailed(draft, preview.missingPython));
+			return;
+		}
+		if (!draft.changed) {
+			show(ctx, draft.report);
+			return;
+		}
+		if (!yes) {
+			if (!ctx.hasUI) {
+				show(ctx, `${draft.report}\n\nNothing was written. Run /steward-models apply --yes to write these changes.`);
+				return;
+			}
+			const ok = await ctx.ui.confirm("Apply the steward model plan?", draft.report);
+			if (!ok) {
+				show(ctx, "steward: /steward-models apply cancelled; nothing was written.");
+				return;
+			}
+		}
+		const done = await runHook(
+			MODELS_APPLY_SUBCOMMAND,
+			{ model_facts: facts, dryRun: false, expect: draft.hashes },
+			Math.max(hookTimeoutMs, APPLY_WRITE_TIMEOUT_MS),
+		);
+		const result = done.output;
+		if (typeof result?.report !== "string" || result.error) {
+			show(ctx, applyFailed(result, done.missingPython));
+			return;
+		}
+		show(ctx, result.report);
+		if (typeof ctx.reload !== "function") {
+			show(ctx, "steward: run /reload so pi-subagents reads the new settings, then /steward-models check.");
+			return;
+		}
+		const store = globalThis as Record<symbol, unknown>;
+		store[PENDING_CHECK_KEY] = { at: Date.now() };
+		try {
+			await ctx.reload();
+		} catch {
+			delete store[PENDING_CHECK_KEY];
+			show(ctx, "steward: the settings were written, but pi did not reload; run /reload.");
+		}
+	}
+
 	// A host without commands (or a registration error) leaves the edict and gates as they are.
 	try {
 		registerModelsRenderer();
@@ -665,15 +755,17 @@ function register(
 	function registerModelsCommand(): void {
 		if (typeof pi.registerCommand !== "function") return;
 		pi.registerCommand(MODELS_COMMAND, {
-			description: "Check the steward model plan: what each steward profile runs on, and every warning",
+			description: "Check the steward model plan (check), or write it into pi-subagents user settings (apply)",
 			getArgumentCompletions: (prefix: string) =>
-				["check", "apply", "stats"].filter((sub) => sub.startsWith(prefix.trim())).map((sub) => ({ value: sub, label: sub })),
+				["check", "apply", "apply --yes", "stats"].filter((sub) => sub.startsWith(prefix.trim())).map((sub) => ({ value: sub, label: sub })),
 			handler: async (args, ctx) => {
 				try {
-					const sub = (args ?? "").trim() || "check";
-					if (sub === "check") show(ctx, await checkReport(ctx));
-					else if (sub === "apply" || sub === "stats") {
-						show(ctx, `steward: /steward-models ${sub} arrives in a later phase (${sub === "apply" ? "Phase 3" : "Phase 4"}); only check works now.`);
+					const [sub = "check", ...flags] = (args ?? "").trim().split(/\s+/).filter(Boolean);
+					const yes = flags.length === 1 && (flags[0] === "--yes" || flags[0] === "-y");
+					if (sub === "check" && flags.length === 0) show(ctx, await checkReport(ctx));
+					else if (sub === "apply" && (flags.length === 0 || yes)) await applyPlan(ctx, yes);
+					else if (sub === "stats" && flags.length === 0) {
+						show(ctx, "steward: /steward-models stats arrives in a later phase (Phase 4); check and apply work now.");
 					} else show(ctx, MODELS_USAGE);
 				} catch {
 					try {

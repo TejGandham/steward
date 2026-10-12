@@ -281,18 +281,23 @@ test("/steward-models is registered and check shows the report", async () => {
 	}
 });
 
-test("/steward-models apply and stats reply that they arrive in a later phase", async () => {
+test("/steward-models stats replies that it arrives in a later phase", async () => {
 	const env = load();
-	for (const sub of ["apply", "stats"]) {
+	for (const sub of ["stats"]) {
 		env.entries.length = 0;
 		await env.commands["steward-models"].handler(sub, env.ctx);
 		assert.equal(env.shown().length, 1);
 		assert.match(env.shown()[0], new RegExp(`${sub}.*later phase`));
 	}
 	assert.equal(hookLog().filter((e) => e.subcommand === "model-plan").length, 0);
+	for (const args of ["frobnicate", "apply --force", "check --yes"]) {
+		env.entries.length = 0;
+		await env.commands["steward-models"].handler(args, env.ctx);
+		assert.match(env.shown()[0], /Usage: \/steward-models \[check\|apply \[--yes\]\|stats\]/, args);
+	}
 	env.entries.length = 0;
 	await env.commands["steward-models"].handler("frobnicate", env.ctx);
-	assert.match(env.shown()[0], /Usage: \/steward-models \[check\|apply\|stats\]/);
+	assert.match(env.shown()[0], /Usage: \/steward-models \[check\|apply \[--yes\]\|stats\]/);
 	assert.equal(env.sent.length, 0);
 });
 
@@ -498,10 +503,10 @@ test("/steward-models check is display-only: an entry, never a message in the mo
 
 test("/steward-models check without a UI also notifies", async () => {
 	const env = load();
-	await env.commands["steward-models"].handler("apply", env.ctx);
+	await env.commands["steward-models"].handler("stats", env.ctx);
 	assert.equal(env.sent.length, 0);
 	assert.equal(env.notices.length, 1);
-	assert.match(env.notices[0].msg, /apply.*later phase/);
+	assert.match(env.notices[0].msg, /stats.*later phase/);
 });
 
 test("model_select and thinking_level_select return without waiting for a slow hook", async () => {

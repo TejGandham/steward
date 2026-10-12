@@ -135,7 +135,7 @@ Each profile ships with a default model ID and thinking level. Settings override
 | `steward.mechanic` | `anthropic/claude-haiku-5-5` | medium |
 | `steward.top-reviewer` | `anthropic/claude-opus-5-5` | max |
 
-Version 0.11.0 added the model plan (see [Model plan on pi](#model-plan-on-pi)). Version 0.10.0 renamed the pi profiles to role-only names. The old names, such as `steward.coder-opus-medium`, still launch the same profile through pi-subagents aliases, and `steward.reviewer-fable-xhigh` launches `steward.top-reviewer`. Settings are different: pi-subagents reads config such as `subagents.agentOverrides` under the new name only, so rename any override keys you saved under an old name.
+Version 0.11.0 added the model plan and 0.12.0 its `apply` command (see [Model plan on pi](#model-plan-on-pi)). Version 0.10.0 renamed the pi profiles to role-only names. The old names, such as `steward.coder-opus-medium`, still launch the same profile through pi-subagents aliases, and `steward.reviewer-fable-xhigh` launches `steward.top-reviewer`. Settings are different: pi-subagents reads config such as `subagents.agentOverrides` under the new name only, so rename any override keys you saved under an old name, or let `/steward-models apply` move them.
 
 A bare `agent: "coder"`, without the `steward.` prefix, now launches `steward.coder` instead of pi-subagents' builtin `worker` agent. pi-subagents lists `coder` as an alias of `worker`, but it matches an agent's own short name before it looks at aliases. To run `worker`, call it by its own name.
 
@@ -186,7 +186,18 @@ Subagents see your `AGENTS.md` files and your skills catalog. A foreground subag
 
 ### Model plan on pi
 
-Version 0.11.0 adds a model plan. **In 0.11.0 the plan is checked and shown, not applied.** Profiles still launch on what pi-subagents settings (`subagents.agentOverrides`) and the profile defaults say. The block warns where those differ from your plan. To make launches follow the plan today, set the overrides by hand as in the recipe under [Profiles on pi](#profiles-on-pi). An `apply` command that writes them for you comes in a later release.
+Version 0.11.0 adds a model plan; 0.12.0 adds `/steward-models apply`. **The plan is not applied on its own.** Profiles launch on what pi-subagents settings (`subagents.agentOverrides`) and the profile defaults say, and the block warns where those differ from your plan. Run `/steward-models apply` to write your user plan into those settings. Run it again after you edit the plan, or after `/subagents-load-profile` replaced the mapping.
+
+**What `apply` does**
+- It reads your user plan only (`~/.pi/agent/steward/model-plan.json`). A repo's plan file, its `.pi/settings.json` and its provider lists play no part, because user settings apply in every repo. To keep a repo off a provider, pin its profiles in that repo's `.pi/settings.json`.
+- It first shows every change, old value to new, and the files it will write, then asks. Without a UI (print mode) it only shows the changes; `/steward-models apply --yes` writes them.
+- It writes only the `model` and `thinking` of the `steward.*` entries in `subagents.agentOverrides` and `subagents.agentOverridesByProvider` in `~/.pi/agent/settings.json`. Everything else stays, including other agents' entries and fields such as `machine`. Entries under old profile names, such as `steward.coder-opus-medium`, move to the new names.
+- Each profile gets the first model in its list that pi has credentials for. `main` becomes `inherit`. A profile with no usable model is left as it is, and the report says so. Profiles and fields your plan does not name are left as they are, with one exception: for a profile your plan names, apply removes `model` and `thinking` from its `agentOverridesByProvider` entry for any provider the plan no longer lists under `byMainProvider`. Otherwise those old values would still win when the main thread is on that provider. Other fields in that entry, such as `fast`, `disabled` or `machine`, stay. An entry left empty is removed, and the provider's object stays, as `{}` if nothing else is in it. A profile with no usable model keeps its provider entries too. A provider entry apply writes always carries `thinking`, so an old level there cannot win either.
+- Before writing it saves a copy, `settings.json.bak-<date>-<time>`. It refuses, and writes nothing, when the plan has an error, the settings file is not valid JSON (a number too large to store, such as `1e400`, counts as invalid), or the plan, the settings file or the profile changed after the preview. A run with nothing to change writes nothing.
+- It also writes the pi-subagents profile `~/.pi/agent/profiles/pi-subagents/steward.json` with the whole mapping, other agents' entries included. `/subagents-load-profile steward` restores it. Loading it resets every agent override, steward or not, to what it was at the last apply, so a change you made to another agent since then is lost. An entry the profile format does not allow, such as `"model": false` (settings accept it, profiles do not), is left out of the profile, and the report says so.
+- `/subagents-check-profile steward` tests each model with a short live call. A profile set to `inherit` (the deep-reasoner in the example plan) shows as a failure there, because `inherit` is not a model name. That failure is expected.
+- If the settings file is written but the profile is not (a full disk, say), the report says so and lists the backups it made (one for each file that existed before), and pi still reloads. Run `/steward-models apply` again before you load the steward profile.
+- Then it reloads pi and shows a fresh check.
 
 You write which model and thinking level each profile should use, plus fallbacks and escalations. At session start, and again after you switch model or thinking level, steward adds a "Model plan" block to the main thread's instructions. The block shows:
 - what each profile really runs on;
@@ -201,7 +212,7 @@ Without a plan file the block still lists what each profile runs on.
 - Per repo: `.pi/steward-model-plan.json`. In a trusted repo it wins over your user plan.
 - A repo's `allowProviders` and `denyProviders` are read even when you decline project trust. If a list cannot be read, every profile is marked blocked.
 
-**The provider lists do not stop a launch.** In 0.11.0, `allowProviders` and `denyProviders` change only what the block tells the main thread about the `steward.*` profiles and what `/steward-models check` reports. pi-subagents still launches whatever its settings say, and other agents, such as its builtin `worker` and `scout`, are not checked at all. To actually stop a launch on a provider, set an enforced, strict `subagents.modelScope` in pi-subagents settings; in an untrusted project pi-subagents ignores the project's copy of that setting.
+**The provider lists do not stop a launch.** `allowProviders` and `denyProviders` change only what the block tells the main thread about the `steward.*` profiles and what `/steward-models check` reports. pi-subagents still launches whatever its settings say, and other agents, such as its builtin `worker` and `scout`, are not checked at all. To actually stop a launch on a provider, set an enforced, strict `subagents.modelScope` in pi-subagents settings; in an untrusted project pi-subagents ignores the project's copy of that setting.
 
 A small plan:
 
@@ -256,7 +267,7 @@ Every role inherits the `"*"` entry. The reviewer escalates to the `steward.deep
 
 **How the main thread delegates.** For independent children it uses the built-in `parallel` workflow. For dependent steps it makes separate `subagent` calls, one after another. It uses a workflow script only as a file path. A script written in the reply never reaches pi-subagents on pi 1.1.0 with pi-subagents 0.77.0, so the edict does not use that form.
 
-**Checking and debugging.** `/steward-models check` prints the full report on screen. It does not go into the model's context. To debug the hook, start pi with `STEWARD_HOOK_LOG=<file>`. Each session-start and `model-plan` hook call then appends one JSON line to that file, holding the full payload and the hook's reply. The session-start payload includes pi's whole model catalog (a few hundred KB with many providers) and your working directory, once per session start and per model or thinking switch. Gate calls are never logged, because they carry your commands, file contents and replies. Delete the file when you are done.
+**Checking and debugging.** `/steward-models check` prints the full report on screen. It does not go into the model's context. To debug the hook, start pi with `STEWARD_HOOK_LOG=<file>`. Each session-start, `model-plan` and `model-plan-apply` hook call then appends one JSON line to that file, holding the full payload and the hook's reply. The session-start payload includes pi's whole model catalog (a few hundred KB with many providers) and your working directory, once per session start and per model or thinking switch. Gate calls are never logged, because they carry your commands, file contents and replies. Delete the file when you are done.
 
 ### Gates on pi
 
