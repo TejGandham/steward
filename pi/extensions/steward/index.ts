@@ -31,7 +31,10 @@ import { fileURLToPath } from "node:url";
 
 export const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const HOOK_SCRIPT = resolve(PLUGIN_ROOT, "hooks", "steward_hook.py");
-const HOOK_TIMEOUT_MS = 15_000;
+/** Kill time for one hook call, and the budget for one edict load (the facts call plus its retry). */
+export const HOOK_TIMEOUT_MS = 15_000;
+/** Kill time for the session-start call that carries model_facts; the plain retry gets the rest. */
+export const FACTS_TIMEOUT_MS = 5_000;
 
 /** pi's built-in tools that write: the same set the Claude Code gate watches. */
 const GATED_TOOLS = new Set(["bash", "edit", "write"]);
@@ -271,11 +274,19 @@ export interface StewardOptions {
 	loadPiTui?: () => Promise<PiTui>;
 	/** Kill time for one hook call; tests shorten it. */
 	hookTimeoutMs?: number;
+	/** Kill time for the session-start call carrying model_facts; tests shorten it. */
+	factsTimeoutMs?: number;
 }
 
 export function createSteward(options: StewardOptions = {}): (pi: ExtensionAPI) => void {
 	return (pi) =>
-		register(pi, options.loadPiAi ?? defaultLoadPiAi, options.loadPiTui ?? defaultLoadPiTui, options.hookTimeoutMs ?? HOOK_TIMEOUT_MS);
+		register(
+			pi,
+			options.loadPiAi ?? defaultLoadPiAi,
+			options.loadPiTui ?? defaultLoadPiTui,
+			options.hookTimeoutMs ?? HOOK_TIMEOUT_MS,
+			options.factsTimeoutMs ?? FACTS_TIMEOUT_MS,
+		);
 }
 
 /** Splits text into lines of at most `width` characters, for a TUI without pi-tui. */
@@ -297,6 +308,7 @@ function register(
 	loadPiAi: () => Promise<PiAi>,
 	loadPiTui: () => Promise<PiTui>,
 	hookTimeoutMs: number,
+	factsTimeoutMs: number,
 ): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 
@@ -304,8 +316,6 @@ function register(
 	let edict: string | undefined;
 	/** Bumped by every load; the load whose number is still `generation` when it ends may land. */
 	let generation = 0;
-	/** Generation `edict` came from; differs from `generation` while a rebuild is due or failed. */
-	let edictGeneration = -1;
 	/** The newest load still running, shared by before_agent_start instead of a second load. */
 	let inflight: Promise<void> | undefined;
 	/**
@@ -377,8 +387,12 @@ function register(
 	}
 
 	/** One session-start call; the edict text, or undefined. */
-	async function sessionStart(ctx: ExtensionContext, payload: Record<string, unknown>): Promise<{ text?: string; missingPython?: boolean }> {
-		const { output, missingPython } = await runHook("session-start", payload, hookTimeoutMs);
+	async function sessionStart(
+		ctx: ExtensionContext,
+		payload: Record<string, unknown>,
+		timeoutMs: number,
+	): Promise<{ text?: string; missingPython?: boolean }> {
+		const { output, missingPython } = await runHook("session-start", payload, timeoutMs);
 		if (missingPython && ctx.hasUI && !warnedMissingPython) {
 			warnedMissingPython = true;
 			ctx.ui.notify("steward: python3 was not found, so the edict and its gates are off.", "warning");
@@ -389,15 +403,21 @@ function register(
 
 	/**
 	 * The edict for the current model, or undefined. A call with model_facts that gives no edict
-	 * is retried once without them, so a facts problem costs the block, never the edict.
+	 * is retried once without them, so a facts problem costs the block, never the edict. The
+	 * facts call gets `factsTimeoutMs` and the retry the rest of `hookTimeoutMs`, so a load never
+	 * runs longer than one hook call did in 0.10.0. A plain-only call gets `hookTimeoutMs`.
 	 */
 	async function loadEdict(ctx: ExtensionContext): Promise<string | undefined> {
 		const base = { session_id: sessionId(ctx) };
+		const started = Date.now();
 		const facts = factsFailed ? undefined : await modelFacts(ctx);
-		let result = await sessionStart(ctx, facts ? { ...base, model_facts: facts } : base);
+		let result = facts
+			? await sessionStart(ctx, { ...base, model_facts: facts }, Math.min(factsTimeoutMs, hookTimeoutMs))
+			: await sessionStart(ctx, base, hookTimeoutMs);
 		if (!result.text && facts && !result.missingPython) {
 			factsFailed = true;
-			result = await sessionStart(ctx, base);
+			const left = hookTimeoutMs - (Date.now() - started);
+			if (left > 0) result = await sessionStart(ctx, base, left);
 		}
 		if (!result.text) return undefined;
 		return subagentsInstalled() ? result.text : `${MISSING_SUBAGENTS_WARNING}\n\n${result.text}`;
@@ -405,7 +425,8 @@ function register(
 
 	/**
 	 * Starts a load as the newest generation. The previous edict stays in place until this load
-	 * succeeds; an older load that ends later, or a load that fails, changes nothing.
+	 * succeeds; an older load that ends later, or a load that fails, changes nothing. A failed
+	 * load is not retried by later prompts: the next load comes with the next switch or session.
 	 */
 	function rebuild(ctx: ExtensionContext): Promise<void> {
 		const mine = ++generation;
@@ -416,10 +437,7 @@ function register(
 			} catch {
 				text = undefined;
 			}
-			if (mine === generation && text) {
-				edict = text;
-				edictGeneration = mine;
-			}
+			if (mine === generation && text) edict = text;
 		})();
 		inflight = run;
 		void run.finally(() => {
@@ -457,10 +475,12 @@ function register(
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		try {
-			// Share a running load. With none running, retry when the last load failed: the next
-			// prompt tries again, without facts if a facts call failed.
+			// Share a running load. With none running, keep the last good edict even when the newest
+			// load failed: the next load comes with the next switch, so a hanging hook costs at most
+			// the one load. Only with no edict at all does the prompt try again, as 0.10.0 did
+			// (without facts if a facts call failed).
 			if (inflight) await settleLoads();
-			else if (edictGeneration !== generation || edict === undefined) await rebuild(ctx);
+			else if (edict === undefined) await rebuild(ctx);
 			if (!edict) return undefined;
 			edictInPrompt = true;
 			const options = event.systemPromptOptions;
