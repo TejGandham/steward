@@ -327,7 +327,12 @@ def compile_plan(plan, plan_path, models):
                 if bound_level is not None:
                     entry["thinking"] = bound_level
             elif use_thinking:
-                entry["thinking"] = level
+                # The level of the candidate that is bound, as the check takes it:
+                # a fallback with its own :level keeps that level.
+                where = "steward.%s with the main thread on %s" % (role, prov)
+                found = (_first_available(role, candidates(model_ref, level), catalog, providers,
+                                          mp._Findings(), where) if base else None)
+                entry["thinking"] = found[1] if found is not None and found[1] is not None else level
                 if "model" in target["overrides"]:
                     # The role's own model applies on this provider; a stale byProvider model would beat it.
                     target["byProviderDrop"][prov] = ["model"]
@@ -425,14 +430,26 @@ def build_settings(data, targets, findings):
         for prov, entries in (current.get("agentOverridesByProvider") or {}).items():
             if key not in entries or prov in target["byProvider"] or prov in target["byProviderKeep"]:
                 continue
+            if target["unchanged"]:
+                continue  # no available candidate: the role's settings are left unchanged
             if target["named"]:
                 # The one exception to the leftover rule: for a role the plan
-                # names, a byProvider entry for a provider the plan does not
-                # list would override the plan's binding on that provider.
-                # The emptied provider object stays as {}.
-                changes.append("agentOverridesByProvider.%s %s: removed (%s); the plan lists no binding for "
-                               "this provider" % (prov, key, json.dumps(entries[key], ensure_ascii=False)))
-                del entries[key]
+                # names, model and thinking in a byProvider entry for a
+                # provider the plan does not list would override the plan's
+                # binding there. Only those two fields go; every other field
+                # stays. An emptied entry is removed; the provider object
+                # stays, as {} when nothing else is in it.
+                entry = entries[key]
+                if not isinstance(entry, dict):
+                    continue
+                popped = {f: entry.pop(f) for f in ("model", "thinking") if f in entry}
+                if not popped:
+                    continue
+                if not entry:
+                    del entries[key]
+                changes.append("agentOverridesByProvider.%s %s: removed %s; the plan lists no binding for "
+                               "this provider" % (prov, key, ", ".join(
+                                   "%s %s" % (f, json.dumps(v, ensure_ascii=False)) for f, v in popped.items())))
             else:
                 findings.add("info", "leftover-override", role,
                              "agentOverridesByProvider.%s %s is not in the plan; it is left as it is." % (prov, key))
@@ -562,12 +579,20 @@ class _Locks:
         previous = _read_owner(path)
         if previous is None or not _dead_owner(previous):
             return False
+        retired = "%s.retired-%s" % (path, previous["token"])
         try:
-            os.rename(path, "%s.retired-%s" % (path, previous["token"]))
+            os.rename(path, retired)
         except FileNotFoundError:
-            pass
+            return True
         except OSError:
             return False
+        # pi-subagents 0.77.0 src/shared/file-lease.js:64-65: the moved lease
+        # must still be the dead owner's; otherwise a live holder's lease was
+        # moved in between the read and the rename.
+        moved = _read_owner(retired)
+        if moved is None or moved.get("token") != previous["token"]:
+            raise Refused("the settings lock owner changed during recovery of %s; run /steward-models apply "
+                          "again (nothing was written)" % path)
         return True
 
     def __init__(self, settings_path, wait):
@@ -824,6 +849,9 @@ def apply(facts, env=None, dry_run=True, expect=None, now=None, before_write=Non
                 for _, (tmp, _target) in prepared[index + 1:]:
                     _discard(tmp)
                 if index == 0:
+                    for path in result["backups"]:
+                        _discard(path)
+                    result["backups"] = []
                     raise Refused("could not write %s (%s); nothing was written"
                                   % (item[1], exc.strerror or type(exc).__name__))
                 # Settings are written, the profile is not: report it, do not hide it.
@@ -854,9 +882,11 @@ def render(result):
     else:
         lines += ["", "Settings and the steward profile already match the plan."]
     if result.get("partial"):
-        lines += ["", "The settings were written, but %s. Settings now follow the plan; the steward profile still "
-                  "holds the old mapping, so do not run /subagents-load-profile steward until /steward-models apply "
-                  "has run again. Restore from the backups below to undo." % result["partialError"]]
+        undo = {0: "", 1: " Restore from the backup below to undo."}.get(
+            len(result["backups"]), " Restore from the backups below to undo.")
+        lines += ["", "The settings were written, but %s. Settings now follow the plan; the steward profile does "
+                  "not, so do not run /subagents-load-profile steward until /steward-models apply has run again.%s"
+                  % (result["partialError"], undo)]
     if result["backups"]:
         lines += ["", "Backups:"] + ["- %s" % path for path in result["backups"]]
     shown = [f for f in result["findings"] if f["severity"] in ("error", "warn")]
