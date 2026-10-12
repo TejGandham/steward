@@ -272,6 +272,84 @@ def _copilot_session_start(payload, env):
     return json.dumps({"additionalContext": "".join(parts)})
 
 
+# ---------------------------------------------------------------------------
+# pi model plan (docs/roadmap/pi-model-plan.md, Phase 2b)
+#
+# Payload contract. The pi extension may add a `model_facts` key to the
+# session-start payload ({"session_id", "model_facts"}). It holds exactly
+# the registry facts documented in hooks/model_plan.py:
+#
+#   {"main": {"provider", "id", "thinkingLevel"} | null,
+#    "models": [{"provider", "id", "available", "thinkingLevels"?,
+#                "maxTokens"?, ...}],
+#    "projectTrusted": bool, "cwd": str}
+#
+# With valid facts, harness pi appends the Model plan block to the
+# session-start text. Without the key, with malformed facts, or on any
+# error the output is exactly what it was before 2b. Other harnesses ignore
+# the key.
+#
+# The `model-plan` subcommand (pi only, used by /steward-models check)
+# reads {"model_facts", "cwd"} on stdin; `cwd` fills model_facts.cwd when
+# that is missing. It prints {"report": "<full check report>"} and exits 0,
+# findings or not. Unusable input prints {"error": "..."}, writes the
+# message to stderr and exits 2. It writes no files.
+# ---------------------------------------------------------------------------
+
+MODEL_PLAN_USAGE_EXIT = 2
+
+
+def _hook_module(name):
+    """Import a sibling module from hooks/ (only harness pi needs them)."""
+    import importlib
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    return importlib.import_module(name)
+
+
+def _pi_model_plan_block(payload, env):
+    facts = payload.get("model_facts")
+    if not isinstance(facts, dict):
+        return None
+    try:
+        return _hook_module("model_plan_render").session_block(facts, env)
+    except Exception:  # session start must fail open
+        return None
+
+
+def cmd_model_plan(stdin_text, env):
+    """Returns (stdout text, stderr text, exit code)."""
+    def fail(message):
+        message = "model-plan: " + message
+        return json.dumps({"error": message}), message, MODEL_PLAN_USAGE_EXIT
+
+    if get_harness(env) != "pi":
+        return fail("this subcommand runs only for pi (STEWARD_HARNESS=pi)")
+    try:
+        payload = json.loads(stdin_text) if stdin_text and stdin_text.strip() else None
+    except ValueError:
+        return fail("stdin is not JSON")
+    if not isinstance(payload, dict):
+        return fail("stdin must be a JSON object {\"model_facts\": {...}, \"cwd\": \"...\"}")
+    facts = payload.get("model_facts")
+    if not isinstance(facts, dict):
+        return fail("model_facts is missing or not an object")
+    cwd = payload.get("cwd")
+    if "cwd" not in facts and isinstance(cwd, str) and cwd:
+        facts = dict(facts, cwd=cwd)
+    if isinstance(facts.get("cwd"), str) and facts["cwd"] and not os.path.isabs(facts["cwd"]):
+        return fail("cwd must be an absolute path, got a relative one")
+    mp = _hook_module("model_plan")
+    try:
+        mp.validate_facts(facts)
+    except ValueError as exc:
+        return fail("model_facts is malformed: %s" % exc)
+    render = _hook_module("model_plan_render")
+    result = mp.evaluate(facts, env=env)
+    return json.dumps({"report": render.render_report(result)}), "", 0
+
+
 def cmd_session_start(payload, env):
     harness = get_harness(env)
     if harness == "copilot":
@@ -302,6 +380,9 @@ def cmd_session_start(payload, env):
             parts.append("\n".join(warnings) + "\n\n")
         parts.append(skill_body)
         text = "".join(parts)
+        block = _pi_model_plan_block(payload, env)
+        if block:
+            text += "\n\n" + block
     else:
         warnings = _dependency_warnings(config_dir)
         header = (
@@ -1441,6 +1522,16 @@ def _dispatch(argv, stdin_text, env):
 
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "model-plan":
+        try:
+            out, err, code = cmd_model_plan(sys.stdin.read(), os.environ)
+        except Exception as exc:
+            out, err, code = (json.dumps({"error": "model-plan: %s" % type(exc).__name__}),
+                              "model-plan: internal error (%s)" % type(exc).__name__, 1)
+        sys.stdout.write(out + "\n")
+        if err:
+            sys.stderr.write(err + "\n")
+        return code
     try:
         stdin_text = sys.stdin.read()
         output = _dispatch(sys.argv, stdin_text, os.environ)
