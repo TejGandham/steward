@@ -32,6 +32,9 @@ render = importlib.import_module("model_plan_render")
 
 # The commit 2b builds on; regression output is captured from its script.
 BASE_COMMIT = "eb80786"
+# Set to 1 to skip, not fail, the regression tests when BASE_COMMIT is missing
+# (a shallow clone, say).
+ALLOW_MISSING_BASE_ENV = "STEWARD_ALLOW_MISSING_BASE_COMMIT"
 BOX_DRAWING = re.compile("[\u2500-\u257f]")
 
 # The operator's Phase 0 settings from the doc, equal to what apply writes
@@ -320,7 +323,11 @@ class FactsCase(StewardTestCase):
             source = subprocess.run(["git", "-C", str(REPO_ROOT), "show", "%s:hooks/steward_hook.py" % BASE_COMMIT],
                                     capture_output=True, check=True).stdout
         except (OSError, subprocess.CalledProcessError):
-            self.skipTest("base commit %s is not in this checkout" % BASE_COMMIT)
+            message = ("base commit %s is not in this checkout, so the regression tests cannot run; fetch it, "
+                       "or set %s=1 to skip them" % (BASE_COMMIT, ALLOW_MISSING_BASE_ENV))
+            if os.environ.get(ALLOW_MISSING_BASE_ENV) == "1":
+                self.skipTest(message)
+            self.fail(message)
         path = Path(self.tmp) / "base" / "hooks" / "steward_hook.py"
         path.parent.mkdir(parents=True)
         path.write_bytes(source)

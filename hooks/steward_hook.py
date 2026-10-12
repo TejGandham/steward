@@ -338,6 +338,8 @@ def cmd_model_plan(stdin_text, env):
     cwd = payload.get("cwd")
     if "cwd" not in facts and isinstance(cwd, str) and cwd:
         facts = dict(facts, cwd=cwd)
+    if isinstance(facts.get("cwd"), str) and facts["cwd"] and not os.path.isabs(facts["cwd"]):
+        return fail("cwd must be an absolute path, got a relative one")
     mp = _hook_module("model_plan")
     try:
         mp.validate_facts(facts)

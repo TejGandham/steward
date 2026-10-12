@@ -15,8 +15,13 @@ only; reads and writes nothing.
 
 Every piece of text taken from the result goes through ``_text``: control,
 format and line-separator characters become ``?``, em-dashes become ``-``,
-box-drawing characters become ``?``, and table cells escape ``|``.
+box-drawing characters become ``?``, and ``|`` in a table cell becomes ``/``
+(no escaping, so a cell never grows past its limit). ``clamp_block`` is the
+last step of the capped block: whatever the input, it holds at most
+MAX_BLOCK_LINES lines and MAX_BLOCK_CHARS characters.
 """
+
+import os
 
 import model_plan as mp
 
@@ -46,7 +51,7 @@ def _text(value, limit):
 
 
 def _cell(value, limit=MAX_CELL_CHARS):
-    return _text(value, limit).replace("|", "\\|")
+    return _text(value, limit).replace("|", "/")
 
 
 def _yes_no(value):
@@ -80,7 +85,8 @@ def blocked_roles(result):
 
 
 def _relaunch_cell(row):
-    relaunch = row.get("relaunch")
+    # The relaunch for the binding a launch really gets, not the plan's.
+    relaunch = row.get("effectiveRelaunch")
     return relaunch["launch"] if relaunch and relaunch.get("launch") else "none"
 
 
@@ -198,21 +204,67 @@ def _blocked_lines(result, blocked, limit):
 def _cap_lines(result):
     lines = []
     for provider in sorted(result.get("providers") or {}):
+        if not mp.PROVIDER_ID_RE.match(provider):
+            continue  # evaluate drops these; a hand-built result might not
         cap = (result["providers"][provider] or {}).get("maxConcurrent")
-        if cap:
-            lines.append("At most %d children at a time on %s." % (cap, _cell(provider, 64)))
+        if type(cap) is int and cap > 0:
+            lines.append("At most %d %s at a time on %s." % (cap, "child" if cap == 1 else "children", provider))
     return lines
 
 
-def _finding_lines(result, blocked, limit, include_info=False):
+def _display_path(path, cwd, home):
+    """A path relative to cwd when under it, with ~ for home, else as is."""
+    if not path:
+        return "built-in default"
+    for base, prefix in ((cwd, ""), (home, "~/")):
+        if base and os.path.isabs(base):
+            base = os.path.normpath(base)
+            if path.startswith(base + os.sep):
+                return prefix + path[len(base) + 1:]
+    return path
+
+
+GROUPED_CODES = ("binding-drift",)
+
+
+def _group_key(f):
+    """(code, source, hint) for a finding that groups across roles, else None."""
+    if f["code"] not in GROUPED_CODES or not f["role"] or not f["source"]:
+        return None
+    hint = f["message"].rsplit("): ", 1)[-1].rstrip(".") if "): " in f["message"] else ""
+    return (f["code"], f["source"], hint)
+
+
+def _grouped_line(code, source, hint, roles, cwd, home):
+    names = ", ".join("steward." + r for r in mp.ROLES if r in roles)
+    where = _display_path(source, cwd, home)
+    if code == "binding-drift":
+        return "- warn: %s launch on other models or thinking than the plan; %s sets them: %s." % (names, where, hint)
+    return "- warn: %s: %s in %s." % (names, code, where)
+
+
+def _finding_lines(result, blocked, limit, include_info=False, group=False, cwd=None, home=None):
     seen = set()
     errors, warns = [], []
+    groups = {}
+    if group:
+        for f in result["findings"]:
+            key = _group_key(f)
+            if key:
+                groups.setdefault(key, []).append(f["role"])
     for f in result["findings"]:
         if f["code"] in MAIN_WARNING_CODES:
             continue
         if f["severity"] == "info" and not include_info:
             continue
         if f["role"] in blocked and f["code"] in BLOCK_CODES and f["subject"] == "effective binding":
+            continue
+        gkey = _group_key(f) if group else None
+        if gkey and len(set(groups[gkey])) > 1:
+            if gkey in seen:
+                continue
+            seen.add(gkey)
+            warns.append(_text(_grouped_line(gkey[0], gkey[1], gkey[2], set(groups[gkey]), cwd, home), limit))
             continue
         # The same message for several roles or subjects is one problem.
         key = (f["severity"], f["code"], f["message"])
@@ -224,8 +276,36 @@ def _finding_lines(result, blocked, limit, include_info=False):
     return errors + warns
 
 
-def render_block(result, capped=True):
-    """The Model plan block for one evaluate() result."""
+def clamp_block(text):
+    """Hard limit on the capped block: at most MAX_BLOCK_LINES lines and
+    MAX_BLOCK_CHARS characters, ending with the "N more" line when cut."""
+    lines = text.split("\n")
+    if len(lines) <= MAX_BLOCK_LINES and len(text) <= MAX_BLOCK_CHARS:
+        return text
+    if lines and lines[-1].endswith("more: run /steward-models check") and lines[-1][0].isdigit():
+        dropped = int(lines[-1].split(" ", 1)[0])
+        lines = lines[:-1]
+    else:
+        dropped = 0
+    kept, used = [], 0
+    for index, line in enumerate(lines):
+        more = MORE_TEXT % (dropped + len(lines) - index)
+        if len(kept) + 2 > MAX_BLOCK_LINES or used + len(line) + 1 + len(more) > MAX_BLOCK_CHARS:
+            line = line[:max(0, MAX_BLOCK_CHARS - used - len(more) - 5)] + "..."
+            if len(kept) + 2 <= MAX_BLOCK_LINES and len(line) > 40:
+                kept.append(line)
+                used += len(line) + 1
+            break
+        kept.append(line)
+        used += len(line) + 1
+    kept.append(MORE_TEXT % (dropped + len(lines) - len(kept)))
+    return "\n".join(kept)
+
+
+def render_block(result, capped=True, cwd=None, home=None):
+    """The Model plan block for one evaluate() result. Capped, override
+    warnings from one file are one line listing the roles, with the path
+    relative to cwd or under ~ for home."""
     limit = MAX_LINE_CHARS if capped else mp.MAX_MESSAGE_CHARS + 40
     warn_limit = MAX_WARNING_CHARS if capped else limit + 200
     blocked = blocked_roles(result)
@@ -236,7 +316,7 @@ def render_block(result, capped=True):
     warnings = [l for l in blocked_lines if l.startswith("STEWARD WARNING")] + _main_warnings(result, warn_limit)
     blocked_lines = [l for l in blocked_lines if not l.startswith("STEWARD WARNING")]
     caps = _cap_lines(result)
-    findings = _finding_lines(result, blocked, limit)
+    findings = _finding_lines(result, blocked, limit, group=capped, cwd=cwd, home=home)
 
     # Priority when capped: main warnings, blocked profiles, caps, findings.
     flow = [("warn", l) for l in warnings] + [("block", l) for l in blocked_lines] \
@@ -267,7 +347,8 @@ def render_block(result, capped=True):
         lines += found
     if dropped:
         lines.append(MORE_TEXT % dropped)
-    return "\n".join(lines)
+    text = "\n".join(lines)
+    return clamp_block(text) if capped else text
 
 
 def _source(value):
@@ -318,4 +399,4 @@ def session_block(facts, env):
     result = mp.evaluate(facts, env=env)
     if not usable(result):
         return None
-    return render_block(result)
+    return render_block(result, cwd=facts.get("cwd"), home=(os.environ if env is None else env).get("HOME"))

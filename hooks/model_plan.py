@@ -723,19 +723,25 @@ def validate_facts(facts):
             raise ValueError("facts.main must be null or {provider, id, thinkingLevel}")
     if not isinstance(facts["models"], list):
         raise ValueError("facts.models must be a list")
+    if not any(_usable_model(entry) for entry in facts["models"]):
+        raise ValueError("facts.models has no usable entry")
     if not isinstance(facts["projectTrusted"], bool):
         raise ValueError("facts.projectTrusted must be a boolean")
     if not isinstance(facts["cwd"], str) or not facts["cwd"]:
         raise ValueError("facts.cwd must be a non-empty string")
 
 
+def _usable_model(entry):
+    return (isinstance(entry, dict) and isinstance(entry.get("provider"), str) and bool(entry["provider"])
+            and isinstance(entry.get("id"), str) and bool(entry["id"])
+            and isinstance(entry.get("available"), bool))
+
+
 def _clean_models(models, findings):
     """Keep the model entries usable by the checks; skip the rest with a finding."""
     out = []
     for index, entry in enumerate(models):
-        if not (isinstance(entry, dict) and isinstance(entry.get("provider"), str) and entry["provider"]
-                and isinstance(entry.get("id"), str) and entry["id"]
-                and isinstance(entry.get("available"), bool)):
+        if not _usable_model(entry):
             findings.add("warn", "facts-bad-model", None,
                          "facts.models entry %d lacks provider, id or available; it is skipped." % index)
             continue
@@ -914,22 +920,22 @@ def parse_plan(data, source, project):
             plan["providers"] = {}
             for name, value in providers.items():
                 if not isinstance(value, dict):
-                    err("plan-bad-value", "providers.%s must be an object." % _echo(name))
+                    err("plan-bad-value", "providers[%s] must be an object." % _show(name, 40))
                     continue
                 entry = {}
                 for key, field in value.items():
                     if key not in PROVIDER_FIELDS:
-                        err("plan-unknown-field", "Unknown field %s in providers.%s." % (_show(key), _echo(name)))
+                        err("plan-unknown-field", "Unknown field %s in providers[%s]." % (_show(key), _show(name, 40)))
                     elif key == "maxConcurrent":
                         if type(field) is int and field > 0:
                             entry[key] = field
                         else:
-                            err("plan-bad-value", "providers.%s.maxConcurrent must be a positive integer." % _echo(name))
+                            err("plan-bad-value", "providers[%s].maxConcurrent must be a positive integer." % _show(name, 40))
                     elif key == "enabled":
                         if isinstance(field, bool):
                             entry[key] = field
                         else:
-                            err("plan-bad-value", "providers.%s.enabled must be true or false." % _echo(name))
+                            err("plan-bad-value", "providers[%s].enabled must be true or false." % _show(name, 40))
                 plan["providers"][name] = entry
 
     families = data.get("families")
@@ -939,8 +945,14 @@ def parse_plan(data, source, project):
         else:
             plan["families"] = {}
             for name, value in families.items():
+                # A family name is shown in the session-start table, so it
+                # must be a plain id, not prose.
+                if not (isinstance(name, str) and PROVIDER_ID_RE.match(name)):
+                    err("plan-bad-value", "Family name %s is not a plain id (letters, digits, '.', '_', '-'); "
+                        "ignored." % _show(name, 40))
+                    continue
                 globs = [value] if isinstance(value, str) else value
-                items = str_list(globs, "families.%s" % _echo(name))
+                items = str_list(globs, "families.%s" % name)
                 if items:
                     plan["families"][name] = items
 
@@ -1002,14 +1014,17 @@ def parse_plan(data, source, project):
                             continue
                         by = {}
                         for prov, sub in field.items():
+                            if not PROVIDER_ID_RE.match(prov):
+                                err("plan-bad-value", "%s key %s is not a pi provider id; ignored." % (where, _show(prov, 40)), label)
+                                continue
                             if not isinstance(sub, dict):
-                                err("plan-bad-value", "%s.%s must be an object." % (where, _echo(prov)), label)
+                                err("plan-bad-value", "%s.%s must be an object." % (where, prov), label)
                                 continue
                             item = {}
                             for skey, sval in sub.items():
-                                swhere = "%s.%s.%s" % (where, _echo(prov), skey)
+                                swhere = "%s.%s.%s" % (where, prov, skey)
                                 if skey not in BY_MAIN_FIELDS:
-                                    err("plan-unknown-field", "Unknown field %s in %s.%s." % (_show(skey), where, _echo(prov)), label)
+                                    err("plan-unknown-field", "Unknown field %s in %s.%s." % (_show(skey), where, prov), label)
                                 elif sval is None:
                                     item[skey] = None
                                 elif skey == "model":
@@ -1160,10 +1175,15 @@ class _Context:
         return self.provider_block(model.split("/", 1)[0])
 
 
-def _candidate_ok(ctx, role, ref, what, source, subject):
+class _Quiet:
+    def add(self, *args, **kwargs):
+        pass
+
+
+def _candidate_ok(ctx, role, ref, what, source, subject, record=True):
     """Resolve one plan candidate. Returns the resolved provider/id, or None
-    after recording why it is skipped."""
-    f = ctx.findings
+    after recording why it is skipped (record=False records nothing)."""
+    f = ctx.findings if record else _Quiet()
     if ref["main"]:
         if not ctx.main:
             f.add("warn", "main-model-unknown", role, "%s is \"main\", but the main thread's model is not known." % what,
@@ -1230,6 +1250,7 @@ def _resolve_plan_role(ctx, role, fields):
         candidates.append((model_ref, thinking, model_src, False, "Bound model"))
     for ref in fallback or []:
         candidates.append((ref, ref["thinking"] or thinking, fallback_src, True, "Fallback"))
+    plan_candidates = [(ref, level, src, what) for ref, level, src, _, what in candidates]
 
     binding = None
     relaunch = None
@@ -1310,7 +1331,45 @@ def _resolve_plan_role(ctx, role, fields):
     for ref, src in refs:
         if not ref["main"]:
             _check_router(ctx, role, ref["model"], src)
-    return plan, relaunch, escalate
+    return plan, relaunch, escalate, plan_candidates
+
+
+def _effective_relaunch(ctx, role, eff, candidates):
+    """The relaunch model for the binding a launch really gets: the next
+    usable candidate after the effective model in the role's candidate list.
+    None, with an info finding saying why, when the effective model is not in
+    the list or nothing after it is usable. A candidate below judgmentModels
+    is skipped when the effective model is judgment-grade."""
+    model = eff.get("model")
+    if not model or not candidates:
+        return None
+    resolved = [ctx.main if ref["main"] else ref["model"] for ref, _, _, _ in candidates]
+    if model not in resolved:
+        ctx.findings.add("info", "effective-relaunch-none", role,
+                         "steward.%s runs %s, which is not in the plan's candidates for %s (%s); no relaunch model "
+                         "is offered after a provider error." % (role, model, role, ", ".join(
+                             dict.fromkeys(r or "main" for r in resolved))), eff["modelSource"]["file"], "relaunch model")
+        return None
+    graded = ctx.judgment_grade(model)
+    skipped_weaker = []
+    for (ref, level, src, what), name in list(zip(candidates, resolved))[resolved.index(model) + 1:]:
+        if name == model:
+            continue
+        found = _candidate_ok(ctx, role, ref, what, src, "relaunch model", record=False)
+        if not found:
+            continue
+        if graded and ctx.judgment_grade(found) is False:
+            skipped_weaker.append(found)
+            continue
+        return {"model": found, "thinking": level, "launch": _launch(found, level)}
+    why = "no later candidate is usable"
+    if skipped_weaker:
+        why = "%s is judgment-grade and the later candidates (%s) are outside judgmentModels" % (
+            model, ", ".join(skipped_weaker))
+    ctx.findings.add("info", "effective-relaunch-none", role,
+                     "steward.%s runs %s; %s, so no relaunch model is offered after a provider error."
+                     % (role, model, why), eff["modelSource"]["file"], "relaunch model")
+    return None
 
 
 def _check_router(ctx, role, model, source):
@@ -1752,6 +1811,26 @@ def evaluate(facts, env=None, agent_dir=None, agents_dir=None):
         return _empty_result(findings.items)
 
 
+def _drop_unknown_providers(merged, models, findings):
+    """Keep plan provider entries only for pi provider ids in the catalog:
+    the session-start block names them, so a key must not carry prose."""
+    known = {m["provider"] for m in models}
+    dropped, first = [], None
+    for name in list(merged["providers"]):
+        if PROVIDER_ID_RE.match(name) and name in known:
+            continue
+        entry = merged["providers"].pop(name)
+        dropped.append(name)
+        if first is None:
+            first = next((v[1] for v in entry.values()), None)
+    if dropped:
+        shown = ", ".join(_show(n, 32) for n in dropped[:3])
+        more = " and %d more" % (len(dropped) - 3) if len(dropped) > 3 else ""
+        findings.add("warn", "plan-provider-unknown", None,
+                     "providers names %d key(s) that are not pi provider ids in the catalog (%s%s); they are "
+                     "ignored." % (len(dropped), shown, more), first)
+
+
 def _read_plan(path, is_project, findings):
     data, error = _read_json(path, "utf-8-sig")
     if error:
@@ -1786,6 +1865,8 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     if has_plan:
         merged = merge_plans(user_plan, user_plan_path, project_plan, root_plan_path)
     deny, allow_lists, closed = _collect_lists(list_plans)
+    if merged:
+        _drop_unknown_providers(merged, models, findings)
 
     ctx = _Context(facts, models, findings, merged, deny, allow_lists, closed)
 
@@ -1858,8 +1939,9 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         frontmatter = read_frontmatter(fm_path)
         effective = _effective_binding(ctx, role, frontmatter, str(fm_path), layers)
         plan = relaunch = escalate = None
+        candidates = ()
         if merged and role in merged["roles"]:
-            plan, relaunch, escalate = _resolve_plan_role(ctx, role, merged["roles"][role])
+            plan, relaunch, escalate, candidates = _resolve_plan_role(ctx, role, merged["roles"][role])
             if plan["model"]:
                 entry = ctx.catalog.get(plan["model"])
                 if entry and entry["thinkingLevels"] is not None and plan["thinking"]:
@@ -1868,7 +1950,9 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                 plan["judgmentGrade"] = ctx.judgment_grade(plan["model"])
                 plan["family"] = ctx.family(plan["model"])
         roles[role] = {"runtimeName": "steward." + role, "plan": plan, "effective": effective,
-                       "relaunch": relaunch, "escalate": escalate,
+                       "relaunch": relaunch,
+                       "effectiveRelaunch": _effective_relaunch(ctx, role, effective, candidates),
+                       "escalate": escalate,
                        "judgmentGrade": effective["judgmentGrade"], "family": effective["family"]}
 
     # The shadow scan runs first: an escalation to a shadowed role is unverifiable.
@@ -1882,8 +1966,18 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     _resolve_role_escalations(ctx, roles, shadowed)
 
     # ---- per-role checks
+    overridden_roles = set()
     for role, row in roles.items():
         plan, eff = row["plan"], row["effective"]
+        settings_files = {p for p in (user_found, project_found) if p}
+        model_differs = bool(plan) and plan["model"] is not None and (
+            plan["inheritsMain"] != eff["inheritsMain"]
+            or (not plan["inheritsMain"] and plan["model"] != eff["model"]))
+        thinking_differs = bool(plan) and plan["thinking"] is not None and plan["thinking"] != eff["thinking"]
+        overridden = (model_differs and eff["modelSource"]["file"] in settings_files) or (
+            thinking_differs and eff["thinkingSource"]["file"] in settings_files)
+        if overridden:
+            overridden_roles.add(role)
         subjects = []  # (label, model, thinking, explicit, source)
         if plan and plan["model"]:
             subjects.append(("plan binding", plan["model"], plan["thinking"], False, plan["source"]))
@@ -1891,6 +1985,10 @@ def _evaluate(facts, env, agent_dir, agents_dir):
             subjects.append(("effective binding", eff["model"], eff["thinking"], False, eff["modelSource"]["file"]))
         if row["relaunch"]:
             subjects.append(("relaunch model", row["relaunch"]["model"], row["relaunch"]["thinking"], True, plan and plan["source"]))
+        eff_relaunch = row["effectiveRelaunch"]
+        if eff_relaunch and eff_relaunch != row["relaunch"]:
+            subjects.append(("relaunch model", eff_relaunch["model"], eff_relaunch["thinking"], True,
+                             plan and plan["source"]))
         esc = row["escalate"]
         if esc and not esc["role"]:
             subjects.append(("escalation model", esc["model"], esc["thinking"], True, plan and plan["source"]))
@@ -1903,13 +2001,17 @@ def _evaluate(facts, env, agent_dir, agents_dir):
 
         for label, model, thinking, explicit, source in subjects:
             entry = ctx.catalog.get(model)
-            if entry and entry["thinkingLevels"] is not None and thinking in THINKING_LEVELS:
+            # Per-model warnings follow the binding a launch gets: a plan
+            # binding overridden in settings is not checked (binding-drift
+            # reports the mismatch).
+            warn_ok = not (label == "plan binding" and overridden)
+            if warn_ok and entry and entry["thinkingLevels"] is not None and thinking in THINKING_LEVELS:
                 level = clamp_thinking(thinking, entry["thinkingLevels"])
                 if level != thinking:
                     findings.add("warn", "thinking-clamped", role,
                                  "%s at %s is clamped to %s: the model does not declare %s. A declared level is not "
                                  "proof the provider honors it." % (model, thinking, level, thinking), source, label)
-            if role in LARGE_OUTPUT_ROLES and not explicit and entry and entry["maxTokens"] is not None \
+            if warn_ok and role in LARGE_OUTPUT_ROLES and not explicit and entry and entry["maxTokens"] is not None \
                     and entry["maxTokens"] < MIN_OUTPUT_TOKENS:
                 findings.add("warn", "max-tokens-low", role,
                              "%s allows only %d output tokens; large %s output can be truncated (below 32K)."
@@ -1919,8 +2021,8 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                 findings.add("error", "thinking-above-max", role,
                              "The %s %s asks for %s, above subagents.maxThinking %s; the launch fails before start."
                              % (label, model, thinking, max_thinking), max_src, label)
-            _check_scope(ctx, role, label, model, explicit, scope, scope_src)
-            if role in JUDGMENT_ROLES and ctx.judgment is not None and not ctx.judgment_grade(model):
+            _check_scope(ctx, role, label, model, explicit, scope, scope_src, warn_ok)
+            if warn_ok and role in JUDGMENT_ROLES and ctx.judgment is not None and not ctx.judgment_grade(model):
                 findings.add("warn", "below-judgment-floor", role,
                              "The %s %s for %s is outside judgmentModels." % (label, model, role),
                              ctx.merged["judgmentSource"], label)
@@ -1938,10 +2040,6 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                          % (eff["model"], role, why), eff["modelSource"]["file"], "effective binding")
 
         if plan:
-            model_differs = plan["model"] is not None and (
-                plan["inheritsMain"] != eff["inheritsMain"]
-                or (not plan["inheritsMain"] and plan["model"] != eff["model"]))
-            thinking_differs = plan["thinking"] is not None and plan["thinking"] != eff["thinking"]
             if model_differs or thinking_differs:
                 won = eff["modelSource"] if model_differs else eff["thinkingSource"]
                 plan_src = plan["source"] if model_differs else plan["thinkingSource"]
@@ -1993,7 +2091,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
             limit, src = cap
             on = sorted(r for r, row in roles.items()
                         if any(b and b.get("model") and b["model"].split("/", 1)[0] == provider
-                               for b in (row["plan"], row["effective"])))
+                               for b in ((None if r in overridden_roles else row["plan"]), row["effective"])))
             if on and (concurrency["parallel"] > limit or concurrency["global"] > limit):
                 findings.add("warn", "concurrency-above-cap", None,
                              "%s allows %d concurrent requests and runs %s, but parallel.concurrency is %d and "
@@ -2069,7 +2167,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     }
 
 
-def _check_scope(ctx, role, label, model, explicit, scope, source):
+def _check_scope(ctx, role, label, model, explicit, scope, source, warn_ok=True):
     """Mirror resolveModelScopesForAgent and checkModelScope
     (PS/src/runs/shared/model-scope.js:40-64,115-145): the model must pass the
     global list and the agent list; `inherit` and `scoped` expand to the main
@@ -2095,6 +2193,8 @@ def _check_scope(ctx, role, label, model, explicit, scope, source):
         if any(glob_match(model, p) for p in patterns):
             continue
         severity = "error" if explicit or strict is True else "warn"
+        if severity == "warn" and not warn_ok:
+            continue
         ctx.findings.add(severity, "outside-model-scope", role,
                          "The %s %s is outside %s (%s)%s." % (
                              label, model, origin, ", ".join(allow),
