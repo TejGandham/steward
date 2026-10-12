@@ -25,7 +25,8 @@ Inputs
    - user plan ``<agent-dir>/steward/model-plan.json``;
    - project plan ``<project>/.pi/steward-model-plan.json`` (trusted only);
      every ``.pi/steward-model-plan.json`` from cwd up to home adds its
-     ``allowProviders`` and ``denyProviders`` (see ``project_plan_files``);
+     ``allowProviders`` and ``denyProviders``, in an untrusted project too,
+     where nothing else is read (see ``read_project_plans``);
    - user pi settings ``<agent-dir>/settings.json``;
    - project pi settings ``<project>/.pi/settings.json`` (trusted only);
    - pi-subagents config ``<agent-dir>/extensions/subagent/config.json``;
@@ -57,7 +58,8 @@ Output
                         "thinkingSource": {"file", "key"},
                         "clampedTo", "judgmentGrade", "family"},
           "relaunch": None | {"model", "thinking", "launch"},
-          "escalate": None | {"model", "thinking", "launch", "inheritsMain"},
+          "escalate": None | {"agent", "role", "model", "thinking", "launch",
+                              "inheritsMain"},
           "judgmentGrade": bool|None, "family": str|None } },
       "providers": {provider: {"maxConcurrent"?, "enabled"?}},
       "allowProviders": [...], "denyProviders": [...],
@@ -72,7 +74,11 @@ frontmatter model string (without a ``:level`` suffix), ``effective.model``
 what pi-subagents resolves it to, and ``effective.exact`` whether the string
 is already an exact, available ``provider/id``. The row-level
 ``judgmentGrade`` and ``family`` describe the effective binding, the one that
-will launch. ``finding.subject`` names the binding a finding is about
+will launch. An ``escalate`` to ``role:<role>`` has ``agent``
+``steward.<role>``, ``role``, ``launch`` None, and the target role's
+effective model and thinking; a model target has ``agent`` and ``role``
+None and ``launch`` the ``provider/id[:level]`` to pass as model.
+``finding.subject`` names the binding a finding is about
 (``"plan binding"``, ``"effective binding"``, ``"relaunch model"``,
 ``"escalation model"``, ``"latent binding"``) or is ``None``.
 
@@ -106,6 +112,8 @@ DEFAULT_GLOBAL_CONCURRENCY = 20
 PLAN_FILE = "steward-model-plan.json"
 # A provider id as written in allowProviders/denyProviders, before normalising.
 PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+# Bytes read from an untrusted project plan; a larger file is not applied.
+UNTRUSTED_MAX_BYTES = 64 * 1024
 
 # Old runtime names. pi-subagents config keys use canonical names only
 # (PS/docs/agents.md:417), so overrides under these keys no longer apply.
@@ -379,17 +387,14 @@ def find_project_root(cwd, env):
     return nearest
 
 
-def project_plan_files(cwd, env, trusted, project_root):
-    """Every project plan this session reads, as (root_plan, list_plans).
+def project_plan_files(cwd, env, project_root):
+    """Project plan paths as (root_plan, list_paths), trust not considered.
 
-    Trust gating of project plans is decided here and only here. The plan at
-    the project root (found as pi-subagents finds it) contributes every field.
-    Each `.pi/steward-model-plan.json` on the walk from cwd up to, not
-    including, home contributes its allowProviders and denyProviders: a
-    nested `.pi` directory (a vendored package) must not hide the repo's
-    restrictions. An untrusted project contributes nothing."""
-    if not trusted:
-        return None, []
+    root_plan is the plan at the project root (found as pi-subagents finds
+    it). list_paths is every `.pi/steward-model-plan.json` on the walk from
+    cwd up to, not including, home, plus the root plan: a nested `.pi`
+    directory (a vendored package) must not hide the repo's restrictions.
+    Which of these are read, and how, is decided by read_project_plans."""
     root_plan = os.path.join(project_root, ".pi", PLAN_FILE) if project_root else None
     lists = []
     for directory in _walk_up(cwd, env):
@@ -399,6 +404,97 @@ def project_plan_files(cwd, env, trusted, project_root):
     if root_plan and os.path.isfile(root_plan) and root_plan not in lists:
         lists.append(root_plan)
     return root_plan, lists
+
+
+def read_project_plans(cwd, env, trusted, project_root, findings):
+    """Every project plan this session reads, as (root_plan_path,
+    project_plan, list_plans). Trust gating of project plans is decided here
+    and only here.
+
+    Trusted: the root plan contributes every field; every plan on the walk
+    contributes its allowProviders and denyProviders.
+
+    Untrusted: no root plan. Every plan on the walk contributes its
+    allowProviders and denyProviders and nothing else, read through
+    _read_untrusted_lists (size-capped, strict ids, no raw text echoed), so
+    declining trust cannot unblock a provider the repo denies. Lists only
+    restrict, so honoring them never widens what a session may do."""
+    if not trusted:
+        _, list_paths = project_plan_files(cwd, env, None)
+        list_plans = []
+        for path in list_paths:
+            plan = _read_untrusted_lists(path, findings)
+            if plan is not None:
+                list_plans.append((plan, path))
+        return None, None, list_plans
+    root_plan_path, list_paths = project_plan_files(cwd, env, project_root)
+    parsed = {}
+    for path in [root_plan_path] + list_paths:
+        if path and path not in parsed:
+            parsed[path] = _read_plan(path, True, findings)
+    project_plan = parsed.get(root_plan_path) if root_plan_path else None
+    list_plans = [(parsed[path], path) for path in list_paths if parsed.get(path) is not None]
+    for plan, path in list_plans:
+        if path != root_plan_path and any(k not in PROJECT_ONLY_FIELDS for k in plan):
+            findings.add("info", "plan-lists-only", None,
+                         "This project plan is above the project root; only its allowProviders and denyProviders "
+                         "apply.", path)
+    return root_plan_path, project_plan, list_plans
+
+
+def _read_untrusted_lists(path, findings):
+    """allowProviders and denyProviders from an untrusted project plan; every
+    other field, version included, is ignored. At most UNTRUSTED_MAX_BYTES
+    are read. Findings never echo the file's text. Returns the lists as a
+    plan dict, or None when the file is unreadable."""
+    def unreadable(why):
+        findings.add("error", "plan-unreadable", None,
+                     "The untrusted project plan could not be read (%s); its allowProviders and denyProviders "
+                     "are not applied." % why, path)
+
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(UNTRUSTED_MAX_BYTES + 1)
+    except OSError as exc:
+        unreadable(type(exc).__name__)
+        return None
+    if len(raw) > UNTRUSTED_MAX_BYTES:
+        findings.add("error", "plan-untrusted-oversize", None,
+                     "The untrusted project plan is larger than %d bytes; its allowProviders and denyProviders "
+                     "are not applied." % UNTRUSTED_MAX_BYTES, path)
+        return None
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError) as exc:
+        unreadable(type(exc).__name__)
+        return None
+    if not isinstance(data, dict):
+        unreadable("not a JSON object")
+        return None
+    plan = {}
+    for key in PROJECT_ONLY_FIELDS:
+        if key not in data:
+            continue
+        value = data[key]
+        if not isinstance(value, list):
+            findings.add("error", "plan-bad-value", None,
+                         "%s in the untrusted project plan must be a list of provider ids; it is ignored." % key, path)
+            continue
+        out = []
+        for index, item in enumerate(value):
+            if isinstance(item, str) and PROVIDER_ID_RE.match(item.strip()):
+                norm = normalize_segment(item.strip())
+                if norm and norm not in out:
+                    out.append(norm)
+            else:
+                findings.add("error", "plan-bad-value", None,
+                             "%s entry %d in the untrusted project plan is not a provider id; it is ignored."
+                             % (key, index + 1), path)
+        plan[key] = out
+    findings.add("info", "plan-untrusted-lists", None,
+                 "The project is not trusted; only allowProviders and denyProviders from %s apply, every other "
+                 "field is ignored." % path, path)
+    return plan
 
 
 def _read_json(path):
@@ -523,12 +619,29 @@ def parse_ref(text, allow_main, allow_level):
     return {"main": False, "model": base, "thinking": level}, None
 
 
-def parse_escalate(value):
-    """The escalation target of a role: `main[:level]` or `provider/id[:level]`.
-    `null` is an explicit unset. Returns (ref_or_None, error_code). New
-    target kinds belong here."""
+ROLE_TARGET_PREFIX = "role:"
+
+
+def parse_escalate(value, role=None):
+    """The escalation target of a role: `main[:level]`, `provider/id[:level]`
+    or `role:<role>`. `null` is an explicit unset. A role target takes no
+    `:level` (the target profile keeps its own thinking), must name a known
+    role and must not name `role` itself. Returns (ref_or_None, error_code);
+    a role target is {"main": False, "model": None, "thinking": None,
+    "role": <role>}. New target kinds belong here."""
     if value is None:
         return None, None
+    if isinstance(value, str) and value.strip().startswith(ROLE_TARGET_PREFIX):
+        target = value.strip()[len(ROLE_TARGET_PREFIX):]
+        if any(ch.isspace() for ch in target) or not target:
+            return None, "plan-bad-value"
+        if ":" in target:
+            return None, "plan-level-in-model"
+        if target not in ROLES:
+            return None, "plan-unknown-role"
+        if target == role:
+            return None, "plan-escalate-self"
+        return {"main": False, "model": None, "thinking": None, "role": target}, None
     return parse_ref(value, True, True)
 
 
@@ -561,7 +674,13 @@ def parse_plan(data, source, project):
         if code == "plan-bare-id":
             return "%s %r is a bare id; write provider/id so it does not change meaning when the main provider changes." % (where, value)
         if code == "plan-level-in-model":
+            if isinstance(value, str) and value.strip().startswith(ROLE_TARGET_PREFIX):
+                return "%s: a role target takes no :level suffix; the target profile keeps its own thinking." % where
             return "%s %r carries a :level suffix; put the level in \"thinking\"." % (where, value)
+        if code == "plan-unknown-role":
+            return "%s names an unknown role; roles are %s." % (where, ", ".join(ROLES))
+        if code == "plan-escalate-self":
+            return "%s names the role itself." % where
         return "%s has an invalid value." % where
 
     def thinking_ok(value, where, role=None):
@@ -711,7 +830,7 @@ def parse_plan(data, source, project):
                                 refs.append(ref)
                         entry["fallback"] = refs
                     elif key == "escalate":
-                        ref, code = parse_escalate(field)
+                        ref, code = parse_escalate(field, None if role == "*" else role)
                         if code:
                             err(code, ref_message(code, where, field), label)
                         else:
@@ -979,10 +1098,20 @@ def _resolve_plan_role(ctx, role, fields):
 
     escalate = None
     esc_ref, esc_src = value("escalate")
-    if esc_ref:
+    if esc_ref and esc_ref.get("role"):
+        if esc_ref["role"] == role:
+            # Reached through "*": the named-role check in parse_escalate cannot see it.
+            ctx.findings.add("error", "plan-escalate-self", role,
+                             "The escalation target role:%s of %s is the role itself (inherited from \"*\"); "
+                             "no escalation." % (role, role), esc_src, "escalation model")
+        else:
+            # Filled in by _resolve_role_escalations once every effective binding is known.
+            escalate = {"agent": "steward." + esc_ref["role"], "role": esc_ref["role"], "model": None,
+                        "thinking": None, "launch": None, "inheritsMain": False, "source": esc_src}
+    elif esc_ref:
         model = _candidate_ok(ctx, role, esc_ref, "Escalation target", esc_src, "escalation model")
         if model:
-            escalate = {"model": model, "thinking": esc_ref["thinking"],
+            escalate = {"agent": None, "role": None, "model": model, "thinking": esc_ref["thinking"],
                         "launch": _launch(model, esc_ref["thinking"]), "inheritsMain": esc_ref["main"]}
 
     # Latent bindings: byMainProvider entries for other main providers apply
@@ -1004,7 +1133,7 @@ def _resolve_plan_role(ctx, role, fields):
     for prov, sub in by_main.items():
         if sub.get("model") and sub["model"][0]:
             refs.append((sub["model"][0], sub["model"][1]))
-    if esc_ref:
+    if esc_ref and not esc_ref.get("role"):
         refs.append((esc_ref, esc_src))
     for ref, src in refs:
         if not ref["main"]:
@@ -1142,26 +1271,27 @@ def _effective_binding(ctx, role, frontmatter, fm_path, layers):
 def _check_binding_policy(ctx, role, subject, inherits, requested, resolved, main_provider, source, describe):
     """Fail-closed allow/deny check of one settings binding. Call only when
     the lists are active. `describe` names the binding in the message;
-    `source` is the file that sets the binding, the one to fix."""
+    `source` is the file that sets the binding, the one to fix. Returns
+    True when it recorded an error."""
     f = ctx.findings
     if inherits:
         if not main_provider:
             f.add("error", "effective-model-unverifiable", role,
                   "%s inherits the main thread's model, which is not known, so allowProviders/denyProviders "
                   "cannot be checked." % describe, source, subject)
-            return
+            return True
         blocked = ctx.provider_block(main_provider)
         if blocked:
             f.add("error", blocked[0], role, "%s inherits the main thread on a blocked %s." % (describe, blocked[1]),
                   source, subject)
-        return
+        return bool(blocked)
     entry = ctx.catalog.get(requested)
     if entry and entry["available"]:
         blocked = ctx.policy_block(requested)
         if blocked:
             f.add("error", blocked[0], role, "%s %s is on a blocked %s." % (describe, requested, blocked[1]),
                   source, subject)
-        return
+        return bool(blocked)
     target = resolved if resolved and resolved != requested and resolved in ctx.catalog else None
     f.add("error", "effective-model-unverifiable", role,
           "%s %r is not an exact, available provider/id%s, so allowProviders/denyProviders cannot be verified; "
@@ -1173,6 +1303,27 @@ def _check_binding_policy(ctx, role, subject, inherits, requested, resolved, mai
         if blocked:
             f.add("error", blocked[0], role, "%s resolves to %s, on a blocked %s." % (describe, target, blocked[1]),
                   source, subject)
+    return True
+
+
+def _resolve_role_escalations(ctx, roles):
+    """Fill each `role:<target>` escalation with the target's effective
+    binding, the one pi-subagents launches steward.<target> with. When the
+    lists are active the target binding is checked again as the escalating
+    role's escalation, so a role target cannot route around them: a blocked
+    or unverifiable target clears the escalation."""
+    for role, row in roles.items():
+        esc = row["escalate"]
+        if not esc or not esc.get("role"):
+            continue
+        source = esc.pop("source", None)
+        eff = roles[esc["role"]]["effective"]
+        if ctx.lists_active and _check_binding_policy(
+                ctx, role, "escalation model", eff["inheritsMain"], eff["requested"], eff["model"],
+                ctx.main_provider, source, "The escalation target %s (its effective binding)" % esc["agent"]):
+            row["escalate"] = None
+            continue
+        esc.update({"model": eff["model"], "thinking": eff["thinking"], "inheritsMain": eff["inheritsMain"]})
 
 
 def _check_latent_settings(ctx, layers):
@@ -1390,19 +1541,8 @@ def _evaluate(facts, env, agent_dir, agents_dir):
 
     # ---- plans
     user_plan_path = os.path.join(agent_dir, "steward", "model-plan.json")
-    root_plan_path, list_paths = project_plan_files(cwd, env, trusted, project_root)
     user_plan = _read_plan(user_plan_path, False, findings)
-    parsed = {}
-    for path in [root_plan_path] + list_paths:
-        if path and path not in parsed:
-            parsed[path] = _read_plan(path, True, findings)
-    project_plan = parsed.get(root_plan_path) if root_plan_path else None
-    list_plans = [(parsed[path], path) for path in list_paths if parsed.get(path) is not None]
-    for plan, path in list_plans:
-        if path != root_plan_path and any(k not in PROJECT_ONLY_FIELDS for k in plan):
-            findings.add("info", "plan-lists-only", None,
-                         "This project plan is above the project root; only its allowProviders and denyProviders "
-                         "apply.", path)
+    root_plan_path, project_plan, list_plans = read_project_plans(cwd, env, trusted, project_root, findings)
     has_plan = user_plan is not None or project_plan is not None or bool(list_plans)
     merged = None
     if has_plan:
@@ -1487,6 +1627,8 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                        "relaunch": relaunch, "escalate": escalate,
                        "judgmentGrade": effective["judgmentGrade"], "family": effective["family"]}
 
+    _resolve_role_escalations(ctx, roles)
+
     # ---- per-role checks
     for role, row in roles.items():
         plan, eff = row["plan"], row["effective"]
@@ -1497,8 +1639,15 @@ def _evaluate(facts, env, agent_dir, agents_dir):
             subjects.append(("effective binding", eff["model"], eff["thinking"], False, eff["modelSource"]["file"]))
         if row["relaunch"]:
             subjects.append(("relaunch model", row["relaunch"]["model"], row["relaunch"]["thinking"], True, plan and plan["source"]))
-        if row["escalate"]:
-            subjects.append(("escalation model", row["escalate"]["model"], row["escalate"]["thinking"], True, plan and plan["source"]))
+        esc = row["escalate"]
+        if esc and not esc["role"]:
+            subjects.append(("escalation model", esc["model"], esc["thinking"], True, plan and plan["source"]))
+        elif esc and esc["model"] and role in JUDGMENT_ROLES and ctx.judgment is not None \
+                and not ctx.judgment_grade(esc["model"]):
+            # The target role's own row carries its clamp, scope and maxThinking checks.
+            findings.add("warn", "below-judgment-floor", role,
+                         "The escalation target %s of %s runs %s, outside judgmentModels."
+                         % (esc["agent"], role, esc["model"]), ctx.merged["judgmentSource"], "escalation model")
 
         for label, model, thinking, explicit, source in subjects:
             entry = ctx.catalog.get(model)
