@@ -7,6 +7,16 @@
  * and maps its answers back onto pi's event results. Like the Claude Code hooks, it fails open:
  * if python3 is missing or the script errors, the tool call or reply goes through.
  *
+ * For the model plan (docs/roadmap/pi-model-plan.md) it also reads pi's model registry and sends
+ * those facts with the session-start payload, rebuilds the edict when the main model or its
+ * thinking level changes, and adds the /steward-models command, which runs the hook's
+ * `model-plan` subcommand and shows its report as a display-only session entry.
+ *
+ * Debugging: with STEWARD_HOOK_LOG=<file>, every hook call appends one JSON line to that file
+ * ({kind: "hook", subcommand, payload, stdout, ms}, plus `timedOut: true` or `error: <code>` when
+ * the call never finished), and each facts gathering one line ({kind: "facts", ms, models,
+ * bytes}). Unset, nothing is written.
+ *
  * Delegation runs through the pi-subagents extension's `subagent` tool. Its foreground children
  * never load ambient extensions, and its background runner sets PI_SUBAGENT_CHILD=1, so this file
  * registers nothing in a child: the edict and its gates apply to the main thread only.
@@ -14,6 +24,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +42,11 @@ const SECTION = "steward";
 const PROSE_GATE_MESSAGE_TYPE = "steward-prose-gate";
 const EDICT_MESSAGE_TYPE = "steward-edict";
 const DELEGATION_GATE_PREFIX = "steward delegation gate";
+const MODELS_COMMAND = "steward-models";
+/** Custom entry type of the /steward-models report: shown in the transcript, never sent to the model. */
+const MODELS_ENTRY_TYPE = "steward-models";
+const MODELS_PLAN_SUBCOMMAND = "model-plan";
+const MODELS_USAGE = "Usage: /steward-models [check|apply|stats]";
 
 type HookOutput = Record<string, any> | undefined;
 
@@ -40,7 +56,22 @@ interface HookResult {
 	missingPython?: boolean;
 }
 
-export function runHook(subcommand: string, payload: Record<string, unknown>): Promise<HookResult> {
+/** Appends one JSON line to $STEWARD_HOOK_LOG when it is set. Never throws. */
+function debugLog(entry: Record<string, unknown>): void {
+	const path = process.env.STEWARD_HOOK_LOG;
+	if (!path) return;
+	try {
+		appendFileSync(path, `${JSON.stringify({ time: new Date().toISOString(), pid: process.pid, ...entry })}\n`);
+	} catch {
+		// debugging only
+	}
+}
+
+export function runHook(
+	subcommand: string,
+	payload: Record<string, unknown>,
+	timeoutMs: number = HOOK_TIMEOUT_MS,
+): Promise<HookResult> {
 	return new Promise((done) => {
 		let settled = false;
 		const finish = (result: HookResult) => {
@@ -49,37 +80,42 @@ export function runHook(subcommand: string, payload: Record<string, unknown>): P
 				done(result);
 			}
 		};
+		const started = Date.now();
+		const logged = (result: HookResult, stdout: string, extra: Record<string, unknown> = {}) => {
+			if (!settled) debugLog({ kind: "hook", subcommand, payload, stdout, ms: Date.now() - started, ...extra });
+			finish(result);
+		};
 		let child;
 		try {
 			child = spawn(process.env.STEWARD_PYTHON || "python3", [HOOK_SCRIPT, subcommand], {
 				env: { ...process.env, STEWARD_HARNESS: "pi", STEWARD_PLUGIN_ROOT: PLUGIN_ROOT },
 				stdio: ["pipe", "pipe", "ignore"],
 			});
-		} catch {
-			finish({ output: undefined, missingPython: true });
+		} catch (err) {
+			logged({ output: undefined, missingPython: true }, "", { error: (err as NodeJS.ErrnoException)?.code ?? "spawn" });
 			return;
 		}
 		const chunks: Buffer[] = [];
 		const timer = setTimeout(() => {
 			child.kill("SIGKILL");
-			finish({ output: undefined });
-		}, HOOK_TIMEOUT_MS);
+			logged({ output: undefined }, Buffer.concat(chunks).toString("utf8"), { timedOut: true });
+		}, timeoutMs);
 		child.stdout.on("data", (chunk: Buffer) => {
 			chunks.push(chunk);
 		});
 		child.on("error", (err: NodeJS.ErrnoException) => {
 			clearTimeout(timer);
-			finish({ output: undefined, missingPython: err.code === "ENOENT" });
+			logged({ output: undefined, missingPython: err.code === "ENOENT" }, "", { error: err.code ?? "spawn" });
 		});
 		child.on("close", () => {
 			clearTimeout(timer);
 			const text = Buffer.concat(chunks).toString("utf8").trim();
-			if (!text) return finish({ output: undefined });
+			if (!text) return logged({ output: undefined }, text);
 			try {
 				const parsed = JSON.parse(text);
-				finish({ output: parsed && typeof parsed === "object" ? parsed : undefined });
+				logged({ output: parsed && typeof parsed === "object" ? parsed : undefined }, text);
 			} catch {
-				finish({ output: undefined });
+				logged({ output: undefined }, text);
 			}
 		});
 		child.stdin.on("error", () => {});
@@ -131,6 +167,67 @@ export function isProseRevision(messages: readonly unknown[]): boolean {
 	return false;
 }
 
+/** What the extension needs from `@earendil-works/pi-ai`. */
+export interface PiAi {
+	getSupportedThinkingLevels?: (model: any) => unknown;
+}
+
+/** pi's extension loader aliases pi packages, so this import works without node_modules. */
+const defaultLoadPiAi = () => import("@earendil-works/pi-ai") as Promise<PiAi>;
+
+function nonEmpty(value: unknown): value is string {
+	return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * The registry facts hooks/model_plan.py reads (its docstring is the contract): main model and
+ * thinking level, every catalog model with whether its provider has configured auth, supported
+ * thinking levels and max output tokens, project trust and the absolute cwd. Returns undefined
+ * when anything is missing or throws, so the caller sends no facts and the hook falls back to the
+ * plain edict.
+ */
+export function gatherModelFacts(ctx: ExtensionContext, piAi: PiAi | undefined): Record<string, unknown> | undefined {
+	try {
+		const levelsOf = piAi?.getSupportedThinkingLevels;
+		if (typeof levelsOf !== "function") return undefined;
+		const registry = ctx.modelRegistry;
+		if (!registry || typeof registry.getAll !== "function" || typeof registry.hasConfiguredAuth !== "function") {
+			return undefined;
+		}
+		const all = registry.getAll();
+		if (!Array.isArray(all)) return undefined;
+		const auth = new Map<string, boolean>();
+		const models: Record<string, unknown>[] = [];
+		for (const model of all) {
+			if (!model || !nonEmpty(model.provider) || !nonEmpty(model.id)) continue;
+			let available = auth.get(model.provider);
+			if (available === undefined) {
+				available = registry.hasConfiguredAuth(model) === true;
+				auth.set(model.provider, available);
+			}
+			const entry: Record<string, unknown> = { provider: model.provider, id: model.id, available };
+			const levels = levelsOf(model);
+			if (Array.isArray(levels) && levels.every((level) => typeof level === "string")) entry.thinkingLevels = [...levels];
+			if (Number.isInteger(model.maxTokens) && model.maxTokens > 0) entry.maxTokens = model.maxTokens;
+			models.push(entry);
+		}
+		if (models.length === 0) return undefined;
+		let main: Record<string, string> | null = null;
+		const current = ctx.model;
+		if (current) {
+			const thinkingLevel = ctx.thinkingLevel;
+			if (!nonEmpty(current.provider) || !nonEmpty(current.id) || !nonEmpty(thinkingLevel)) return undefined;
+			main = { provider: current.provider, id: current.id, thinkingLevel };
+		}
+		const projectTrusted = ctx.isProjectTrusted();
+		if (typeof projectTrusted !== "boolean") return undefined;
+		if (!nonEmpty(ctx.cwd)) return undefined;
+		return { main, models, projectTrusted, cwd: resolve(ctx.cwd) };
+	} catch {
+		return undefined;
+	}
+}
+
 function sessionId(ctx: ExtensionContext): string {
 	try {
 		const id = ctx.sessionManager.getSessionId();
@@ -155,10 +252,63 @@ const SUBAGENT_NOT_ACTIVE_WARNING =
 	"/reload, or starting a new session, makes it available. Restarting pi and resuming this " +
 	"conversation does not, because pi restores the conversation's recorded tools on resume.";
 
-export default function steward(pi: ExtensionAPI): void {
+/** What the extension needs from `@earendil-works/pi-tui` to draw the /steward-models entry. */
+export interface PiTui {
+	Text?: new (text?: string, paddingX?: number, paddingY?: number) => { render(width: number): string[]; invalidate(): void };
+}
+
+/** pi aliases pi-tui for extensions too. */
+const defaultLoadPiTui = () => import("@earendil-works/pi-tui") as Promise<PiTui>;
+
+export interface StewardOptions {
+	/** Loads `@earendil-works/pi-ai`; tests pass a stand-in. */
+	loadPiAi?: () => Promise<PiAi>;
+	/** Loads `@earendil-works/pi-tui`; tests pass a stand-in. */
+	loadPiTui?: () => Promise<PiTui>;
+	/** Kill time for one hook call; tests shorten it. */
+	hookTimeoutMs?: number;
+}
+
+export function createSteward(options: StewardOptions = {}): (pi: ExtensionAPI) => void {
+	return (pi) =>
+		register(pi, options.loadPiAi ?? defaultLoadPiAi, options.loadPiTui ?? defaultLoadPiTui, options.hookTimeoutMs ?? HOOK_TIMEOUT_MS);
+}
+
+/** Splits text into lines of at most `width` characters, for a TUI without pi-tui. */
+function wrapLines(text: string, width: number): string[] {
+	const max = Math.max(1, width);
+	const out: string[] = [];
+	for (const line of text.split("\n")) {
+		if (line.length === 0) out.push("");
+		for (let i = 0; i < line.length; i += max) out.push(line.slice(i, i + max));
+	}
+	return out;
+}
+
+const steward = createSteward();
+export default steward;
+
+function register(
+	pi: ExtensionAPI,
+	loadPiAi: () => Promise<PiAi>,
+	loadPiTui: () => Promise<PiTui>,
+	hookTimeoutMs: number,
+): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 
+	/** The last edict that loaded. A rebuild replaces it only when it succeeds and is the newest. */
 	let edict: string | undefined;
+	/** Bumped by every load; the load whose number is still `generation` when it ends may land. */
+	let generation = 0;
+	/** Generation `edict` came from; differs from `generation` while a rebuild is due or failed. */
+	let edictGeneration = -1;
+	/** The newest load still running, shared by before_agent_start instead of a second load. */
+	let inflight: Promise<void> | undefined;
+	/**
+	 * A session-start call with model_facts gave no edict (timeout, bad output, crash) since the
+	 * last session start or model/thinking switch: load the plain edict without facts until then.
+	 */
+	let factsFailed = false;
 	let warnedMissingPython = false;
 	/** True while the current run's system prompt carries the edict (set by before_agent_start). */
 	let edictInPrompt = false;
@@ -197,31 +347,116 @@ export default function steward(pi: ExtensionAPI): void {
 		return subagentsInstalled() ? SUBAGENT_NOT_ACTIVE_WARNING : MISSING_SUBAGENTS_WARNING;
 	}
 
-	async function loadEdict(ctx: ExtensionContext): Promise<string | undefined> {
-		const { output, missingPython } = await runHook("session-start", { session_id: sessionId(ctx) });
+	let piAi: Promise<PiAi | undefined> | undefined;
+	function piAiModule(): Promise<PiAi | undefined> {
+		piAi ??= loadPiAi().catch(() => undefined);
+		return piAi;
+	}
+
+	/** Registry facts for the hook, or undefined (the hook then gives the plain edict). */
+	async function modelFacts(ctx: ExtensionContext): Promise<Record<string, unknown> | undefined> {
+		try {
+			const started = Date.now();
+			const facts = gatherModelFacts(ctx, await piAiModule());
+			if (facts && process.env.STEWARD_HOOK_LOG) {
+				debugLog({
+					kind: "facts",
+					ms: Date.now() - started,
+					models: (facts.models as unknown[]).length,
+					bytes: Buffer.byteLength(JSON.stringify(facts)),
+				});
+			}
+			return facts;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** One session-start call; the edict text, or undefined. */
+	async function sessionStart(ctx: ExtensionContext, payload: Record<string, unknown>): Promise<{ text?: string; missingPython?: boolean }> {
+		const { output, missingPython } = await runHook("session-start", payload, hookTimeoutMs);
 		if (missingPython && ctx.hasUI && !warnedMissingPython) {
 			warnedMissingPython = true;
 			ctx.ui.notify("steward: python3 was not found, so the edict and its gates are off.", "warning");
 		}
 		const text = output?.hookSpecificOutput?.additionalContext;
-		// undefined, not "", so the next prompt tries again
-		if (typeof text !== "string" || !text) return undefined;
-		return subagentsInstalled() ? text : `${MISSING_SUBAGENTS_WARNING}\n\n${text}`;
+		return { text: typeof text === "string" && text ? text : undefined, missingPython };
+	}
+
+	/**
+	 * The edict for the current model, or undefined. A call with model_facts that gives no edict
+	 * is retried once without them, so a facts problem costs the block, never the edict.
+	 */
+	async function loadEdict(ctx: ExtensionContext): Promise<string | undefined> {
+		const base = { session_id: sessionId(ctx) };
+		const facts = factsFailed ? undefined : await modelFacts(ctx);
+		let result = await sessionStart(ctx, facts ? { ...base, model_facts: facts } : base);
+		if (!result.text && facts && !result.missingPython) {
+			factsFailed = true;
+			result = await sessionStart(ctx, base);
+		}
+		if (!result.text) return undefined;
+		return subagentsInstalled() ? result.text : `${MISSING_SUBAGENTS_WARNING}\n\n${result.text}`;
+	}
+
+	/**
+	 * Starts a load as the newest generation. The previous edict stays in place until this load
+	 * succeeds; an older load that ends later, or a load that fails, changes nothing.
+	 */
+	function rebuild(ctx: ExtensionContext): Promise<void> {
+		const mine = ++generation;
+		const run = (async () => {
+			let text: string | undefined;
+			try {
+				text = await loadEdict(ctx);
+			} catch {
+				text = undefined;
+			}
+			if (mine === generation && text) {
+				edict = text;
+				edictGeneration = mine;
+			}
+		})();
+		inflight = run;
+		void run.finally(() => {
+			if (inflight === run) inflight = undefined;
+		});
+		return run;
+	}
+
+	/** Waits for the newest load, including one started while waiting. */
+	async function settleLoads(): Promise<void> {
+		for (let i = 0; inflight && i < 8; i++) await inflight;
 	}
 
 	pi.on("session_start", async (_event, ctx) => {
-		try {
-			softNotes.clear();
-			edictInPrompt = false;
-			edict = await loadEdict(ctx);
-		} catch {
-			edict = undefined;
-		}
+		softNotes.clear();
+		edictInPrompt = false;
+		factsFailed = false;
+		await rebuild(ctx);
+	});
+
+	// The main model changed (set, cycle or restore), or its thinking level did: rebuild so the
+	// next run's system prompt carries a block for the new values. pi updates both before it emits
+	// either event, so ctx reads the new values. A switch also gives the facts another try.
+	// Both handlers start the load and return: pi awaits model_select handlers (setModel waits for
+	// them), so waiting for the hook here would hold up the switch for as long as the hook runs.
+	// before_agent_start waits for the load instead.
+	pi.on("model_select", async (_event, ctx) => {
+		factsFailed = false;
+		void rebuild(ctx);
+	});
+	pi.on("thinking_level_select", async (_event, ctx) => {
+		factsFailed = false;
+		void rebuild(ctx);
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
 		try {
-			if (edict === undefined) edict = await loadEdict(ctx);
+			// Share a running load. With none running, retry when the last load failed: the next
+			// prompt tries again, without facts if a facts call failed.
+			if (inflight) await settleLoads();
+			else if (edictGeneration !== generation || edict === undefined) await rebuild(ctx);
 			if (!edict) return undefined;
 			edictInPrompt = true;
 			const options = event.systemPromptOptions;
@@ -348,4 +583,82 @@ export default function steward(pi: ExtensionAPI): void {
 		// Notes for calls that never produced a result (blocked by another extension, aborted).
 		softNotes.clear();
 	});
+
+	let piTui: PiTui | undefined;
+	loadPiTui().then(
+		(mod) => {
+			piTui = mod;
+		},
+		() => {},
+	);
+
+	/**
+	 * Shows a /steward-models result. A custom entry is display-only: pi stores it in the session
+	 * but never sends it to the model (sendMessage would add a model-visible message). Without a
+	 * UI nothing draws entries, so notify as well.
+	 */
+	function show(ctx: ExtensionContext, text: string): void {
+		const append = (pi as Partial<ExtensionAPI>).appendEntry;
+		if (typeof append === "function") append.call(pi, MODELS_ENTRY_TYPE, { text });
+		if (!ctx.hasUI || typeof append !== "function") ctx.ui.notify(text, "info");
+	}
+
+	function registerModelsRenderer(): void {
+		const registerRenderer = (pi as Partial<ExtensionAPI>).registerEntryRenderer;
+		if (typeof registerRenderer !== "function") return;
+		registerRenderer.call(pi, MODELS_ENTRY_TYPE, (entry: { data?: unknown }) => {
+			const data = entry?.data as { text?: unknown } | undefined;
+			const text = typeof data?.text === "string" ? data.text : "";
+			if (!text) return undefined;
+			const Text = piTui?.Text;
+			if (typeof Text === "function") return new Text(text, 1, 0);
+			return { render: (width: number) => wrapLines(text, width), invalidate: () => {} };
+		});
+	}
+
+	async function checkReport(ctx: ExtensionContext): Promise<string> {
+		const facts = await modelFacts(ctx);
+		if (!facts) return "steward: /steward-models check could not read pi's model registry, so no check ran.";
+		const { output, missingPython } = await runHook(MODELS_PLAN_SUBCOMMAND, { model_facts: facts, cwd: facts.cwd }, hookTimeoutMs);
+		if (missingPython) return "steward: /steward-models check failed: python3 was not found.";
+		if (typeof output?.report === "string" && output.report) return output.report;
+		const reason = typeof output?.error === "string" && output.error ? output.error.slice(0, 200) : "the hook gave no report";
+		return `steward: /steward-models check failed: ${reason}`;
+	}
+
+	// A host without commands (or a registration error) leaves the edict and gates as they are.
+	try {
+		registerModelsRenderer();
+	} catch {
+		// no renderer: the entry is stored but not drawn
+	}
+	try {
+		registerModelsCommand();
+	} catch {
+		// no command
+	}
+
+	function registerModelsCommand(): void {
+		if (typeof pi.registerCommand !== "function") return;
+		pi.registerCommand(MODELS_COMMAND, {
+			description: "Check the steward model plan: what each steward profile runs on, and every warning",
+			getArgumentCompletions: (prefix: string) =>
+				["check", "apply", "stats"].filter((sub) => sub.startsWith(prefix.trim())).map((sub) => ({ value: sub, label: sub })),
+			handler: async (args, ctx) => {
+				try {
+					const sub = (args ?? "").trim() || "check";
+					if (sub === "check") show(ctx, await checkReport(ctx));
+					else if (sub === "apply" || sub === "stats") {
+						show(ctx, `steward: /steward-models ${sub} arrives in a later phase (${sub === "apply" ? "Phase 3" : "Phase 4"}); only check works now.`);
+					} else show(ctx, MODELS_USAGE);
+				} catch {
+					try {
+						show(ctx, "steward: /steward-models failed with an internal error.");
+					} catch {
+						// never crash the command
+					}
+				}
+			},
+		});
+	}
 }

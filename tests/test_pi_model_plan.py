@@ -402,6 +402,8 @@ class FindingTests(PlanTestCase):
 
     def test_concurrency(self):
         self.user_plan(OPERATOR_PLAN)
+        # Counted on effective bindings: a settings override puts coder on ollama-cloud.
+        self.user_settings({"subagents": {"agentOverrides": {"steward.coder": {"model": OLLAMA}}}})
         result = self.run_plan()
         warn = self.findings(result, code="concurrency-above-cap", severity="warn")
         self.assertEqual(len(warn), 1)

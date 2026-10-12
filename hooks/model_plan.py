@@ -708,6 +708,14 @@ def _show(value, limit=MAX_KEY_CHARS):
     return "'%s'" % _echo(value, limit)
 
 
+def _provider_key(name):
+    """A plan provider key for a message: the key itself when it is a
+    provider id, else a description that does not echo its text."""
+    if isinstance(name, str) and PROVIDER_ID_RE.match(name):
+        return "'%s'" % name
+    return "(a key that is not a provider id)"
+
+
 def validate_facts(facts):
     """Raise ValueError unless the top level of facts matches the contract.
     Model entries are checked one by one in _clean_models."""
@@ -920,22 +928,22 @@ def parse_plan(data, source, project):
             plan["providers"] = {}
             for name, value in providers.items():
                 if not isinstance(value, dict):
-                    err("plan-bad-value", "providers[%s] must be an object." % _show(name, 40))
+                    err("plan-bad-value", "providers[%s] must be an object." % _provider_key(name))
                     continue
                 entry = {}
                 for key, field in value.items():
                     if key not in PROVIDER_FIELDS:
-                        err("plan-unknown-field", "Unknown field %s in providers[%s]." % (_show(key), _show(name, 40)))
+                        err("plan-unknown-field", "Unknown field %s in providers[%s]." % (_show(key), _provider_key(name)))
                     elif key == "maxConcurrent":
                         if type(field) is int and field > 0:
                             entry[key] = field
                         else:
-                            err("plan-bad-value", "providers[%s].maxConcurrent must be a positive integer." % _show(name, 40))
+                            err("plan-bad-value", "providers[%s].maxConcurrent must be a positive integer." % _provider_key(name))
                     elif key == "enabled":
                         if isinstance(field, bool):
                             entry[key] = field
                         else:
-                            err("plan-bad-value", "providers[%s].enabled must be true or false." % _show(name, 40))
+                            err("plan-bad-value", "providers[%s].enabled must be true or false." % _provider_key(name))
                 plan["providers"][name] = entry
 
     families = data.get("families")
@@ -1015,7 +1023,7 @@ def parse_plan(data, source, project):
                         by = {}
                         for prov, sub in field.items():
                             if not PROVIDER_ID_RE.match(prov):
-                                err("plan-bad-value", "%s key %s is not a pi provider id; ignored." % (where, _show(prov, 40)), label)
+                                err("plan-bad-value", "%s has a key that is not a pi provider id; ignored." % where, label)
                                 continue
                             if not isinstance(sub, dict):
                                 err("plan-bad-value", "%s.%s must be an object." % (where, prov), label)
@@ -1513,14 +1521,14 @@ def _check_binding_policy(ctx, role, subject, inherits, requested, resolved, mai
             return True
         blocked = ctx.provider_block(main_provider)
         if blocked:
-            f.add("error", blocked[0], role, "%s inherits the main thread on a blocked %s." % (describe, blocked[1]),
+            f.add("error", blocked[0], role, "%s inherits the main thread, which is blocked: %s." % (describe, blocked[1]),
                   source, subject)
         return bool(blocked)
     entry = ctx.catalog.get(requested)
     if entry and entry["available"]:
         blocked = ctx.policy_block(requested)
         if blocked:
-            f.add("error", blocked[0], role, "%s %s is on a blocked %s." % (describe, requested, blocked[1]),
+            f.add("error", blocked[0], role, "%s %s is blocked: %s." % (describe, requested, blocked[1]),
                   source, subject)
         return bool(blocked)
     target = resolved if resolved and resolved != requested and resolved in ctx.catalog else None
@@ -1532,7 +1540,7 @@ def _check_binding_policy(ctx, role, subject, inherits, requested, resolved, mai
     if target:
         blocked = ctx.policy_block(target)
         if blocked:
-            f.add("error", blocked[0], role, "%s resolves to %s, on a blocked %s." % (describe, target, blocked[1]),
+            f.add("error", blocked[0], role, "%s resolves to %s, which is blocked: %s." % (describe, target, blocked[1]),
                   source, subject)
     return True
 
@@ -1824,11 +1832,10 @@ def _drop_unknown_providers(merged, models, findings):
         if first is None:
             first = next((v[1] for v in entry.values()), None)
     if dropped:
-        shown = ", ".join(_show(n, 32) for n in dropped[:3])
-        more = " and %d more" % (len(dropped) - 3) if len(dropped) > 3 else ""
+        # The keys are not echoed: a rejected key may carry prose.
         findings.add("warn", "plan-provider-unknown", None,
-                     "providers names %d key(s) that are not pi provider ids in the catalog (%s%s); they are "
-                     "ignored." % (len(dropped), shown, more), first)
+                     "providers names %d key(s) that are not pi provider ids in the catalog; they are "
+                     "ignored. Check each providers key against `pi --list-models`." % len(dropped), first)
 
 
 def _read_plan(path, is_project, findings):
@@ -1966,7 +1973,6 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     _resolve_role_escalations(ctx, roles, shadowed)
 
     # ---- per-role checks
-    overridden_roles = set()
     for role, row in roles.items():
         plan, eff = row["plan"], row["effective"]
         settings_files = {p for p in (user_found, project_found) if p}
@@ -1976,8 +1982,6 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         thinking_differs = bool(plan) and plan["thinking"] is not None and plan["thinking"] != eff["thinking"]
         overridden = (model_differs and eff["modelSource"]["file"] in settings_files) or (
             thinking_differs and eff["thinkingSource"]["file"] in settings_files)
-        if overridden:
-            overridden_roles.add(role)
         subjects = []  # (label, model, thinking, explicit, source)
         if plan and plan["model"]:
             subjects.append(("plan binding", plan["model"], plan["thinking"], False, plan["source"]))
@@ -2051,10 +2055,12 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                         project_root, ".pi", "settings.json")
                 else:
                     hint = "run /steward-models apply"
+                plan_model = plan["setting"] or plan["model"]
+                wanted = "%s at %s" % (plan_model, plan["thinking"]) if plan_model else "thinking %s" % plan["thinking"]
                 findings.add("warn", "binding-drift", role,
-                             "steward.%s launches on %s at %s, not the plan's %s at %s (from %s %s): %s."
-                             % (role, eff["model"], eff["thinking"], plan["setting"] or plan["model"],
-                                plan["thinking"], won["file"] or "built-in default", won["key"] or "", hint),
+                             "steward.%s launches on %s at %s, not the plan's %s (from %s %s): %s."
+                             % (role, eff["model"], eff["thinking"], wanted,
+                                won["file"] or "built-in default", won["key"] or "", hint),
                              won["file"])
 
     if ctx.lists_active:
@@ -2089,9 +2095,11 @@ def _evaluate(facts, env, agent_dir, agents_dir):
             if not cap:
                 continue
             limit, src = cap
+            # A role launches on its effective binding (the plan applies only
+            # after apply), as the block's cap lines count it.
             on = sorted(r for r, row in roles.items()
-                        if any(b and b.get("model") and b["model"].split("/", 1)[0] == provider
-                               for b in ((None if r in overridden_roles else row["plan"]), row["effective"])))
+                        if row["effective"].get("model")
+                        and row["effective"]["model"].split("/", 1)[0] == provider)
             if on and (concurrency["parallel"] > limit or concurrency["global"] > limit):
                 findings.add("warn", "concurrency-above-cap", None,
                              "%s allows %d concurrent requests and runs %s, but parallel.concurrency is %d and "
@@ -2119,7 +2127,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         blocked = ctx.provider_block(fm["provider"])
         if blocked:
             findings.add("error", "main-" + blocked[0], "main",
-                         "The main thread runs %s, on a blocked %s; use /model to switch." % (ctx.main, blocked[1]),
+                         "The main thread runs %s, which is blocked: %s. Use /model to switch." % (ctx.main, blocked[1]),
                          blocked[2])
         if expected_models and not main_out["inPlan"]:
             findings.add("warn", "main-not-in-plan", "main",
