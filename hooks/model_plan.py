@@ -26,7 +26,9 @@ Inputs
    - project plan ``<project>/.pi/steward-model-plan.json`` (trusted only);
      every ``.pi/steward-model-plan.json`` from cwd up to home adds its
      ``allowProviders`` and ``denyProviders``, in an untrusted project too,
-     where nothing else is read (see ``read_project_plans``);
+     where nothing else is read. The lists are read the same way in both
+     modes, ``version`` ignored, and a file whose lists cannot be read in
+     full blocks every provider (see ``read_plan_lists``);
    - user pi settings ``<agent-dir>/settings.json``;
    - project pi settings ``<project>/.pi/settings.json`` (trusted only);
    - pi-subagents config ``<agent-dir>/extensions/subagent/config.json``;
@@ -63,6 +65,7 @@ Output
           "judgmentGrade": bool|None, "family": str|None } },
       "providers": {provider: {"maxConcurrent"?, "enabled"?}},
       "allowProviders": [...], "denyProviders": [...],
+      "listsActive": bool, "listsFailClosed": [path, ...],
       "concurrency": {"parallel": int, "global": int, "source": path|None},
       "findings": [{"severity": "error"|"warn"|"info", "code", "role",
                     "message", "source", "subject"}] }
@@ -78,7 +81,9 @@ will launch. An ``escalate`` to ``role:<role>`` has ``agent``
 ``steward.<role>``, ``role``, ``launch`` None, and the target role's
 effective model and thinking; a model target has ``agent`` and ``role``
 None and ``launch`` the ``provider/id[:level]`` to pass as model.
-``finding.subject`` names the binding a finding is about
+``allowProviders`` is the intersection of the allow lists; it is empty
+both when no allow list applies and when the lists fail closed, so read
+``listsActive`` and ``listsFailClosed`` for that. ``finding.subject`` names the binding a finding is about
 (``"plan binding"``, ``"effective binding"``, ``"relaunch model"``,
 ``"escalation model"``, ``"latent binding"``) or is ``None``.
 
@@ -94,6 +99,7 @@ cited beside the code that mirrors them.
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 
 ROLES = ("coder", "deep-reasoner", "reviewer", "researcher", "writer", "mechanic", "top-reviewer")
@@ -112,8 +118,14 @@ DEFAULT_GLOBAL_CONCURRENCY = 20
 PLAN_FILE = "steward-model-plan.json"
 # A provider id as written in allowProviders/denyProviders, before normalising.
 PROVIDER_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-# Bytes read from an untrusted project plan; a larger file is not applied.
-UNTRUSTED_MAX_BYTES = 64 * 1024
+# Bytes read from a project plan file; a larger file fails closed.
+LIST_MAX_BYTES = 64 * 1024
+# Entries allowed in one allowProviders or denyProviders list; a longer list fails closed.
+MAX_LIST_ENTRIES = 64
+# Caps on text echoed into findings (2b renders them into the system prompt).
+MAX_MESSAGE_CHARS = 1000
+MAX_SOURCE_CHARS = 512
+MAX_KEY_CHARS = 64
 
 # Old runtime names. pi-subagents config keys use canonical names only
 # (PS/docs/agents.md:417), so overrides under these keys no longer apply.
@@ -411,124 +423,288 @@ def read_project_plans(cwd, env, trusted, project_root, findings):
     project_plan, list_plans). Trust gating of project plans is decided here
     and only here.
 
-    Trusted: the root plan contributes every field; every plan on the walk
-    contributes its allowProviders and denyProviders.
-
-    Untrusted: no root plan. Every plan on the walk contributes its
-    allowProviders and denyProviders and nothing else, read through
-    _read_untrusted_lists (size-capped, strict ids, no raw text echoed), so
-    declining trust cannot unblock a provider the repo denies. Lists only
-    restrict, so honoring them never widens what a session may do."""
-    if not trusted:
-        _, list_paths = project_plan_files(cwd, env, None)
-        list_plans = []
-        for path in list_paths:
-            plan = _read_untrusted_lists(path, findings)
-            if plan is not None:
-                list_plans.append((plan, path))
-        return None, None, list_plans
-    root_plan_path, list_paths = project_plan_files(cwd, env, project_root)
-    parsed = {}
-    for path in [root_plan_path] + list_paths:
-        if path and path not in parsed:
-            parsed[path] = _read_plan(path, True, findings)
-    project_plan = parsed.get(root_plan_path) if root_plan_path else None
-    list_plans = [(parsed[path], path) for path in list_paths if parsed.get(path) is not None]
-    for plan, path in list_plans:
-        if path != root_plan_path and any(k not in PROJECT_ONLY_FIELDS for k in plan):
+    Every plan on the walk, the root plan included, contributes its
+    allowProviders and denyProviders through read_plan_lists, in a trusted
+    and an untrusted session alike: size-capped, strict ids, `version`
+    ignored, no raw text echoed, and a file whose lists cannot be read in
+    full fails closed. Declining trust or a bad `version` therefore cannot
+    unblock a provider the repo denies. Trusted only: the root plan's other
+    fields are parsed by parse_plan (there `version` must be 1).
+    list_plans holds only the files that contribute a list."""
+    root_plan_path, list_paths = project_plan_files(cwd, env, project_root if trusted else None)
+    project_plan = None
+    list_plans = []
+    untrusted_paths = []
+    for path in list_paths:
+        data, lists = read_plan_lists(path, findings)
+        is_root = trusted and path == root_plan_path
+        if is_root and data is not None:
+            plan, found = parse_plan(data, path, True)
+            for item in found:
+                findings.add(**item)
+            project_plan = plan
+        contributes = bool(lists["deny"]) or lists["allow"] is not None or bool(lists["closed"])
+        if contributes:
+            list_plans.append((lists, path))
+        if data is None:
+            continue
+        if not trusted:
+            if contributes:
+                untrusted_paths.append(path)
+        elif not is_root and any(k not in PROJECT_ONLY_FIELDS and k != "version" for k in data):
             findings.add("info", "plan-lists-only", None,
                          "This project plan is above the project root; only its allowProviders and denyProviders "
                          "apply.", path)
+    if untrusted_paths:
+        # One finding for the whole walk, so a deep tree cannot flood the findings.
+        findings.add("info", "plan-untrusted-lists", None,
+                     "The project is not trusted; only allowProviders and denyProviders apply from %d plan file(s): "
+                     "%s; every other field is ignored." % (len(untrusted_paths), _list_paths(untrusted_paths)),
+                     untrusted_paths[0])
     return root_plan_path, project_plan, list_plans
 
 
-def _read_untrusted_lists(path, findings):
-    """allowProviders and denyProviders from an untrusted project plan; every
-    other field, version included, is ignored. At most UNTRUSTED_MAX_BYTES
-    are read. Findings never echo the file's text. Returns the lists as a
-    plan dict, or None when the file is unreadable."""
-    def unreadable(why):
-        findings.add("error", "plan-unreadable", None,
-                     "The untrusted project plan could not be read (%s); its allowProviders and denyProviders "
-                     "are not applied." % why, path)
+def _list_paths(paths, shown=3):
+    text = ", ".join(_echo(p, 200) for p in paths[:shown])
+    return text + (" and %d more" % (len(paths) - shown) if len(paths) > shown else "")
+
+
+def read_plan_lists(path, findings):
+    """allowProviders and denyProviders of one project plan file, the same
+    way for a trusted and an untrusted session; every other field, `version`
+    included, is ignored here. At most LIST_MAX_BYTES are read, decoded as
+    UTF-8 with an optional BOM. Findings never echo the file's text, and
+    there is at most one finding per list key.
+
+    Returns (data, lists). data is the parsed JSON object, or None when the
+    file is unreadable. lists is {"deny": [norm, ...], "allow": [norm, ...]
+    or None, "closed": [reason, ...]}. A non-empty "closed" makes the file
+    block every provider (fail closed): the file cannot be read, is over the
+    size cap, is not an object, or a list key is not a list, is longer than
+    MAX_LIST_ENTRIES, is a denyProviders with any entry that is not a
+    provider id (dropping it would widen access), or is an allowProviders
+    whose entries are all invalid. An allowProviders with some valid entries
+    keeps those; an explicit [] means no allow list."""
+    lists = {"deny": [], "allow": None, "closed": []}
+
+    def unreadable(code, why):
+        findings.add("error", code, None,
+                     "The project plan could not be read (%s); every provider is blocked until it is fixed." % why,
+                     path)
+        lists["closed"].append("cannot be read")
+        return None, lists
 
     try:
         with open(path, "rb") as handle:
-            raw = handle.read(UNTRUSTED_MAX_BYTES + 1)
+            raw = handle.read(LIST_MAX_BYTES + 1)
     except OSError as exc:
-        unreadable(type(exc).__name__)
-        return None
-    if len(raw) > UNTRUSTED_MAX_BYTES:
-        findings.add("error", "plan-untrusted-oversize", None,
-                     "The untrusted project plan is larger than %d bytes; its allowProviders and denyProviders "
-                     "are not applied." % UNTRUSTED_MAX_BYTES, path)
-        return None
+        return unreadable("plan-unreadable", type(exc).__name__)
+    if len(raw) > LIST_MAX_BYTES:
+        return unreadable("plan-oversize", "larger than %d bytes" % LIST_MAX_BYTES)
     try:
-        data = json.loads(raw.decode("utf-8"))
+        data = json.loads(raw.decode("utf-8-sig"))
     except (ValueError, RecursionError) as exc:
-        unreadable(type(exc).__name__)
-        return None
+        return unreadable("plan-unreadable", type(exc).__name__)
     if not isinstance(data, dict):
-        unreadable("not a JSON object")
-        return None
-    plan = {}
+        return unreadable("plan-unreadable", "not a JSON object")
     for key in PROJECT_ONLY_FIELDS:
         if key not in data:
             continue
         value = data[key]
+        deny = key == "denyProviders"
+        good, bad = [], 0
         if not isinstance(value, list):
             findings.add("error", "plan-bad-value", None,
-                         "%s in the untrusted project plan must be a list of provider ids; it is ignored." % key, path)
+                         "%s in the project plan must be a list of provider ids; every provider is blocked until "
+                         "it is fixed." % key, path)
+            lists["closed"].append("has a %s that is not a list" % key)
             continue
-        out = []
-        for index, item in enumerate(value):
+        if len(value) > MAX_LIST_ENTRIES:
+            findings.add("error", "plan-list-too-long", None,
+                         "%s in the project plan has %d entries, more than %d; every provider is blocked until it "
+                         "is fixed." % (key, len(value), MAX_LIST_ENTRIES), path)
+            lists["closed"].append("has a %s longer than %d entries" % (key, MAX_LIST_ENTRIES))
+            continue
+        for item in value:
             if isinstance(item, str) and PROVIDER_ID_RE.match(item.strip()):
                 norm = normalize_segment(item.strip())
-                if norm and norm not in out:
-                    out.append(norm)
-            else:
+                if norm and norm not in good:
+                    good.append(norm)
+                    continue
+                if norm:
+                    continue  # a duplicate after normalising
+            bad += 1
+        if deny:
+            lists["deny"] = good
+            if bad:
                 findings.add("error", "plan-bad-value", None,
-                             "%s entry %d in the untrusted project plan is not a provider id; it is ignored."
-                             % (key, index + 1), path)
-        plan[key] = out
-    findings.add("info", "plan-untrusted-lists", None,
-                 "The project is not trusted; only allowProviders and denyProviders from %s apply, every other "
-                 "field is ignored." % path, path)
-    return plan
+                             "denyProviders in the project plan has %d entries that are not provider ids; every "
+                             "provider is blocked until they are fixed." % bad, path)
+                lists["closed"].append("has denyProviders entries that are not provider ids")
+        elif value and not good:
+            findings.add("error", "plan-bad-value", None,
+                         "allowProviders in the project plan has no valid provider id (%d entries); every provider "
+                         "is blocked until it is fixed." % bad, path)
+            lists["closed"].append("has an allowProviders with no valid provider id")
+        else:
+            if bad:
+                findings.add("error", "plan-bad-value", None,
+                             "allowProviders in the project plan has %d entries that are not provider ids; they "
+                             "are ignored." % bad, path)
+            if good:
+                lists["allow"] = good
+    return data, lists
 
 
-def _read_json(path):
+def _read_json(path, encoding="utf-8"):
     """(data, error). Missing file gives (None, None)."""
     if not path or not os.path.isfile(path):
         return None, None
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, "r", encoding=encoding) as handle:
             return json.load(handle), None
     except (OSError, ValueError, RecursionError) as exc:
         return None, "%s: %s" % (type(exc).__name__, str(exc)[:200])
 
 
-def read_frontmatter(path):
-    """Flat `key: value` frontmatter of a pi agent file."""
-    out = {}
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except (OSError, ValueError):
-        return out
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return out
-    for line in lines[1:]:
-        if line.strip() == "---":
-            break
-        key, sep, value = line.partition(":")
-        if not sep or line[:1].isspace():
+# JavaScript String.prototype.trim and \s whitespace (ECMA-262 WhiteSpace and
+# LineTerminator), so the frontmatter and package-name mirrors match Node.
+_JS_WS = "\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+_JS_TRIM_RE = re.compile("\\A[%s]+|[%s]+\\Z" % (_JS_WS, _JS_WS))
+_JS_TRIM_END_RE = re.compile("[%s]+\\Z" % _JS_WS)
+_JS_TRIM_START_RE = re.compile("\\A[%s]+" % _JS_WS)
+_JS_NON_WS_RE = re.compile("[^%s]" % _JS_WS)
+# JS multiline `^`: start of input or after a line terminator.
+_JS_LINE_START = "(?:\\A|(?<=[\n\r\u2028\u2029]))"
+_FM_KEY_RE = re.compile("^([A-Za-z0-9_-]+):[%s]*([^\n\r\u2028\u2029]*)\\Z" % _JS_WS)
+_FM_INDENT_RE = re.compile(_JS_LINE_START + "[ \t]+(?=[^%s])" % _JS_WS)
+# pi-subagents IDENTIFIER_PATTERN (PS/src/agents/identity.js:1).
+PACKAGE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)*\Z")
+
+
+def _js_trim(text):
+    return _JS_TRIM_RE.sub("", text)
+
+
+def _fold_block(block):
+    """foldBlock (PS/src/agents/frontmatter.js:11-38)."""
+    folded, has_content, previous_more, blank_lines = "", False, False, 0
+    for line in block.split("\n"):
+        current = _JS_TRIM_END_RE.sub("", line)
+        if _js_trim(current) == "":
+            if has_content:
+                blank_lines += 1
             continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
-        out[key.strip()] = value
-    return out
+        current_more = len(current) > len(_JS_TRIM_START_RE.sub("", current))
+        if has_content:
+            if blank_lines > 0:
+                folded += "\n" * (blank_lines + (1 if previous_more or current_more else 0))
+            else:
+                folded += "\n" if previous_more or current_more else " "
+        folded += current
+        has_content, previous_more, blank_lines = True, current_more, 0
+    return _js_trim(folded)
+
+
+def parse_frontmatter(content):
+    """Mirror pi-subagents parseFrontmatter (PS/src/agents/frontmatter.js:62-140):
+    `key: value` lines at column 0, quotes stripped, and block values (an
+    empty value, `|`, `|-`, `>` or `>-` followed by more-indented lines)
+    joined with their common indent removed, folded for `>`."""
+    frontmatter = {}
+    normalized = content.replace("\r\n", "\n")
+    if not normalized.startswith("---"):
+        return frontmatter
+    end = normalized.find("\n---", 3)
+    if end == -1:
+        return frontmatter
+    state = {"key": None, "lines": None, "indent": None, "folded": False, "literal": False}
+
+    def flush():
+        raw = "\n".join(state["lines"])
+        match = _FM_INDENT_RE.search(raw)
+        prefix = match.group(0) if match else ""
+        if prefix:
+            stripped = re.sub(_JS_LINE_START + re.escape(prefix), "", raw)
+            if stripped.startswith("\n"):
+                stripped = stripped[1:]
+        else:
+            stripped = raw
+        frontmatter[state["key"]] = _fold_block(stripped) if state["folded"] else stripped
+        state.update({"key": None, "lines": None, "indent": None, "folded": False, "literal": False})
+
+    for line in normalized[4:end].split("\n"):
+        first = _JS_NON_WS_RE.search(line)
+        indent = first.start() if first else len(line)
+        trimmed = _js_trim(line)
+        if state["key"] is not None and state["lines"] is not None and (
+                indent > (state["indent"] or 0) or ((state["folded"] or state["literal"]) and trimmed == "")):
+            state["lines"].append(line)
+            continue
+        if state["key"] is not None and state["lines"] is not None:
+            flush()
+        match = _FM_KEY_RE.match(line)
+        if not match:
+            continue
+        key, raw_value = match.group(1), _js_trim(match.group(2))
+        quoted = (raw_value.startswith('"') and raw_value.endswith('"')) or (
+            raw_value.startswith("'") and raw_value.endswith("'"))
+        value = raw_value[1:-1] if quoted else raw_value
+        is_folded = not quoted and raw_value in (">", ">-")
+        is_literal = not quoted and raw_value in ("|", "|-")
+        if value == "" or is_folded or is_literal:
+            state.update({"key": key, "lines": [], "indent": indent, "folded": is_folded, "literal": is_literal})
+        else:
+            frontmatter[key] = value
+    if state["key"] is not None and state["lines"] is not None:
+        flush()
+    return frontmatter
+
+
+def read_frontmatter(path):
+    """Frontmatter of a pi agent file, parsed as pi-subagents parses it."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {}
+    return parse_frontmatter(text)
+
+
+def normalize_package_name(value):
+    """pi-subagents normalizePackageName (PS/src/agents/identity.js:2-7):
+    trim, lowercase, whitespace runs to `-`, drop all but [a-z0-9.-],
+    collapse `-` and `.` runs, trim `-` and `.`. None when nothing is left."""
+    if not isinstance(value, str):
+        return None
+    text = _js_trim(value)
+    if not text:
+        return None
+    text = re.sub("[%s]+" % _JS_WS, "-", text.lower())
+    text = re.sub(r"[^a-z0-9.-]", "", text)
+    text = re.sub(r"-+", "-", text)
+    text = re.sub(r"\.+", ".", text)
+    text = re.sub(r"\A[-.]+|[-.]+\Z", "", text)
+    return text or None
+
+
+def _sanitize(text, limit):
+    """Control, format and line-separator characters become `?`; text over
+    limit is cut with `...`. Applied to every finding message and source."""
+    if text is None:
+        return None
+    text = "".join("?" if unicodedata.category(ch)[0] == "C" or unicodedata.category(ch) in ("Zl", "Zp") else ch
+                   for ch in str(text))
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def _echo(value, limit=MAX_KEY_CHARS):
+    """A key, value or path from a file, safe to put in a message."""
+    return _sanitize(value if isinstance(value, str) else repr(value), limit)
+
+
+def _show(value, limit=MAX_KEY_CHARS):
+    """repr-style quoting of an echoed key or value."""
+    return "'%s'" % _echo(value, limit)
 
 
 def validate_facts(facts):
@@ -579,6 +755,8 @@ class _Findings:
         self._seen = set()
 
     def add(self, severity, code, role, message, source=None, subject=None):
+        message = _sanitize(message, MAX_MESSAGE_CHARS)
+        source = _sanitize(source, MAX_SOURCE_CHARS)
         key = (severity, code, role, message, subject)
         if key in self._seen:
             return
@@ -591,6 +769,7 @@ def _empty_result(findings):
     return {"hasPlan": False, "planFiles": {"user": None, "project": None, "lists": []},
             "settingsFiles": {"user": None, "project": None}, "main": None, "roles": {},
             "providers": {}, "allowProviders": [], "denyProviders": [],
+            "listsActive": False, "listsFailClosed": [],
             "concurrency": {"parallel": DEFAULT_PARALLEL_CONCURRENCY, "global": DEFAULT_GLOBAL_CONCURRENCY,
                             "source": None},
             "findings": findings}
@@ -648,6 +827,7 @@ def parse_escalate(value, role=None):
 def parse_plan(data, source, project):
     """Validate one plan file. Returns (plan, findings_list). Invalid entries
     are dropped with an error finding; a file with a bad version is dropped.
+    allowProviders and denyProviders are read by read_plan_lists, not here.
     `null` for a role's model, thinking or escalate (and `null` or `[]` for
     fallback) is kept as an explicit unset that wins in the merge."""
     found = []
@@ -661,22 +841,23 @@ def parse_plan(data, source, project):
         return None, found
     version = data.get("version")
     if type(version) is not int or version != 1:
-        err("plan-bad-version", "The model plan needs \"version\": 1; the file is ignored.")
+        err("plan-bad-version", "The model plan needs \"version\": 1; the file is ignored%s."
+            % (" except its allowProviders and denyProviders" if project else ""))
         return None, found
     plan = {}
     for key in data:
         if key not in TOP_FIELDS:
-            err("plan-unknown-field", "Unknown top-level field %r." % key)
+            err("plan-unknown-field", "Unknown top-level field %s." % _show(key))
         elif key in PROJECT_ONLY_FIELDS and not project:
-            err("plan-project-only-field", "%r is allowed only in a project plan (.pi/steward-model-plan.json); ignored." % key)
+            err("plan-project-only-field", "%s is allowed only in a project plan (.pi/steward-model-plan.json); ignored." % _show(key))
 
     def ref_message(code, where, value):
         if code == "plan-bare-id":
-            return "%s %r is a bare id; write provider/id so it does not change meaning when the main provider changes." % (where, value)
+            return "%s %s is a bare id; write provider/id so it does not change meaning when the main provider changes." % (where, _show(value))
         if code == "plan-level-in-model":
             if isinstance(value, str) and value.strip().startswith(ROLE_TARGET_PREFIX):
                 return "%s: a role target takes no :level suffix; the target profile keeps its own thinking." % where
-            return "%s %r carries a :level suffix; put the level in \"thinking\"." % (where, value)
+            return "%s %s carries a :level suffix; put the level in \"thinking\"." % (where, _show(value))
         if code == "plan-unknown-role":
             return "%s names an unknown role; roles are %s." % (where, ", ".join(ROLES))
         if code == "plan-escalate-self":
@@ -695,20 +876,6 @@ def parse_plan(data, source, project):
         err("plan-bad-value", "%s must be a list of non-empty strings." % where)
         return None
 
-    def provider_list(value, where):
-        if not isinstance(value, list):
-            err("plan-bad-value", "%s must be a list of provider ids." % where)
-            return None
-        out = []
-        for index, item in enumerate(value):
-            if isinstance(item, str) and PROVIDER_ID_RE.match(item.strip()):
-                norm = normalize_segment(item.strip())
-                if norm and norm not in out:
-                    out.append(norm)
-            else:
-                err("plan-bad-value", "%s entry %d is not a provider id; it is ignored." % (where, index + 1))
-        return out
-
     main = data.get("main")
     if main is not None:
         if not isinstance(main, dict):
@@ -717,7 +884,7 @@ def parse_plan(data, source, project):
             out = {}
             for key, value in main.items():
                 if key not in MAIN_FIELDS:
-                    err("plan-unknown-field", "Unknown field %r in \"main\"." % key)
+                    err("plan-unknown-field", "Unknown field %s in \"main\"." % _show(key))
                 elif key == "models":
                     items = str_list(value, "main.models")
                     if items is not None:
@@ -746,22 +913,22 @@ def parse_plan(data, source, project):
             plan["providers"] = {}
             for name, value in providers.items():
                 if not isinstance(value, dict):
-                    err("plan-bad-value", "providers.%s must be an object." % name)
+                    err("plan-bad-value", "providers.%s must be an object." % _echo(name))
                     continue
                 entry = {}
                 for key, field in value.items():
                     if key not in PROVIDER_FIELDS:
-                        err("plan-unknown-field", "Unknown field %r in providers.%s." % (key, name))
+                        err("plan-unknown-field", "Unknown field %s in providers.%s." % (_show(key), _echo(name)))
                     elif key == "maxConcurrent":
                         if type(field) is int and field > 0:
                             entry[key] = field
                         else:
-                            err("plan-bad-value", "providers.%s.maxConcurrent must be a positive integer." % name)
+                            err("plan-bad-value", "providers.%s.maxConcurrent must be a positive integer." % _echo(name))
                     elif key == "enabled":
                         if isinstance(field, bool):
                             entry[key] = field
                         else:
-                            err("plan-bad-value", "providers.%s.enabled must be true or false." % name)
+                            err("plan-bad-value", "providers.%s.enabled must be true or false." % _echo(name))
                 plan["providers"][name] = entry
 
     families = data.get("families")
@@ -772,16 +939,9 @@ def parse_plan(data, source, project):
             plan["families"] = {}
             for name, value in families.items():
                 globs = [value] if isinstance(value, str) else value
-                items = str_list(globs, "families.%s" % name)
+                items = str_list(globs, "families.%s" % _echo(name))
                 if items:
                     plan["families"][name] = items
-
-    if project:
-        for key in PROJECT_ONLY_FIELDS:
-            if key in data:
-                items = provider_list(data[key], key)
-                if items is not None:
-                    plan[key] = items
 
     roles = data.get("roles")
     if roles is not None:
@@ -791,7 +951,7 @@ def parse_plan(data, source, project):
             plan["roles"] = {}
             for role, value in roles.items():
                 if role != "*" and role not in ROLES:
-                    err("plan-unknown-role", "Unknown role %r; roles are %s or \"*\"." % (role, ", ".join(ROLES)))
+                    err("plan-unknown-role", "Unknown role %s; roles are %s or \"*\"." % (_show(role), ", ".join(ROLES)))
                     continue
                 label = None if role == "*" else role
                 if not isinstance(value, dict):
@@ -801,7 +961,7 @@ def parse_plan(data, source, project):
                 for key, field in value.items():
                     where = "roles.%s.%s" % (role, key)
                     if key not in ROLE_FIELDS:
-                        err("plan-unknown-field", "Unknown field %r in roles.%s." % (key, role), label)
+                        err("plan-unknown-field", "Unknown field %s in roles.%s." % (_show(key), role), label)
                     elif key == "model":
                         if field is None:
                             entry["model"] = None
@@ -842,13 +1002,13 @@ def parse_plan(data, source, project):
                         by = {}
                         for prov, sub in field.items():
                             if not isinstance(sub, dict):
-                                err("plan-bad-value", "%s.%s must be an object." % (where, prov), label)
+                                err("plan-bad-value", "%s.%s must be an object." % (where, _echo(prov)), label)
                                 continue
                             item = {}
                             for skey, sval in sub.items():
-                                swhere = "%s.%s.%s" % (where, prov, skey)
+                                swhere = "%s.%s.%s" % (where, _echo(prov), skey)
                                 if skey not in BY_MAIN_FIELDS:
-                                    err("plan-unknown-field", "Unknown field %r in %s.%s." % (skey, where, prov), label)
+                                    err("plan-unknown-field", "Unknown field %s in %s.%s." % (_show(skey), where, _echo(prov)), label)
                                 elif sval is None:
                                     item[skey] = None
                                 elif skey == "model":
@@ -914,24 +1074,27 @@ def merge_plans(user, user_path, project, project_path):
 
 def _collect_lists(list_plans):
     """Union the deny lists and intersect the allow lists of every project plan.
-    Returns (deny {norm: source}, allow_lists [(set, source)])."""
+    Returns (deny {norm: source}, allow_lists [(list, source)],
+    closed [(source, reason)]); a closed file blocks every provider."""
     deny = {}
     allow_lists = []
-    for plan, path in list_plans:
-        for provider in plan.get("denyProviders", []):
+    closed = []
+    for lists, path in list_plans:
+        for provider in lists["deny"]:
             deny.setdefault(provider, path)
-        if plan.get("allowProviders"):
-            allow_lists.append((list(plan["allowProviders"]), path))
-    return deny, allow_lists
+        if lists["allow"] is not None:
+            allow_lists.append((list(lists["allow"]), path))
+        for reason in lists["closed"]:
+            closed.append((path, reason))
+    return deny, allow_lists, closed
 
 
 # ---------------------------------------------------------------- evaluation
 
 class _Context:
-    def __init__(self, facts, models, findings, merged, deny, allow_lists):
+    def __init__(self, facts, models, findings, merged, deny, allow_lists, closed=()):
         self.facts = facts
         self.findings = findings
-        self.models = models
         self.catalog = {_full(m): m for m in models}
         self.available = [m for m in models if m["available"]]
         main = facts["main"]
@@ -940,7 +1103,8 @@ class _Context:
         self.merged = merged
         self.deny = deny
         self.allow_lists = allow_lists
-        self.lists_active = bool(deny) or bool(allow_lists)
+        self.closed = list(closed)
+        self.lists_active = bool(deny) or bool(allow_lists) or bool(self.closed)
         self.families = []
         overrides = merged["families"] if merged else {}
         for name, globs in overrides.items():
@@ -951,7 +1115,7 @@ class _Context:
         self.judgment = merged["judgmentModels"] if merged else None
 
     def allowed_providers(self):
-        if not self.allow_lists:
+        if not self.allow_lists or self.closed:
             return []
         first = self.allow_lists[0][0]
         return [p for p in first if all(p in allowed for allowed, _ in self.allow_lists[1:])]
@@ -979,11 +1143,16 @@ class _Context:
         Both sides are compared after normalize_segment."""
         norm = normalize_segment(provider)
         if norm in self.deny:
-            return "provider-denied", "provider %s is in denyProviders" % provider, self.deny[norm]
+            return ("provider-denied", "provider %s is in denyProviders in %s" % (_echo(provider), _echo(self.deny[norm], 300)),
+                    self.deny[norm])
+        if self.closed:
+            path, reason = self.closed[0]
+            return ("provider-not-allowed", "provider %s; the project plan %s %s, so every provider is blocked"
+                    % (_echo(provider), _echo(path, 300), reason), path)
         for allowed, path in self.allow_lists:
             if norm not in allowed:
-                return ("provider-not-allowed", "provider %s is outside allowProviders (%s)"
-                        % (provider, ", ".join(allowed)), path)
+                return ("provider-not-allowed", "provider %s is outside allowProviders in %s"
+                        % (_echo(provider), _echo(path, 300)), path)
         return None
 
     def policy_block(self, model):
@@ -1294,8 +1463,8 @@ def _check_binding_policy(ctx, role, subject, inherits, requested, resolved, mai
         return bool(blocked)
     target = resolved if resolved and resolved != requested and resolved in ctx.catalog else None
     f.add("error", "effective-model-unverifiable", role,
-          "%s %r is not an exact, available provider/id%s, so allowProviders/denyProviders cannot be verified; "
-          "write the exact provider/id." % (describe, requested,
+          "%s %s is not an exact, available provider/id%s, so allowProviders/denyProviders cannot be verified; "
+          "write the exact provider/id." % (describe, _show(requested, 200),
                                              "; pi-subagents resolves it to %s" % target if target else ""),
           source, subject)
     if target:
@@ -1306,24 +1475,63 @@ def _check_binding_policy(ctx, role, subject, inherits, requested, resolved, mai
     return True
 
 
-def _resolve_role_escalations(ctx, roles):
+def _resolve_role_escalations(ctx, roles, shadowed=None):
     """Fill each `role:<target>` escalation with the target's effective
     binding, the one pi-subagents launches steward.<target> with. When the
     lists are active the target binding is checked again as the escalating
-    role's escalation, so a role target cannot route around them: a blocked
-    or unverifiable target clears the escalation."""
+    role's escalation, so a role target cannot route around them: a blocked,
+    unverifiable or shadowed target clears the escalation. `shadowed` maps a
+    role to the agent file that replaces it, or is True when the shadow scan
+    was truncated (every role may be shadowed). A cycle of role targets is
+    flagged."""
+    shadowed = shadowed or {}
+    sources = {role: row["escalate"].get("source") for role, row in roles.items()
+               if row["escalate"] and row["escalate"].get("role")}
+    _check_escalation_cycles(ctx, {role: roles[role]["escalate"]["role"] for role in sources}, sources)
     for role, row in roles.items():
         esc = row["escalate"]
         if not esc or not esc.get("role"):
             continue
         source = esc.pop("source", None)
-        eff = roles[esc["role"]]["effective"]
+        target = esc["role"]
+        if ctx.lists_active and (shadowed is True or target in shadowed):
+            where = ("the agent scan was truncated" if shadowed is True
+                     else "%s replaces it" % _echo(shadowed[target], 300))
+            ctx.findings.add("error", "effective-model-unverifiable", role,
+                             "The escalation target %s cannot be checked against allowProviders/denyProviders (%s); "
+                             "no escalation." % (esc["agent"], where), source, "escalation model")
+            row["escalate"] = None
+            continue
+        eff = roles[target]["effective"]
         if ctx.lists_active and _check_binding_policy(
                 ctx, role, "escalation model", eff["inheritsMain"], eff["requested"], eff["model"],
                 ctx.main_provider, source, "The escalation target %s (its effective binding)" % esc["agent"]):
             row["escalate"] = None
             continue
         esc.update({"model": eff["model"], "thinking": eff["thinking"], "inheritsMain": eff["inheritsMain"]})
+
+
+def _check_escalation_cycles(ctx, targets, sources):
+    """Warn once per cycle of `role:` escalation targets."""
+    seen = set()
+    for start in ROLES:
+        path = []
+        current = start
+        while current in targets and current not in path:
+            path.append(current)
+            current = targets[current]
+        if current not in path:
+            continue
+        cycle = path[path.index(current):]
+        key = frozenset(cycle)
+        if key in seen:
+            continue
+        seen.add(key)
+        chain = " -> ".join("steward." + r for r in cycle + [cycle[0]])
+        ctx.findings.add("warn", "escalation-cycle", cycle[0],
+                         "The role escalation targets form a cycle (%s); a failed check can bounce between these "
+                         "profiles, so escalate to the main thread after one round." % chain,
+                         sources.get(cycle[0]), "escalation model")
 
 
 def _check_latent_settings(ctx, layers):
@@ -1404,15 +1612,19 @@ def _agent_scan_dirs(agent_dir, env, cwd, project_root, settings_paths):
     return dirs
 
 
-def _agent_files(root):
-    """Agent definition files under root (inspectAgentDefinitionDirectory)."""
+def _agent_files(root, limit=None):
+    """Agent definition files under root (inspectAgentDefinitionDirectory),
+    as (files, truncated). The walk stops after `limit` files
+    (MAX_DISCOVERY_FILES); pi-subagents has no cap, so truncated means some
+    files were not looked at."""
+    limit = MAX_DISCOVERY_FILES if limit is None else limit
     out = []
     root = os.path.abspath(root)
     if not os.path.isdir(root):
-        return out
+        return out, False
     seen = set()
     stack = [root]
-    while stack and len(out) < MAX_DISCOVERY_FILES:
+    while stack and len(out) < limit:
         current = stack.pop()
         try:
             real = os.path.realpath(current)
@@ -1440,30 +1652,53 @@ def _agent_files(root):
                 if any(p == ".agents" and parts[i + 1:i + 2] == ["skills"] for i, p in enumerate(parts)):
                     continue
                 out.append(path)
-    return out
+    return out[:limit], len(out) >= limit
 
 
 def _check_shadowing(ctx, agent_dir, env, cwd, project_root, settings_paths, package_dir):
     """A user or project agent whose runtime name is steward.<role> replaces
-    the package profile (mergeAgentsForScope, PS/src/agents/agent-selection.js:1-21;
-    runtime name `<package>.<name>`, PS/src/agents/identity.js:18-21)."""
+    the package profile (mergeAgentsForScope, PS/src/agents/agent-selection.js:1-21).
+    Mirrors loadAgentsFromDefinitionFiles (PS/src/agents/agents.js:1891-1910):
+    frontmatter parsed as parseFrontmatter does, name and description
+    required, `package` normalised by normalizePackageName and checked with
+    IDENTIFIER_PATTERN (an invalid package makes pi-subagents skip the file),
+    runtime name `<package>.<name>` (PS/src/agents/identity.js:2-21).
+    Returns (shadowed {role: path}, truncated). Agents from other installed
+    pi packages are not scanned (a known gap)."""
     package_dir = os.path.realpath(str(package_dir))
+    shadowed = {}
+    truncated = False
     for directory in _agent_scan_dirs(agent_dir, env, cwd, project_root, settings_paths):
-        for path in _agent_files(directory):
+        files, cut = _agent_files(directory)
+        if cut:
+            truncated = True
+            ctx.findings.add("error", "shadow-scan-truncated", None,
+                             "%s holds more than %d agent files; the scan stopped, so an agent that replaces a "
+                             "steward profile may be missed and allowProviders/denyProviders cannot be verified."
+                             % (_echo(directory, 300), MAX_DISCOVERY_FILES), directory)
+        for path in files:
             if os.path.dirname(os.path.realpath(path)) == package_dir:
                 continue
             fm = read_frontmatter(path)
-            if not fm.get("name") or not fm.get("description"):
+            name = fm.get("name")
+            if not name or not fm.get("description"):
                 continue
-            package = fm.get("package", "").strip()
-            runtime = "%s.%s" % (package, fm["name"]) if package else fm["name"]
+            raw_package = fm.get("package")
+            package = None
+            if raw_package:
+                package = normalize_package_name(raw_package)
+                if not package or not PACKAGE_ID_RE.match(package):
+                    continue
+            runtime = "%s.%s" % (package, name) if package else name
             if not runtime.startswith("steward.") or runtime[len("steward."):] not in ROLES:
                 continue
             role = runtime[len("steward."):]
+            shadowed.setdefault(role, path)
             ctx.findings.add("error", "agent-shadowed", role,
                              "%s defines %s and replaces the steward profile, so its model cannot be checked "
-                             "against allowProviders/denyProviders; remove or rename it." % (path, runtime),
+                             "against allowProviders/denyProviders; remove or rename it." % (_echo(path, 300), runtime),
                              path, "effective binding")
+    return shadowed, truncated
 
 
 def _startup_thinking(ctx, user_data, user_path, project_data, project_path):
@@ -1515,7 +1750,7 @@ def evaluate(facts, env=None, agent_dir=None, agents_dir=None):
 
 
 def _read_plan(path, is_project, findings):
-    data, error = _read_json(path)
+    data, error = _read_json(path, "utf-8-sig")
     if error:
         findings.add("error", "plan-unreadable", None, "The model plan could not be read (%s); the file is ignored." % error, path)
     if data is None:
@@ -1547,19 +1782,25 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     merged = None
     if has_plan:
         merged = merge_plans(user_plan, user_plan_path, project_plan, root_plan_path)
-    deny, allow_lists = _collect_lists(list_plans)
+    deny, allow_lists, closed = _collect_lists(list_plans)
 
-    ctx = _Context(facts, models, findings, merged, deny, allow_lists)
+    ctx = _Context(facts, models, findings, merged, deny, allow_lists, closed)
 
+    # One provider-unknown finding per list key across every plan file.
     known = {normalize_segment(m["provider"]) for m in models}
-    for plan, path in list_plans:
-        for key in PROJECT_ONLY_FIELDS:
-            for provider in plan.get(key, []):
-                if provider not in known:
-                    findings.add("warn", "provider-unknown", None,
-                                 "%s names provider %s, which no model in pi's catalog uses. The lists name pi "
-                                 "provider ids, not upstream vendors." % (key, provider), path)
-    if allow_lists and not ctx.allowed_providers():
+    for key, slot in (("allowProviders", "allow"), ("denyProviders", "deny")):
+        unknown, first = [], None
+        for lists, path in list_plans:
+            for provider in lists[slot] or []:
+                if provider not in known and provider not in unknown:
+                    unknown.append(provider)
+                    first = first or path
+        if unknown:
+            shown = ", ".join(unknown[:3]) + (" and %d more" % (len(unknown) - 3) if len(unknown) > 3 else "")
+            findings.add("warn", "provider-unknown", None,
+                         "%s names %d provider(s) that no model in pi's catalog uses (%s). The lists name pi "
+                         "provider ids, not upstream vendors." % (key, len(unknown), shown), first)
+    if allow_lists and not closed and not ctx.allowed_providers():
         findings.add("error", "allow-lists-disjoint", None,
                      "The allowProviders lists share no provider, so every model is blocked.",
                      allow_lists[0][1])
@@ -1598,7 +1839,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
 
     # Project modelScope replaces the user one; maxThinking project wins
     # (PS/src/agents/agents.js:1133-1137,2563; PS/docs/models.md "Model scope enforcement").
-    if project_found and "modelScope" in project_sub:
+    if project_found and project_sub.get("modelScope") is not None:
         scope, scope_src = project_sub.get("modelScope"), project_found
     else:
         scope, scope_src = user_sub.get("modelScope"), user_found
@@ -1627,7 +1868,15 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                        "relaunch": relaunch, "escalate": escalate,
                        "judgmentGrade": effective["judgmentGrade"], "family": effective["family"]}
 
-    _resolve_role_escalations(ctx, roles)
+    # The shadow scan runs first: an escalation to a shadowed role is unverifiable.
+    shadowed = None
+    if ctx.lists_active:
+        shadowed, truncated = _check_shadowing(ctx, agent_dir, env, cwd, project_root,
+                                               [p for p in (user_settings_path, project_settings_path) if p],
+                                               agents_dir)
+        if truncated:
+            shadowed = True
+    _resolve_role_escalations(ctx, roles, shadowed)
 
     # ---- per-role checks
     for role, row in roles.items():
@@ -1709,8 +1958,6 @@ def _evaluate(facts, env, agent_dir, agents_dir):
 
     if ctx.lists_active:
         _check_latent_settings(ctx, layers)
-        _check_shadowing(ctx, agent_dir, env, cwd, project_root,
-                         [p for p in (user_settings_path, project_settings_path) if p], agents_dir)
 
     # ---- cross-role checks
     if ctx.judgment is None:
@@ -1812,6 +2059,8 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         "providers": providers_out,
         "allowProviders": ctx.allowed_providers(),
         "denyProviders": sorted(ctx.deny),
+        "listsActive": ctx.lists_active,
+        "listsFailClosed": sorted({path for path, _ in ctx.closed}),
         "concurrency": concurrency,
         "findings": findings.items,
     }

@@ -62,7 +62,8 @@ CATALOG = [
 OPERATOR_PLAN = {
     "version": 1,
     "main": {"models": [SOL, OPUS], "thinking": "xhigh"},
-    "judgmentModels": ["openai-codex/gpt-6*", "amorphic/claude-opus-5*", "amorphic/claude-fable-5*"],
+    "judgmentModels": ["openai-codex/gpt-6*", "amorphic/claude-opus-5*", "anthropic/claude-opus-5*",
+                       "amorphic/claude-fable-5*"],
     "providers": {"ollama-cloud": {"maxConcurrent": 3}, "fireworks": {}},
     "roles": {
         "*": {
@@ -76,10 +77,12 @@ OPERATOR_PLAN = {
             "model": SONNET,
             "thinking": "high",
             "fallback": [SOL + ":medium"],
+            "escalate": "role:deep-reasoner",
             "byMainProvider": {"amorphic": {"model": SOL, "thinking": "medium"}},
         },
-        "deep-reasoner": {"model": "main", "thinking": "xhigh", "fallback": [OPUS, SOL]},
-        "top-reviewer": {"model": OPUS, "thinking": "max"},
+        "deep-reasoner": {"model": "main", "thinking": "xhigh", "fallback": [OPUS, SOL], "escalate": None},
+        "top-reviewer": {"model": OPUS, "thinking": "max", "fallback": ["anthropic/claude-opus-5-5:max"],
+                         "escalate": None},
     },
 }
 
@@ -1308,8 +1311,11 @@ class UntrustedListsTests(PlanTestCase):
         result = self.run_plan(trusted=False)
         self.assertEqual(result["denyProviders"], ["ollama-cloud"])
         self.assertEqual(result["allowProviders"], [])
+        # an invalid deny entry or a non-list allow list fails closed, one finding per key
+        self.assertTrue(result["listsActive"])
+        self.assertTrue(result["listsFailClosed"])
         bad = self.findings(result, code="plan-bad-value")
-        self.assertEqual(len(bad), 4)
+        self.assertEqual(len(bad), 2)
         text = json.dumps(result["findings"])
         self.assertNotIn("IGNORE", text)
         self.assertNotIn("SECRETVALUE", text)
@@ -1320,7 +1326,8 @@ class UntrustedListsTests(PlanTestCase):
         path.write_text(json.dumps({"denyProviders": ["ollama-cloud"]}) + " " * (64 * 1024), encoding="utf-8")
         result = self.run_plan(trusted=False)
         self.assertEqual(result["denyProviders"], [])
-        self.assertTrue(self.findings(result, code="plan-untrusted-oversize"))
+        self.assertTrue(self.findings(result, code="plan-oversize"))
+        self.assertTrue(result["listsFailClosed"])
         self.assertNotIn("internal-error", self.codes(result))
 
     def test_bad_json_and_shapes(self):
@@ -1340,7 +1347,9 @@ class UntrustedListsTests(PlanTestCase):
         result = self.run_plan(cwd=sub, trusted=False)
         self.assertEqual(result["allowProviders"], ["amorphic"])
         self.assertEqual(result["denyProviders"], ["fireworks", "ollama-cloud"])
-        self.assertEqual(len(self.findings(result, code="plan-untrusted-lists")), 2)
+        info = self.findings(result, code="plan-untrusted-lists")
+        self.assertEqual(len(info), 1)
+        self.assertIn("2 plan file(s)", info[0]["message"])
 
 
 class NitTests(PlanTestCase):
