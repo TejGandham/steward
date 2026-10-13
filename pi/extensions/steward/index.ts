@@ -28,7 +28,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -288,6 +288,27 @@ export interface StewardOptions {
 	hookTimeoutMs?: number;
 	/** Kill time for the session-start call carrying model_facts; tests shorten it. */
 	factsTimeoutMs?: number;
+	/** Writes /steward-models output to stdout in print mode; tests capture it. */
+	writeStdout?: (text: string) => void;
+}
+
+/**
+ * pi 1.1.0 takes over process.stdout in every non-interactive mode (main.js calls
+ * takeOverStdout, which sends process.stdout.write to stderr), so print-mode output goes
+ * straight to fd 1. A non-blocking pipe can refuse a write; retry briefly, then give up.
+ */
+function defaultWriteStdout(text: string): void {
+	const buf = Buffer.from(text, "utf8");
+	let off = 0;
+	let tries = 0;
+	while (off < buf.length) {
+		try {
+			off += writeSync(1, buf, off, buf.length - off);
+		} catch (err) {
+			const code = (err as NodeJS.ErrnoException)?.code;
+			if ((code !== "EAGAIN" && code !== "EWOULDBLOCK") || ++tries > 1000) return;
+		}
+	}
 }
 
 export function createSteward(options: StewardOptions = {}): (pi: ExtensionAPI) => void {
@@ -298,6 +319,7 @@ export function createSteward(options: StewardOptions = {}): (pi: ExtensionAPI) 
 			options.loadPiTui ?? defaultLoadPiTui,
 			options.hookTimeoutMs ?? HOOK_TIMEOUT_MS,
 			options.factsTimeoutMs ?? FACTS_TIMEOUT_MS,
+			options.writeStdout ?? defaultWriteStdout,
 		);
 }
 
@@ -321,6 +343,7 @@ function register(
 	loadPiTui: () => Promise<PiTui>,
 	hookTimeoutMs: number,
 	factsTimeoutMs: number,
+	writeStdout: (text: string) => void,
 ): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 
@@ -631,13 +654,19 @@ function register(
 
 	/**
 	 * Shows a /steward-models result. A custom entry is display-only: pi stores it in the session
-	 * but never sends it to the model (sendMessage would add a model-visible message). Without a
-	 * UI nothing draws entries, so notify as well.
+	 * but never sends it to the model (sendMessage would add a model-visible message), and pi
+	 * emits it as an `entry_appended` event, which JSON and RPC mode stream on stdout. Per mode:
+	 * tui draws the entry; rpc also notifies, which the RPC extension UI protocol forwards;
+	 * print has no UI and prints only assistant text, so the text goes to stdout; json leaves
+	 * stdout to pi's JSONL. A host without `ctx.mode` gets the entry plus a notice when it has
+	 * no UI.
 	 */
 	function show(ctx: ExtensionContext, text: string): void {
 		const append = (pi as Partial<ExtensionAPI>).appendEntry;
 		if (typeof append === "function") append.call(pi, MODELS_ENTRY_TYPE, { text });
-		if (!ctx.hasUI || typeof append !== "function") ctx.ui.notify(text, "info");
+		const mode = (ctx as { mode?: string }).mode;
+		if (mode === "print") writeStdout(text.endsWith("\n") ? text : `${text}\n`);
+		else if (mode === "rpc" || !ctx.hasUI || typeof append !== "function") ctx.ui.notify(text, "info");
 	}
 
 	function registerModelsRenderer(): void {
