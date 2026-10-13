@@ -413,7 +413,35 @@ def render_report(result):
 
 def session_block(facts, env):
     """The capped block for session start, or None to leave the text as it is."""
+    return session_block_and_launches(facts, env)[0]
+
+
+def session_launches(result):
+    """{"steward.<role>": {"relaunch", "escalation"}}: the exact model strings the block tells
+    the main thread to pass after a provider error or a failed check, or None. A role
+    escalation (another profile, no model) and a blocked profile carry None. The pi extension
+    uses these to classify a logged launch's `kind` (Phase 4)."""
+    blocked = blocked_roles(result)
+    out = {}
+    for role, row in (result.get("roles") or {}).items():
+        relaunch = escalation = None
+        if role not in blocked:
+            eff = row.get("effectiveRelaunch")
+            if eff and eff.get("launch"):
+                relaunch = eff["launch"]
+            esc = row.get("escalate")
+            if esc and not esc.get("role") and esc.get("launch"):
+                escalation = esc["launch"]
+        out["steward." + role] = {"relaunch": relaunch, "escalation": escalation}
+    return out
+
+
+def session_block_and_launches(facts, env):
+    """(block, launches) for session start, or (None, None) to leave the text as it is."""
     result = mp.evaluate(facts, env=env)
     if not usable(result):
-        return None
-    return render_block(result, cwd=facts.get("cwd"), home=(os.environ if env is None else env).get("HOME"))
+        return None, None
+    block = render_block(result, cwd=facts.get("cwd"), home=(os.environ if env is None else env).get("HOME"))
+    if not block:
+        return None, None
+    return block, session_launches(result)

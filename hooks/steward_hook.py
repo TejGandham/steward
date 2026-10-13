@@ -311,11 +311,11 @@ def _hook_module(name):
 def _pi_model_plan_block(payload, env):
     facts = payload.get("model_facts")
     if not isinstance(facts, dict):
-        return None
+        return None, None
     try:
-        return _hook_module("model_plan_render").session_block(facts, env)
+        return _hook_module("model_plan_render").session_block_and_launches(facts, env)
     except Exception:  # session start must fail open
-        return None
+        return None, None
 
 
 def cmd_model_plan(stdin_text, env):
@@ -427,10 +427,11 @@ def cmd_session_start(payload, env):
             parts.append("\n".join(warnings) + "\n\n")
         parts.append(skill_body)
         text = "".join(parts)
-        block = _pi_model_plan_block(payload, env)
+        block, launches = _pi_model_plan_block(payload, env)
         if block:
             text += "\n\n" + block
     else:
+        launches = None
         warnings = _dependency_warnings(config_dir)
         header = (
             "<STEWARD>\n"
@@ -452,12 +453,19 @@ def cmd_session_start(payload, env):
         except OSError:
             pass
 
-    return json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            "additionalContext": text,
-        }
-    })
+    output = {
+        "hookEventName": "SessionStart",
+        "additionalContext": text,
+    }
+    if block_launches_ok(launches):
+        # pi only: each profile's relaunch and escalation model strings, as data, for the
+        # extension's outcome log (docs/roadmap/pi-model-plan.md, Phase 4).
+        output["stewardLaunches"] = launches
+    return json.dumps({"hookSpecificOutput": output})
+
+
+def block_launches_ok(launches):
+    return isinstance(launches, dict) and bool(launches)
 
 
 # ---------------------------------------------------------------------------
@@ -1568,12 +1576,43 @@ def _dispatch(argv, stdin_text, env):
     return None
 
 
+def cmd_delegation_stats(stdin_text, env):
+    """/steward-models stats: reads {"days"?, "path"?, "now"?} and prints
+    {"report": text}. Bad input prints {"error"} and exits 2. Reads only the
+    outcome log (hooks/delegation_stats.py)."""
+    import time
+
+    def fail(message):
+        message = "delegation-stats: " + message
+        return json.dumps({"error": message}), message, MODEL_PLAN_USAGE_EXIT
+
+    try:
+        payload = json.loads(stdin_text) if stdin_text and stdin_text.strip() else {}
+    except ValueError:
+        return fail("stdin is not JSON")
+    if not isinstance(payload, dict):
+        return fail("stdin must be a JSON object")
+    stats = _hook_module("delegation_stats")
+    days = payload.get("days", stats.DEFAULT_DAYS)
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 3650:
+        return fail("days must be a whole number from 1 to 3650")
+    path = payload.get("path")
+    if not isinstance(path, str) or not path:
+        path = stats.log_path(env)
+    now = payload.get("now")
+    if isinstance(now, bool) or not isinstance(now, (int, float)):
+        now = time.time()
+    return json.dumps({"report": stats.report(path, days, float(now))}), "", 0
+
+
 def main():
-    if len(sys.argv) >= 2 and sys.argv[1] in ("model-plan", "model-plan-apply"):
+    if len(sys.argv) >= 2 and sys.argv[1] in ("model-plan", "model-plan-apply", "delegation-stats"):
         name = sys.argv[1]
         try:
             if name == "model-plan":
                 out, err, code = cmd_model_plan(sys.stdin.read(), os.environ)
+            elif name == "delegation-stats":
+                out, err, code = cmd_delegation_stats(sys.stdin.read(), os.environ)
             else:
                 out, err, code = cmd_model_plan_apply(sys.stdin.read(), os.environ, sys.argv[2:])
         except Exception as exc:

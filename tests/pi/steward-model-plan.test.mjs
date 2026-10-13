@@ -282,23 +282,23 @@ test("/steward-models is registered and check shows the report", async () => {
 	}
 });
 
-test("/steward-models stats replies that it arrives in a later phase", async () => {
+test("/steward-models stats shows the summary; bad arguments show the usage", async () => {
 	const env = load();
-	for (const sub of ["stats"]) {
+	for (const sub of ["stats", "stats --days 30"]) {
 		env.entries.length = 0;
 		await env.commands["steward-models"].handler(sub, env.ctx);
 		assert.equal(env.shown().length, 1);
-		assert.match(env.shown()[0], new RegExp(`${sub}.*later phase`));
+		assert.match(env.shown()[0], /No steward launches logged/);
 	}
 	assert.equal(hookLog().filter((e) => e.subcommand === "model-plan").length, 0);
-	for (const args of ["frobnicate", "apply --force", "check --yes"]) {
+	for (const args of ["frobnicate", "apply --force", "check --yes", "stats --days", "stats --days 0", "stats 7"]) {
 		env.entries.length = 0;
 		await env.commands["steward-models"].handler(args, env.ctx);
-		assert.match(env.shown()[0], /Usage: \/steward-models \[check\|apply \[--yes\]\|stats\]/, args);
+		assert.match(env.shown()[0], /Usage: \/steward-models \[check\|apply \[--yes\]\|stats \[--days N\]\]/, args);
 	}
 	env.entries.length = 0;
 	await env.commands["steward-models"].handler("frobnicate", env.ctx);
-	assert.match(env.shown()[0], /Usage: \/steward-models \[check\|apply \[--yes\]\|stats\]/);
+	assert.match(env.shown()[0], /Usage: \/steward-models \[check\|apply \[--yes\]\|stats \[--days N\]\]/);
 	assert.equal(env.sent.length, 0);
 });
 
@@ -507,7 +507,7 @@ test("/steward-models check without a UI also notifies", async () => {
 	await env.commands["steward-models"].handler("stats", env.ctx);
 	assert.equal(env.sent.length, 0);
 	assert.equal(env.notices.length, 1);
-	assert.match(env.notices[0].msg, /stats.*later phase/);
+	assert.match(env.notices[0].msg, /No steward launches logged/);
 });
 
 // ---- Print mode drops notify and draws no entries, so the report goes to stdout there.
