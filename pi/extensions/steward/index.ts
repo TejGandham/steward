@@ -14,6 +14,11 @@
  * `model-plan-apply` as a dry run, shows the changes and asks (or needs `--yes` without a UI),
  * runs it again to write, then calls ctx.reload(); the reloaded instance shows a fresh check.
  *
+ * Outcome log (Phase 4): one JSON line per finished steward.* launch to
+ * $XDG_STATE_HOME/steward/pi-delegations.jsonl, from tool results and pi-subagents'
+ * `subagent:async-complete` events; `/steward-models stats` runs the hook's `delegation-stats`
+ * summarizer. No task text or output is logged, and every step fails open.
+ *
  * Debugging: with STEWARD_HOOK_LOG=<file>, every session-start, model-plan and model-plan-apply
  * hook call appends
  * one JSON line to that file ({kind: "hook", subcommand, payload, stdout, ms}, plus
@@ -28,7 +33,8 @@
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { appendFileSync, writeSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,7 +60,8 @@ const MODELS_COMMAND = "steward-models";
 const MODELS_ENTRY_TYPE = "steward-models";
 const MODELS_PLAN_SUBCOMMAND = "model-plan";
 const MODELS_APPLY_SUBCOMMAND = "model-plan-apply";
-const MODELS_USAGE = "Usage: /steward-models [check|apply [--yes]|stats]";
+const MODELS_USAGE = "Usage: /steward-models [check|apply [--yes]|stats [--days N]]";
+const STATS_SUBCOMMAND = "delegation-stats";
 /** Kill time for the writing apply call: long, so a slow disk never kills it mid-write. */
 const APPLY_WRITE_TIMEOUT_MS = 60_000;
 /**
@@ -144,7 +151,9 @@ export function runHook(
 
 /**
  * True when a `subagent` call starts work, so it counts as a delegation: a direct child
- * (`agent`), a workflow, or `action: "resume"` of a retained child. Other management calls
+ * (`agent`), top-level parallel `tasks` or a `chain` (pi-subagents 0.77.0
+ * `src/extension/schemas.js:278-280`), a workflow, or `action: "resume"` of a retained child.
+ * Other management calls
  * (`action: "list"`, `"status"`, `"guide"`, ...) and the `subagents_enable` loader do not.
  */
 export function launchesWork(input: unknown): boolean {
@@ -152,7 +161,8 @@ export function launchesWork(input: unknown): boolean {
 	const args = input as Record<string, unknown>;
 	if (args.action === "resume") return true;
 	if (args.action !== undefined) return false;
-	return Boolean(args.agent) || Boolean(args.workflow);
+	const nonEmpty = (v: unknown) => Array.isArray(v) && v.length > 0;
+	return Boolean(args.agent) || Boolean(args.workflow) || nonEmpty(args.tasks) || nonEmpty(args.chain);
 }
 
 /** Text of the most recent assistant message, or undefined when it has none. */
@@ -271,6 +281,115 @@ const SUBAGENT_NOT_ACTIVE_WARNING =
 	"/reload, or starting a new session, makes it available. Restarting pi and resuming this " +
 	"conversation does not, because pi restores the conversation's recorded tools on resume.";
 
+/** Rotate the outcome log to `<file>.<stamp>-<pid>` when it grows past this size. */
+export const DELEGATION_LOG_MAX_BYTES = 5 * 1024 * 1024;
+const DELEGATION_LOG_NAME = "pi-delegations.jsonl";
+/** pi-subagents 0.77.0 events (`PS/src/shared/types.js:11,15`). */
+const ASYNC_STARTED_EVENT = "subagent:async-started";
+const ASYNC_COMPLETE_EVENT = "subagent:async-complete";
+const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const STEWARD_PREFIX = "steward.";
+/** Bound on the per-session maps the logger keeps between launch and completion. */
+const MAX_TRACKED = 500;
+
+/** Per profile, the exact model strings the block names for a relaunch and an escalation. */
+export type LaunchStrings = Record<string, { relaunch?: string | null; escalation?: string | null }>;
+
+export function delegationLogPath(env: NodeJS.ProcessEnv = process.env): string {
+	const state = env.XDG_STATE_HOME || resolve(env.HOME || homedir(), ".local", "state");
+	return resolve(state, "steward", DELEGATION_LOG_NAME);
+}
+
+/**
+ * `kind` of a logged launch: no model param is plain; the profile's relaunch or escalation
+ * string from the session-start data is relaunch or escalation; any other model is operator.
+ */
+export function classifyKind(agent: string, modelParam: string | undefined, strings: LaunchStrings): string {
+	if (!modelParam) return "plain";
+	const entry = strings[agent];
+	if (entry?.relaunch && modelParam === entry.relaunch) return "relaunch";
+	if (entry?.escalation && modelParam === entry.escalation) return "escalation";
+	return "operator";
+}
+
+/** An HTTP status in an error line: at the start, or after "HTTP", "status", "code" or "error". */
+const PROVIDER_STATUS = /(?:^|\n)\s*(?:(?:error|http|status(?: code)?|code)\s*[:=]?\s*)?(?:408|429|5\d\d)\b(?!\s*(?:items?|tests?|lines?|ms|bytes)\b)/i;
+/** Transport and provider phrases as SDKs and pi-ai word them. */
+const PROVIDER_PHRASE =
+	/rate[ _-]?limit|too many requests|overloaded|insufficient_quota|quota exceeded|timed out|\btimeout\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|service unavailable|bad gateway|gateway timeout|internal server error|api error|unauthori[sz]ed|invalid api key|stream (?:error|ended)|first token/i;
+
+/**
+ * "provider" when an error text reads as a provider or transport failure, else "other". Callers
+ * pass pi-subagents' structured `error` field only, never the child's output.
+ */
+export function errorClass(text: unknown): "provider" | "other" {
+	return typeof text === "string" && (PROVIDER_STATUS.test(text) || PROVIDER_PHRASE.test(text)) ? "provider" : "other";
+}
+
+/** Model-supplied strings in the log: at most 100 characters of `[\w.:/@+-]`. */
+export function cleanLogField(value: string): string {
+	return value.slice(0, 100).replace(/[^\w.:/@+-]/g, "_");
+}
+
+/** Keep this many rotated log files; older ones are removed. */
+const ROTATED_KEEP = 2;
+
+/** Tightens a path to `mode` when its group or other bits are set. */
+function tighten(path: string, mode: number): void {
+	try {
+		if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, mode);
+	} catch {
+		// missing or not ours: leave it
+	}
+}
+
+/** Splits "provider/id:level" into model and thinking; a non-level suffix stays in the model. */
+function splitModel(value: unknown, thinking: unknown): { model: string | null; thinking: string | null } {
+	const level = typeof thinking === "string" && thinking ? thinking : null;
+	if (typeof value !== "string" || !value) return { model: null, thinking: level };
+	const i = value.lastIndexOf(":");
+	if (i > 0 && THINKING_LEVELS.has(value.slice(i + 1))) return { model: value.slice(0, i), thinking: level ?? value.slice(i + 1) };
+	return { model: value, thinking: level };
+}
+
+function finiteMs(...values: unknown[]): number | null {
+	for (const v of values) if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.round(v);
+	return null;
+}
+
+/** Appends one line to the outcome log, rotating above `maxBytes`. Never throws. */
+function appendDelegationLine(entry: Record<string, unknown>, maxBytes: number): void {
+	try {
+		const path = delegationLogPath();
+		const dir = dirname(path);
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		tighten(dir, 0o700);
+		try {
+			if (statSync(path).size >= maxBytes) {
+				// A unique name per rotation, so two sessions rotating at once never overwrite
+				// each other's file; the loser only moves a fresh, small file aside.
+				const stamp = new Date().toISOString().replace(/[-:.]/g, "");
+				renameSync(path, `${path}.${stamp}-${process.pid}`);
+				const base = `${DELEGATION_LOG_NAME}.`;
+				const rotated = readdirSync(dir).filter((n) => n.startsWith(base)).sort();
+				for (const old of rotated.slice(0, Math.max(0, rotated.length - ROTATED_KEEP))) {
+					try {
+						unlinkSync(resolve(dir, old));
+					} catch {
+						// another session removed it
+					}
+				}
+			}
+		} catch {
+			// no file yet
+		}
+		appendFileSync(path, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+		tighten(path, 0o600);
+	} catch {
+		// fail open: the log never affects the session
+	}
+}
+
 /** What the extension needs from `@earendil-works/pi-tui` to draw the /steward-models entry. */
 export interface PiTui {
 	Text?: new (text?: string, paddingX?: number, paddingY?: number) => { render(width: number): string[]; invalidate(): void };
@@ -290,23 +409,68 @@ export interface StewardOptions {
 	factsTimeoutMs?: number;
 	/** Writes /steward-models output to stdout in print mode; tests capture it. */
 	writeStdout?: (text: string) => void;
+	/** Size at which the outcome log rotates; tests shrink it. */
+	delegationLogMaxBytes?: number;
 }
 
 /**
  * pi 1.1.0 takes over process.stdout in every non-interactive mode (main.js calls
  * takeOverStdout, which sends process.stdout.write to stderr), so print-mode output goes
- * straight to fd 1. A non-blocking pipe can refuse a write; retry briefly, then give up.
+ * straight to fd 1. A non-blocking pipe can refuse a write; retry with a short blocking
+ * sleep, then give up and say so on stderr.
  */
 function defaultWriteStdout(text: string): void {
+	writeAllSync(text);
+}
+
+export interface WriteAllDeps {
+	/** Writes buf[off, off+len) and returns the bytes written; throws like fs.writeSync. */
+	write?: (buf: Buffer, off: number, len: number) => number;
+	/** Blocks for ms milliseconds. */
+	sleep?: (ms: number) => void;
+	/** Receives the one-line give-up notice. */
+	notice?: (text: string) => void;
+	/** Refused writes (EAGAIN) tolerated before giving up. */
+	maxTries?: number;
+}
+
+const WRITE_RETRY_SLEEP_MS = 5;
+const WRITE_MAX_TRIES = 400; // about 2 s of refusals in all
+
+function blockingSleep(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+export function writeAllSync(text: string, deps: WriteAllDeps = {}): void {
+	const write = deps.write ?? ((buf: Buffer, off: number, len: number) => writeSync(1, buf, off, len));
+	const sleep = deps.sleep ?? blockingSleep;
+	const notice =
+		deps.notice ??
+		((t: string) => {
+			try {
+				writeSync(2, t);
+			} catch {
+				// Nowhere left to report it.
+			}
+		});
+	const maxTries = deps.maxTries ?? WRITE_MAX_TRIES;
 	const buf = Buffer.from(text, "utf8");
 	let off = 0;
 	let tries = 0;
 	while (off < buf.length) {
 		try {
-			off += writeSync(1, buf, off, buf.length - off);
+			off += write(buf, off, buf.length - off);
 		} catch (err) {
 			const code = (err as NodeJS.ErrnoException)?.code;
-			if ((code !== "EAGAIN" && code !== "EWOULDBLOCK") || ++tries > 1000) return;
+			const retry = code === "EAGAIN" || code === "EWOULDBLOCK";
+			if (retry && tries < maxTries) {
+				tries++;
+				sleep(WRITE_RETRY_SLEEP_MS);
+				continue;
+			}
+			const why = retry ? `stdout refused writes ${tries} times` : `stdout write failed (${code ?? "error"})`;
+			notice(`steward: ${why}; ${buf.length - off} of ${buf.length} bytes of the report were not written.\n`);
+			return;
 		}
 	}
 }
@@ -320,6 +484,7 @@ export function createSteward(options: StewardOptions = {}): (pi: ExtensionAPI) 
 			options.hookTimeoutMs ?? HOOK_TIMEOUT_MS,
 			options.factsTimeoutMs ?? FACTS_TIMEOUT_MS,
 			options.writeStdout ?? defaultWriteStdout,
+			options.delegationLogMaxBytes ?? DELEGATION_LOG_MAX_BYTES,
 		);
 }
 
@@ -344,6 +509,7 @@ function register(
 	hookTimeoutMs: number,
 	factsTimeoutMs: number,
 	writeStdout: (text: string) => void,
+	logMaxBytes: number,
 ): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 
@@ -362,6 +528,8 @@ function register(
 	/** True while the current run's system prompt carries the edict (set by before_agent_start). */
 	let edictInPrompt = false;
 	const softNotes = new Map<string, string>();
+	/** Relaunch and escalation strings of the newest edict that loaded, for the outcome log. */
+	let launchStrings: LaunchStrings = {};
 
 	function hasDelegationTool(names: readonly string[]): boolean {
 		return names.includes(SUBAGENT_TOOL) || names.includes(SUBAGENT_LOADER_TOOL);
@@ -426,14 +594,19 @@ function register(
 		ctx: ExtensionContext,
 		payload: Record<string, unknown>,
 		timeoutMs: number,
-	): Promise<{ text?: string; missingPython?: boolean }> {
+	): Promise<{ text?: string; missingPython?: boolean; launches?: LaunchStrings }> {
 		const { output, missingPython } = await runHook("session-start", payload, timeoutMs);
 		if (missingPython && ctx.hasUI && !warnedMissingPython) {
 			warnedMissingPython = true;
 			ctx.ui.notify("steward: python3 was not found, so the edict and its gates are off.", "warning");
 		}
 		const text = output?.hookSpecificOutput?.additionalContext;
-		return { text: typeof text === "string" && text ? text : undefined, missingPython };
+		const launches = output?.hookSpecificOutput?.stewardLaunches;
+		return {
+			text: typeof text === "string" && text ? text : undefined,
+			missingPython,
+			launches: launches && typeof launches === "object" && !Array.isArray(launches) ? launches : undefined,
+		};
 	}
 
 	/**
@@ -442,7 +615,7 @@ function register(
 	 * facts call gets `factsTimeoutMs` and the retry the rest of `hookTimeoutMs`, so a load never
 	 * runs longer than one hook call did in 0.10.0. A plain-only call gets `hookTimeoutMs`.
 	 */
-	async function loadEdict(ctx: ExtensionContext): Promise<string | undefined> {
+	async function loadEdict(ctx: ExtensionContext): Promise<{ text: string; launches: LaunchStrings } | undefined> {
 		const base = { session_id: sessionId(ctx) };
 		const started = Date.now();
 		const facts = factsFailed ? undefined : await modelFacts(ctx);
@@ -455,7 +628,8 @@ function register(
 			if (left > 0) result = await sessionStart(ctx, base, left);
 		}
 		if (!result.text) return undefined;
-		return subagentsInstalled() ? result.text : `${MISSING_SUBAGENTS_WARNING}\n\n${result.text}`;
+		const text = subagentsInstalled() ? result.text : `${MISSING_SUBAGENTS_WARNING}\n\n${result.text}`;
+		return { text, launches: result.launches ?? {} };
 	}
 
 	/**
@@ -466,13 +640,16 @@ function register(
 	function rebuild(ctx: ExtensionContext): Promise<void> {
 		const mine = ++generation;
 		const run = (async () => {
-			let text: string | undefined;
+			let loaded: { text: string; launches: LaunchStrings } | undefined;
 			try {
-				text = await loadEdict(ctx);
+				loaded = await loadEdict(ctx);
 			} catch {
-				text = undefined;
+				loaded = undefined;
 			}
-			if (mine === generation && text) edict = text;
+			if (mine === generation && loaded) {
+				edict = loaded.text;
+				launchStrings = loaded.launches;
+			}
 		})();
 		inflight = run;
 		void run.finally(() => {
@@ -487,6 +664,7 @@ function register(
 	}
 
 	pi.on("session_start", async (event, ctx) => {
+		noteSession(ctx);
 		softNotes.clear();
 		edictInPrompt = false;
 		factsFailed = false;
@@ -556,6 +734,225 @@ function register(
 		}
 	});
 
+	// Outcome log (docs/roadmap/pi-model-plan.md, Phase 4): one line per finished steward.*
+	// launch. A sync result carries the finished rows in details.results[]; an async launch
+	// returns results: [] and finishes later as a `subagent:async-complete` event, and a
+	// workflow's children finish inside the workflow's completion. Never logs task text,
+	// outputs or file contents; every step fails open.
+	let session: { id?: string; cwd?: string } = {};
+	// Launch-time record of an async or detached run: its kind uses the relaunch and escalation
+	// strings current at launch. In memory only, so a completion after /reload logs as plain.
+	const asyncLaunches = new Map<string, { modelParam?: string; kind: string; at: number }>();
+	const started = new Map<string, number>();
+	const ended = new Map<string, number>();
+	const logged = new Set<string>();
+
+	function noteSession(ctx: ExtensionContext): void {
+		try {
+			session = { id: sessionId(ctx), cwd: typeof ctx.cwd === "string" ? resolve(ctx.cwd) : undefined };
+		} catch {
+			// keep the last one
+		}
+	}
+
+	function remember<V>(map: Map<string, V> | Set<string>, key: string, value?: V): void {
+		if (map.size >= MAX_TRACKED) {
+			const first = map.keys().next().value;
+			if (first !== undefined) map.delete(first);
+		}
+		if (map instanceof Set) map.add(key);
+		else map.set(key, value as V);
+	}
+
+	function writeLaunch(fields: {
+		key: string;
+		agent: unknown;
+		runId?: unknown;
+		modelParam?: string;
+		model?: unknown;
+		thinking?: unknown;
+		ok: boolean;
+		errorText?: unknown;
+		durationMs: number | null;
+		mode: "sync" | "async" | "workflow-child";
+		kind?: string;
+	}): void {
+		if (typeof fields.agent !== "string" || !fields.agent.startsWith(STEWARD_PREFIX)) return;
+		if (logged.has(fields.key)) return;
+		remember(logged, fields.key);
+		const resolved = splitModel(fields.model, fields.thinking);
+		appendDelegationLine(
+			{
+				v: 1,
+				ts: new Date().toISOString(),
+				sessionId: session.id ?? null,
+				cwd: session.cwd ?? null,
+				agent: cleanLogField(fields.agent),
+				runId: typeof fields.runId === "string" ? cleanLogField(fields.runId) : null,
+				modelParam: fields.modelParam !== undefined ? cleanLogField(fields.modelParam) : null,
+				model: resolved.model,
+				thinking: resolved.thinking,
+				status: fields.ok ? "ok" : "error",
+				isError: !fields.ok,
+				errorClass: fields.ok ? null : errorClass(fields.errorText),
+				durationMs: fields.durationMs,
+				mode: fields.mode,
+				kind: fields.kind ?? classifyKind(fields.agent, fields.modelParam, launchStrings),
+			},
+			logMaxBytes,
+		);
+	}
+
+	function textOf(content: unknown): string | undefined {
+		if (!Array.isArray(content)) return undefined;
+		return content.map((part) => (part && typeof part.text === "string" ? part.text : "")).join("\n");
+	}
+
+	function logLaunchResult(event: { input?: unknown; details?: unknown; isError?: boolean; content?: unknown; toolCallId?: string }): void {
+		try {
+			const input = (event.input && typeof event.input === "object" ? event.input : {}) as Record<string, any>;
+			if (!launchesWork(input)) return;
+			const details = (event.details && typeof event.details === "object" ? event.details : {}) as Record<string, any>;
+			const modelParam = typeof input.model === "string" && input.model ? input.model : undefined;
+			const asyncId = typeof details.asyncId === "string" ? details.asyncId : undefined;
+			const agentOf = (a: unknown) => (typeof a === "string" ? a : "");
+			if (asyncId && !event.isError) {
+				remember(asyncLaunches, asyncId, { modelParam, kind: classifyKind(agentOf(input.agent), modelParam, launchStrings), at: Date.now() });
+				return;
+			}
+			const steps = Array.isArray(input.tasks) ? input.tasks : Array.isArray(input.chain) ? input.chain : undefined;
+			const rows = Array.isArray(details.results) ? details.results : [];
+			if (rows.length > 0) {
+				rows.forEach((row: Record<string, any>, i: number) => {
+					if (!row || typeof row !== "object") return;
+					const index = Number.isInteger(row.index) ? row.index : i;
+					const task = steps ? steps[index] : undefined;
+					const param = typeof task?.model === "string" && task.model ? task.model : modelParam;
+					// Not finished: a detached child keeps running and an interrupted one waits for
+					// the next action (pi-subagents 0.77.0 src/runs/foreground/execution.js:503,1407,
+					// subagent-executor.js:3951-3968); a stop without an error is the same. The real
+					// outcome arrives later under the same run id, so keep the launch-time record.
+					if (row.detached || row.interrupted || (row.stopped && !row.error)) {
+						const runId = typeof details.runId === "string" ? details.runId : undefined;
+						if (runId && !asyncLaunches.has(runId)) {
+							remember(asyncLaunches, runId, { modelParam: param, kind: classifyKind(agentOf(row.agent), param, launchStrings), at: Date.now() });
+						}
+						return;
+					}
+					const ok = row.exitCode === 0 && !row.error && event.isError !== true;
+					writeLaunch({
+						key: `${details.runId ?? event.toolCallId}:${index}`,
+						agent: row.agent,
+						runId: details.runId,
+						modelParam: param,
+						model: row.model,
+						thinking: row.thinking,
+						ok,
+						errorText: row.error,
+						durationMs: finiteMs(row.progressSummary?.durationMs, row.durationMs),
+						mode: "sync",
+					});
+				});
+				return;
+			}
+			if (event.isError && typeof input.agent === "string") {
+				// Rejected before it ran (unknown model, launch failure): no resolved model.
+				writeLaunch({
+					key: `rejected:${event.toolCallId ?? Date.now()}`,
+					agent: input.agent,
+					modelParam,
+					ok: false,
+					// pi-subagents' own rejection text: no child ran, so there is no child output.
+					errorText: textOf(event.content),
+					durationMs: null,
+					mode: input.async === true ? "async" : "sync",
+				});
+			}
+		} catch {
+			// fail open
+		}
+	}
+
+	function onAsyncStarted(data: unknown): void {
+		try {
+			const d = data as Record<string, any> | null;
+			if (d && typeof d.id === "string" && !started.has(d.id)) remember(started, d.id, Date.now());
+		} catch {
+			// fail open
+		}
+	}
+
+	function onAsyncComplete(data: unknown): void {
+		try {
+			const d = data as Record<string, any> | null;
+			if (!d || typeof d !== "object") return;
+			const id = typeof d.runId === "string" ? d.runId : typeof d.id === "string" ? d.id : undefined;
+			if (!id) return;
+			const now = Date.now();
+			if (d.awaitedByWorkflow) {
+				// A workflow child: its model arrives with the workflow's own completion.
+				remember(ended, id, now);
+				return;
+			}
+			const rows: Record<string, any>[] = Array.isArray(d.results) ? d.results.filter((r: unknown) => r && typeof r === "object") : [];
+			const children = d.workflowChildren?.children;
+			if (d.mode === "workflow" || Array.isArray(children)) {
+				const byRun = new Map(rows.filter((r) => typeof r.runId === "string").map((r) => [r.runId, r]));
+				for (const child of Array.isArray(children) ? children : []) {
+					if (!child || typeof child !== "object") continue;
+					const childId = typeof child.runId === "string" ? child.runId : undefined;
+					const row = childId ? byRun.get(childId) : undefined;
+					const ok = child.state === "completed" && row?.success !== false;
+					const start = childId ? started.get(childId) : undefined;
+					const end = childId ? ended.get(childId) : undefined;
+					writeLaunch({
+						key: `${id}:${childId ?? child.childId}`,
+						agent: child.agent,
+						runId: childId,
+						model: child.model ?? row?.model,
+						thinking: row?.thinking,
+						ok,
+						errorText: row?.error ?? child.error,
+						durationMs: finiteMs(row?.durationMs, start !== undefined ? (end ?? now) - start : undefined),
+						mode: "workflow-child",
+					});
+				}
+				return;
+			}
+			const launch = asyncLaunches.get(id);
+			const start = launch?.at ?? started.get(id);
+			const list = rows.length > 0 ? rows : [{ agent: d.agent, success: d.success, error: d.error }];
+			list.forEach((row, i) => {
+				const ok = row.success !== false && d.success !== false && !row.error;
+				writeLaunch({
+					key: `${id}:${Number.isInteger(row.index) ? row.index : i}`,
+					agent: row.agent ?? d.agent,
+					runId: id,
+					modelParam: launch?.modelParam,
+					kind: launch?.kind,
+					model: row.model,
+					thinking: row.thinking,
+					ok,
+					errorText: row.error ?? d.error,
+					durationMs: finiteMs(row.durationMs, d.durationMs, start !== undefined ? now - start : undefined),
+					mode: "async",
+				});
+			});
+		} catch {
+			// fail open
+		}
+	}
+
+	try {
+		const events = (pi as Partial<ExtensionAPI>).events as { on?: (channel: string, fn: (data: unknown) => void) => unknown } | undefined;
+		if (events && typeof events.on === "function") {
+			events.on(ASYNC_STARTED_EVENT, onAsyncStarted);
+			events.on(ASYNC_COMPLETE_EVENT, onAsyncComplete);
+		}
+	} catch {
+		// no event bus: sync launches are still logged
+	}
+
 	pi.on("tool_call", async (event, ctx) => {
 		try {
 			if (!GATED_TOOLS.has(event.toolName)) return undefined;
@@ -592,6 +989,8 @@ function register(
 	pi.on("tool_result", async (event, ctx) => {
 		try {
 			if (event.toolName === SUBAGENT_TOOL) {
+				noteSession(ctx);
+				logLaunchResult(event);
 				// Only a launch that pi-subagents accepted counts as a delegation.
 				if (!event.isError && launchesWork(event.input)) {
 					await runHook("delegated", { session_id: sessionId(ctx) });
@@ -680,6 +1079,15 @@ function register(
 			if (typeof Text === "function") return new Text(text, 1, 0);
 			return { render: (width: number) => wrapLines(text, width), invalidate: () => {} };
 		});
+	}
+
+	/** `stats`: the hook's summarizer reads the outcome log; this only shows its text. */
+	async function statsReport(days: number): Promise<string> {
+		const { output, missingPython } = await runHook(STATS_SUBCOMMAND, { days, path: delegationLogPath() }, hookTimeoutMs);
+		if (missingPython) return "steward: /steward-models stats failed: python3 was not found.";
+		if (typeof output?.report === "string" && output.report) return output.report;
+		const reason = typeof output?.error === "string" && output.error ? output.error.slice(0, 200) : "the hook gave no report";
+		return `steward: /steward-models stats failed: ${reason}`;
 	}
 
 	async function checkReport(ctx: ExtensionContext): Promise<string> {
@@ -784,18 +1192,18 @@ function register(
 	function registerModelsCommand(): void {
 		if (typeof pi.registerCommand !== "function") return;
 		pi.registerCommand(MODELS_COMMAND, {
-			description: "Check the steward model plan (check), or write it into pi-subagents user settings (apply)",
+			description: "Check the steward model plan (check), write it into pi-subagents user settings (apply), or summarize steward launches (stats)",
 			getArgumentCompletions: (prefix: string) =>
-				["check", "apply", "apply --yes", "stats"].filter((sub) => sub.startsWith(prefix.trim())).map((sub) => ({ value: sub, label: sub })),
+				["check", "apply", "apply --yes", "stats", "stats --days"].filter((sub) => sub.startsWith(prefix.trim())).map((sub) => ({ value: sub, label: sub })),
 			handler: async (args, ctx) => {
 				try {
 					const [sub = "check", ...flags] = (args ?? "").trim().split(/\s+/).filter(Boolean);
 					const yes = flags.length === 1 && (flags[0] === "--yes" || flags[0] === "-y");
+					const days = flags.length === 0 ? 7 : flags.length === 2 && flags[0] === "--days" && /^\d{1,4}$/.test(flags[1]) ? Number(flags[1]) : 0;
 					if (sub === "check" && flags.length === 0) show(ctx, await checkReport(ctx));
 					else if (sub === "apply" && (flags.length === 0 || yes)) await applyPlan(ctx, yes);
-					else if (sub === "stats" && flags.length === 0) {
-						show(ctx, "steward: /steward-models stats arrives in a later phase (Phase 4); check and apply work now.");
-					} else show(ctx, MODELS_USAGE);
+					else if (sub === "stats" && days >= 1) show(ctx, await statsReport(days));
+					else show(ctx, MODELS_USAGE);
 				} catch {
 					try {
 						show(ctx, "steward: /steward-models failed with an internal error.");

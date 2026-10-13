@@ -378,6 +378,10 @@ test("launchesWork", () => {
 	assert.equal(launchesWork({ action: "list" }), false);
 	assert.equal(launchesWork({ action: "status", agent: "x" }), false);
 	assert.equal(launchesWork({ action: "resume", id: "r1" }), true);
+	// pi-subagents 0.77.0 top-level parallel and chain modes (PS/src/extension/schemas.js:278-280)
+	assert.equal(launchesWork({ tasks: [{ agent: "steward.coder", task: "x" }] }), true);
+	assert.equal(launchesWork({ chain: [{ agent: "steward.coder", task: "x" }] }), true);
+	assert.equal(launchesWork({ tasks: [] }), false);
 	assert.equal(launchesWork({}), false);
 	assert.equal(launchesWork(undefined), false);
 });

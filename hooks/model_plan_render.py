@@ -372,18 +372,31 @@ def _source(value):
     return _text(value, mp.MAX_SOURCE_CHARS) if value else "built-in default"
 
 
+def _finding_line(f):
+    who = ", ".join(x for x in (("steward." + f["role"]) if f["role"] and f["role"] != "main" else f["role"],
+                                f["subject"]) if x)
+    line = "- %s %s%s: %s" % (f["severity"], f["code"], " (%s)" % who if who else "", f["message"])
+    if f["source"]:
+        line += " Source: %s" % f["source"]
+    return line
+
+
 def render_report(result):
     """The full check report for /steward-models check."""
     lines = [render_block(result, capped=False), "", "## Findings"]
     if not result["findings"]:
         lines.append("None.")
     for f in result["findings"]:
-        who = ", ".join(x for x in (("steward." + f["role"]) if f["role"] and f["role"] != "main" else f["role"],
-                                    f["subject"]) if x)
-        line = "- %s %s%s: %s" % (f["severity"], f["code"], " (%s)" % who if who else "", f["message"])
-        if f["source"]:
-            line += " Source: %s" % f["source"]
+        line = _finding_line(f)
         lines.append(_text(line, mp.MAX_MESSAGE_CHARS + mp.MAX_SOURCE_CHARS + 200))
+    lines += ["", "## Plan binding",
+              "Warnings for plan bindings that do not launch yet, because another binding wins; "
+              "they apply once the plan binding launches (after /steward-models apply)."]
+    plan_warnings = result.get("planWarnings") or []
+    if not plan_warnings:
+        lines.append("None.")
+    for f in plan_warnings:
+        lines.append(_text(_finding_line(f), mp.MAX_MESSAGE_CHARS + mp.MAX_SOURCE_CHARS + 200))
     lines += ["", "## Where each binding comes from"]
     for role in mp.ROLES:
         row = (result.get("roles") or {}).get(role)
@@ -413,7 +426,35 @@ def render_report(result):
 
 def session_block(facts, env):
     """The capped block for session start, or None to leave the text as it is."""
+    return session_block_and_launches(facts, env)[0]
+
+
+def session_launches(result):
+    """{"steward.<role>": {"relaunch", "escalation"}}: the exact model strings the block tells
+    the main thread to pass after a provider error or a failed check, or None. A role
+    escalation (another profile, no model) and a blocked profile carry None. The pi extension
+    uses these to classify a logged launch's `kind` (Phase 4)."""
+    blocked = blocked_roles(result)
+    out = {}
+    for role, row in (result.get("roles") or {}).items():
+        relaunch = escalation = None
+        if role not in blocked:
+            eff = row.get("effectiveRelaunch")
+            if eff and eff.get("launch"):
+                relaunch = eff["launch"]
+            esc = row.get("escalate")
+            if esc and not esc.get("role") and esc.get("launch"):
+                escalation = esc["launch"]
+        out["steward." + role] = {"relaunch": relaunch, "escalation": escalation}
+    return out
+
+
+def session_block_and_launches(facts, env):
+    """(block, launches) for session start, or (None, None) to leave the text as it is."""
     result = mp.evaluate(facts, env=env)
     if not usable(result):
-        return None
-    return render_block(result, cwd=facts.get("cwd"), home=(os.environ if env is None else env).get("HOME"))
+        return None, None
+    block = render_block(result, cwd=facts.get("cwd"), home=(os.environ if env is None else env).get("HOME"))
+    if not block:
+        return None, None
+    return block, session_launches(result)
