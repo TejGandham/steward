@@ -95,7 +95,7 @@ Caveats:
 - Anthropic: "In our own use, the gap between Opus 5.5 and Claude Fable 5.1 is narrower than these scores suggest."
 - Nothing tests dense plan or spec review, the profile's actual job.
 
-Why max, not xhigh:
+Why max, not xhigh (history, superseded 2026-10-12):
 - xhigh would duplicate `steward:deep-reasoner-opus-xhigh`; the top reviewer exists for the pass after that one falls short.
 - AA index 58 at max vs 56 at xhigh, at $5.98 vs $3.46 cost per index task.
 - CodeRabbit's Opus max configuration caught 10 of 13 hard bugs at 52.0% precision vs 8 of 13 at 66.7% for standard. Gap review values recall over precision, so the trade favors max.

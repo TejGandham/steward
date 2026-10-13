@@ -11,11 +11,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 PLAN_DOC = REPO_ROOT / "docs" / "roadmap" / "pi-model-plan.md"
+ROUTING = REPO_ROOT / "skills" / "delegating" / "routing.md"
 EDICTS = (
     REPO_ROOT / "skills" / "delegating" / "SKILL.md",
     REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md",
     REPO_ROOT / "copilot" / "skills" / "delegating" / "SKILL.md",
+    REPO_ROOT / "skills" / "orchestrating" / "onboarding-template.md",
 )
+PROFILE_DOCS = (README, ROUTING) + EDICTS
 RULE = "Claude Opus never runs at max"
 
 
@@ -49,6 +52,22 @@ def opus_max_pairs(node, where="$"):
     elif isinstance(node, str) and node.lower().endswith(":max") and is_opus(node.rsplit(":", 1)[0]):
         found.append(f"{where}={node}")
     return found
+
+
+def table_opus_max_rows(text):
+    """Markdown table rows where an Opus model cell is followed by a max effort cell."""
+    found = []
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            continue
+        cells = [c.strip().strip("`").strip() for c in line.strip().strip("|").split("|")]
+        for model, effort in zip(cells, cells[1:]):
+            if "opus" in model.lower() and "steward" not in model.lower() and effort.lower() == "max":
+                found.append(line)
+    return found
+
+
+PROFILE_PAIR = re.compile(r"\((?:opus|[\w/.-]*claude-opus[\w.-]*),\s*max\)", re.I)
 
 
 def json_blocks(text):
@@ -95,6 +114,14 @@ class NoOpusMaxTests(unittest.TestCase):
             for block in json_blocks(path.read_text(encoding="utf-8")):
                 self.assertEqual(opus_max_pairs(block), [], path.name)
 
+    def test_profile_tables(self):
+        for path in PROFILE_DOCS:
+            self.assertEqual(table_opus_max_rows(path.read_text(encoding="utf-8")), [], path.name)
+
+    def test_profile_bullets(self):
+        for path in PROFILE_DOCS:
+            self.assertEqual(PROFILE_PAIR.findall(path.read_text(encoding="utf-8")), [], path.name)
+
     def test_edicts_carry_the_rule(self):
         for path in EDICTS:
             self.assertIn(RULE, path.read_text(encoding="utf-8"), path)
@@ -106,6 +133,15 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(len(opus_max_pairs(["anthropic/claude-opus-5-5:max"])), 1)
         self.assertEqual(opus_max_pairs({"model": "anthropic/claude-fable-5-1", "thinking": "max"}), [])
         self.assertEqual(opus_max_pairs(["fireworks/x/deepseek-v4p1-flash:max"]), [])
+
+    def test_detects_table_rows_and_bullets(self):
+        self.assertEqual(len(table_opus_max_rows("| `steward:reviewer-opus-max` | Opus | max | x |")), 1)
+        self.assertEqual(len(table_opus_max_rows("| `steward.top-reviewer` | `anthropic/claude-opus-5-5` | max |")), 1)
+        self.assertEqual(table_opus_max_rows("| `steward:reviewer-opus-max` | Opus | xhigh | x |"), [])
+        self.assertEqual(table_opus_max_rows("| steward:x | Sonnet | max |"), [])
+        self.assertEqual(len(PROFILE_PAIR.findall("**steward:reviewer-opus-max** (opus, max): top")), 1)
+        self.assertEqual(PROFILE_PAIR.findall("**steward:reviewer-opus-max** (opus, xhigh): top"), [])
+        self.assertEqual(PROFILE_PAIR.findall("Why max, not xhigh"), [])
 
 
 if __name__ == "__main__":
