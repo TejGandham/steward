@@ -7,7 +7,7 @@
       "steward.researcher": { "model": "amorphic/claude-sonnet-5-5", "thinking": "low" },
       "steward.reviewer": { "model": "amorphic/claude-sonnet-5-5", "thinking": "high" },
       "steward.writer": { "model": "amorphic/claude-sonnet-5-5", "thinking": "medium" },
-      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "max" }
+      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "xhigh" }
     }
   }
 }
