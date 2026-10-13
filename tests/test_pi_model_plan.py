@@ -379,6 +379,11 @@ class FindingTests(PlanTestCase):
             "coder": {"model": OLLAMA, "thinking": "xhigh"},
             "writer": {"model": FIREWORKS, "thinking": "medium"},
             "top-reviewer": {"model": OPUS, "thinking": "max"}}})
+        # Per-model warnings follow the launching binding, so the plan is applied.
+        self.user_settings({"subagents": {"agentOverrides": {
+            "steward.coder": {"model": OLLAMA, "thinking": "xhigh"},
+            "steward.writer": {"model": FIREWORKS, "thinking": "medium"},
+            "steward.top-reviewer": {"model": OPUS, "thinking": "max"}}}})
         result = self.run_plan()
         coder = self.findings(result, code="thinking-clamped", role="coder")
         self.assertTrue(coder and coder[0]["severity"] == "warn")
@@ -389,6 +394,10 @@ class FindingTests(PlanTestCase):
 
     def test_max_tokens_on_coder_and_writer_only(self):
         self.user_plan(OPERATOR_PLAN)
+        # Per-model warnings follow the launching binding, so the plan's flash roles are applied.
+        self.user_settings({"subagents": {"agentOverrides": {
+            "steward.%s" % r: {"model": OLLAMA, "thinking": "high"}
+            for r in ("coder", "writer", "researcher", "mechanic")}}})
         result = self.run_plan()
         roles = {f["role"] for f in self.findings(result, code="max-tokens-low", severity="warn")}
         self.assertEqual(roles, {"coder", "writer"})
@@ -1364,6 +1373,8 @@ class NitTests(PlanTestCase):
     def test_max_tokens_threshold_is_32000(self):
         models = copy.deepcopy(CATALOG) + [model("ext/at-32000", max_tokens=32000), model("ext/below", max_tokens=31999)]
         self.user_plan({"version": 1, "roles": {"coder": {"model": "ext/at-32000"}, "writer": {"model": "ext/below"}}})
+        self.user_settings({"subagents": {"agentOverrides": {
+            "steward.coder": {"model": "ext/at-32000"}, "steward.writer": {"model": "ext/below"}}}})
         result = self.run_plan(models=models)
         self.assertEqual({f["role"] for f in self.findings(result, code="max-tokens-low")}, {"writer"})
 
