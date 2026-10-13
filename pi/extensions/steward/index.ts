@@ -14,6 +14,11 @@
  * `model-plan-apply` as a dry run, shows the changes and asks (or needs `--yes` without a UI),
  * runs it again to write, then calls ctx.reload(); the reloaded instance shows a fresh check.
  *
+ * Outcome log (Phase 4): one JSON line per finished steward.* launch to
+ * $XDG_STATE_HOME/steward/pi-delegations.jsonl, from tool results and pi-subagents'
+ * `subagent:async-complete` events; `/steward-models stats` runs the hook's `delegation-stats`
+ * summarizer. No task text or output is logged, and every step fails open.
+ *
  * Debugging: with STEWARD_HOOK_LOG=<file>, every session-start, model-plan and model-plan-apply
  * hook call appends
  * one JSON line to that file ({kind: "hook", subcommand, payload, stdout, ms}, plus
