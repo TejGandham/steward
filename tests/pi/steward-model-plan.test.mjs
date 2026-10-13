@@ -73,6 +73,7 @@ function load(opts = {}) {
 	const model = pick("model", REGISTRY_MODELS[3]);
 	const thinkingLevel = pick("thinkingLevel", "xhigh");
 	const { cwd, factory, hookTimeoutMs, factsTimeoutMs } = opts;
+	const stdout = [];
 	const handlers = {};
 	const commands = {};
 	const sent = [];
@@ -98,7 +99,7 @@ function load(opts = {}) {
 		getAllTools: () => ["read", "bash", "edit", "write", "subagent"].map((name) => ({ name })),
 		getActiveTools: () => ["read", "bash", "edit", "write", "subagent"],
 	};
-	const make = factory ?? createSteward({ hookTimeoutMs, factsTimeoutMs, loadPiAi: async () => {
+	const make = factory ?? createSteward({ hookTimeoutMs, factsTimeoutMs, writeStdout: (text) => stdout.push(text), loadPiAi: async () => {
 		if (piAi instanceof Error) throw piAi;
 		return piAi;
 	} });
@@ -122,7 +123,7 @@ function load(opts = {}) {
 		return result;
 	};
 	const shown = () => entries.filter((e) => e.customType === "steward-models").map((e) => e.data.text);
-	return { handlers, commands, sent, entries, entryRenderers, shown, notices, ctx, fire };
+	return { handlers, commands, sent, entries, entryRenderers, shown, notices, stdout, ctx, fire };
 }
 
 function promptEvent() {
@@ -507,6 +508,52 @@ test("/steward-models check without a UI also notifies", async () => {
 	assert.equal(env.sent.length, 0);
 	assert.equal(env.notices.length, 1);
 	assert.match(env.notices[0].msg, /stats.*later phase/);
+});
+
+// ---- Print mode drops notify and draws no entries, so the report goes to stdout there.
+// pi 1.1.0 takes over process.stdout in every non-interactive mode (main.js, takeOverStdout),
+// so the extension writes fd 1 itself; JSON and RPC already stream the entry as entry_appended.
+
+test("/steward-models check in print mode writes the report to stdout", async () => {
+	const env = load();
+	env.ctx.mode = "print";
+	await env.commands["steward-models"].handler("check", env.ctx);
+	assert.equal(env.sent.length, 0);
+	assert.equal(env.stdout.length, 1);
+	assert.ok(env.stdout[0].includes(BLOCK_HEADING), env.stdout[0].slice(0, 300));
+	assert.ok(env.stdout[0].endsWith("\n"));
+	assert.equal(env.notices.length, 0, "print mode has no UI to notify");
+});
+
+test("/steward-models in the TUI stays an entry: no stdout, no notice, nothing sent", async () => {
+	const env = load();
+	env.ctx.mode = "tui";
+	env.ctx.hasUI = true;
+	await env.commands["steward-models"].handler("check", env.ctx);
+	assert.equal(env.stdout.length, 0);
+	assert.equal(env.notices.length, 0);
+	assert.equal(env.sent.length, 0);
+	assert.equal(env.shown().length, 1);
+});
+
+test("/steward-models in JSON mode leaves stdout to pi's JSONL: the entry is the output", async () => {
+	const env = load();
+	env.ctx.mode = "json";
+	await env.commands["steward-models"].handler("check", env.ctx);
+	assert.equal(env.stdout.length, 0);
+	assert.equal(env.sent.length, 0);
+	assert.equal(env.shown().length, 1);
+});
+
+test("/steward-models in RPC mode notifies the client as well as appending the entry", async () => {
+	const env = load();
+	env.ctx.mode = "rpc";
+	env.ctx.hasUI = true;
+	await env.commands["steward-models"].handler("stats", env.ctx);
+	assert.equal(env.stdout.length, 0);
+	assert.equal(env.sent.length, 0);
+	assert.equal(env.shown().length, 1);
+	assert.equal(env.notices.length, 1);
 });
 
 test("model_select and thinking_level_select return without waiting for a slow hook", async () => {

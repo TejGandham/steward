@@ -2020,6 +2020,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     _resolve_role_escalations(ctx, roles, shadowed)
 
     # ---- per-role checks
+    model_drift = {}
     for role, row in roles.items():
         plan, eff = row["plan"], row["effective"]
         settings_files = {p for p in (user_found, project_found) if p}
@@ -2029,6 +2030,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         thinking_differs = bool(plan) and plan["thinking"] is not None and plan["thinking"] != eff["thinking"]
         overridden = (model_differs and eff["modelSource"]["file"] in settings_files) or (
             thinking_differs and eff["thinkingSource"]["file"] in settings_files)
+        model_drift[role] = model_differs
         subjects = []  # (label, model, thinking, explicit, source)
         if plan and plan["model"]:
             subjects.append(("plan binding", plan["model"], plan["thinking"], False, plan["source"]))
@@ -2052,17 +2054,20 @@ def _evaluate(facts, env, agent_dir, agents_dir):
 
         for label, model, thinking, explicit, source in subjects:
             entry = ctx.catalog.get(model)
-            # Per-model warnings follow the binding a launch gets: a plan
-            # binding overridden in settings is not checked (binding-drift
-            # reports the mismatch).
+            # Per-model warnings (clamp, maxTokens, judgment floor) follow the
+            # binding a launch gets: a plan binding is checked only when no
+            # effective binding is known, since binding-drift reports any
+            # mismatch and apply makes the plan binding the launch. Scope keeps
+            # the narrower rule: a plan binding overridden in settings is skipped.
             warn_ok = not (label == "plan binding" and overridden)
-            if warn_ok and entry and entry["thinkingLevels"] is not None and thinking in THINKING_LEVELS:
+            model_ok = not (label == "plan binding" and eff["model"])
+            if model_ok and entry and entry["thinkingLevels"] is not None and thinking in THINKING_LEVELS:
                 level = clamp_thinking(thinking, entry["thinkingLevels"])
                 if level != thinking:
                     findings.add("warn", "thinking-clamped", role,
                                  "%s at %s is clamped to %s: the model does not declare %s. A declared level is not "
                                  "proof the provider honors it." % (model, thinking, level, thinking), source, label)
-            if warn_ok and role in LARGE_OUTPUT_ROLES and not explicit and entry and entry["maxTokens"] is not None \
+            if model_ok and role in LARGE_OUTPUT_ROLES and not explicit and entry and entry["maxTokens"] is not None \
                     and entry["maxTokens"] < MIN_OUTPUT_TOKENS:
                 findings.add("warn", "max-tokens-low", role,
                              "%s allows only %d output tokens; large %s output can be truncated (below 32K)."
@@ -2073,7 +2078,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                              "The %s %s asks for %s, above subagents.maxThinking %s; the launch fails before start."
                              % (label, model, thinking, max_thinking), max_src, label)
             _check_scope(ctx, role, label, model, explicit, scope, scope_src, warn_ok)
-            if warn_ok and role in JUDGMENT_ROLES and ctx.judgment is not None and not ctx.judgment_grade(model):
+            if model_ok and role in JUDGMENT_ROLES and ctx.judgment is not None and not ctx.judgment_grade(model):
                 findings.add("warn", "below-judgment-floor", role,
                              "The %s %s for %s is outside judgmentModels." % (label, model, role),
                              ctx.merged["judgmentSource"], label)
@@ -2127,15 +2132,17 @@ def _evaluate(facts, env, agent_dir, agents_dir):
 
     if has_plan:
         def fam(role):
+            # The launching binding's family; the plan's only where no
+            # override applies (as binding-drift reports it).
             row = roles[role]
-            if row["plan"] and row["plan"]["model"]:
-                return row["plan"]["family"]
-            return row["effective"]["family"]
-        rev, cod = fam("reviewer"), fam("coder")
+            if row["plan"] and row["plan"]["model"] and not model_drift.get(role):
+                return row["plan"]["family"], row["plan"]["source"]
+            return row["effective"]["family"], row["effective"]["modelSource"]["file"]
+        (rev, rev_src), (cod, _) = fam("reviewer"), fam("coder")
         if rev and rev == cod:
             findings.add("warn", "reviewer-same-family", "reviewer",
                          "The reviewer and the coder are both %s models; cross-family review is lost." % rev,
-                         roles["reviewer"]["plan"] and roles["reviewer"]["plan"]["source"])
+                         rev_src)
         rplan = roles["reviewer"]["plan"]
         if rplan and rplan["byMainProvider"] and ctx.main and rev and rev == ctx.family(ctx.main):
             findings.add("warn", "reviewer-main-family", "reviewer",
