@@ -59,7 +59,7 @@ PLAN = {
         "reviewer": {"model": SONNET, "thinking": "high", "fallback": [SOL + ":medium"],
                      "byMainProvider": {"amorphic": {"model": SOL, "thinking": "medium"}}},
         "deep-reasoner": {"model": "main", "thinking": "xhigh", "fallback": [OPUS]},
-        "top-reviewer": {"model": OPUS, "thinking": "max", "fallback": None},
+        "top-reviewer": {"model": OPUS, "thinking": "xhigh", "fallback": None},
     },
 }
 
@@ -70,7 +70,7 @@ EXPECTED_OVERRIDES = {
     "steward.researcher": {"model": OLLAMA, "thinking": "high"},
     "steward.writer": {"model": OLLAMA, "thinking": "high"},
     "steward.mechanic": {"model": OLLAMA, "thinking": "low"},
-    "steward.top-reviewer": {"model": OPUS, "thinking": "max"},
+    "steward.top-reviewer": {"model": OPUS, "thinking": "xhigh"},
 }
 
 # pi writes settings.json as JSON.stringify(settings, null, 2), no trailing newline.
@@ -482,7 +482,7 @@ class SafetyTests(ApplyTestCase):
         self.user_plan(PLAN)
         self.apply()
         self.assertEqual(self.settings()["subagents"]["agentOverrides"]["steward.top-reviewer"],
-                         {"model": OPUS, "thinking": "max"})
+                         {"model": OPUS, "thinking": "xhigh"})
         self.assertEqual(self.backups(), [])
 
     def test_lock_held_by_another_writer_refuses(self):

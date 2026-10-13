@@ -1,7 +1,7 @@
 ---
 name: top-reviewer
-description: Highest-stakes review where a miss is costly and the material is dense, gap analysis of execution plans and specs, cross-repo sequencing review, adversarial checks of decision records. Use only when the operator asks for the top reviewer (or for Fable) or when a deep-reasoner pass is not enough. Read-only by default.
-reasoning-effort: max
+description: Highest-stakes review where a miss is costly and the material is dense, gap analysis of execution plans and specs, cross-repo sequencing review, adversarial checks of decision records. Use only when the operator asks for the top reviewer (or for Fable) or when a deep-reasoner pass is not enough. Runs Opus 5.5 at xhigh effort, the top tier; Claude Opus never runs at max. Read-only by default.
+reasoning-effort: xhigh
 include-custom-instructions: true
 ---
 

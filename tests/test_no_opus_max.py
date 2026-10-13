@@ -1,0 +1,112 @@
+"""Operator decision 2026-10-12: Claude Opus never runs at max effort or
+thinking. The top reviewer runs Opus 5.5 at xhigh on Claude Code, pi and
+GitHub Copilot (skills/delegating/routing.md, section "Top reviewer on Opus
+5.5 xhigh; Opus never at max (operator decision 2026-10-12)")."""
+
+import json
+import re
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+README = REPO_ROOT / "README.md"
+PLAN_DOC = REPO_ROOT / "docs" / "roadmap" / "pi-model-plan.md"
+EDICTS = (
+    REPO_ROOT / "skills" / "delegating" / "SKILL.md",
+    REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md",
+    REPO_ROOT / "copilot" / "skills" / "delegating" / "SKILL.md",
+)
+RULE = "Claude Opus never runs at max"
+
+
+def frontmatter(path):
+    text = path.read_text(encoding="utf-8")
+    block = text.split("---", 2)[1]
+    fields = {}
+    for line in block.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            fields[key.strip()] = value.strip()
+    return fields
+
+
+def is_opus(model):
+    return isinstance(model, str) and ("claude-opus" in model.lower() or model.strip().lower() == "opus")
+
+
+def opus_max_pairs(node, where="$"):
+    """Every place in a JSON value that binds an Opus model to max thinking,
+    as {model, thinking} objects or as `model:max` reference strings."""
+    found = []
+    if isinstance(node, dict):
+        if is_opus(node.get("model")) and node.get("thinking") == "max":
+            found.append(where)
+        for key, value in node.items():
+            found += opus_max_pairs(value, f"{where}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            found += opus_max_pairs(value, f"{where}[{i}]")
+    elif isinstance(node, str) and node.lower().endswith(":max") and is_opus(node.rsplit(":", 1)[0]):
+        found.append(f"{where}={node}")
+    return found
+
+
+def json_blocks(text):
+    return [json.loads(b) for b in re.findall(r"```json\n(.*?)```", text, re.S)]
+
+
+class NoOpusMaxTests(unittest.TestCase):
+    def test_claude_code_agents(self):
+        for path in sorted((REPO_ROOT / "agents").glob("*.md")):
+            fm = frontmatter(path)
+            if is_opus(fm.get("model")):
+                self.assertNotEqual(fm.get("effort"), "max", path.name)
+
+    def test_pi_agents(self):
+        for path in sorted((REPO_ROOT / "pi" / "agents").glob("*.md")):
+            fm = frontmatter(path)
+            if is_opus(fm.get("model")):
+                self.assertNotEqual(fm.get("thinking"), "max", path.name)
+
+    def test_copilot_agents_against_edict_models(self):
+        # Copilot profiles pin no model; the edict's table names it per role.
+        edict = EDICTS[2].read_text(encoding="utf-8")
+        rows = dict(re.findall(r"^\| steward:([a-z-]+) \| ([^|]+?) \|", edict, re.M))
+        self.assertIn("top-reviewer", rows)
+        efforts = dict(re.findall(r"^\| steward:([a-z-]+) \| [^|]+ \| `([a-z]+)` \|", edict, re.M))
+        for path in sorted((REPO_ROOT / "copilot" / "agents").glob("*.agent.md")):
+            role = frontmatter(path)["name"]
+            if "opus" in rows.get(role, "").lower():
+                self.assertNotEqual(frontmatter(path).get("reasoning-effort"), "max", path.name)
+                self.assertNotEqual(efforts.get(role), "max", role)
+
+    def test_repo_pi_settings(self):
+        data = json.loads((REPO_ROOT / ".pi" / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual(opus_max_pairs(data), [])
+
+    def test_operator_case_plan(self):
+        section = PLAN_DOC.read_text(encoding="utf-8").split("### Operator's case", 1)[1]
+        plan = json.loads(section.split("```json", 1)[1].split("```", 1)[0])
+        self.assertEqual(opus_max_pairs(plan), [])
+        self.assertEqual(plan["roles"]["top-reviewer"]["thinking"], "xhigh")
+
+    def test_plan_doc_and_readme_json_examples(self):
+        for path in (PLAN_DOC, README):
+            for block in json_blocks(path.read_text(encoding="utf-8")):
+                self.assertEqual(opus_max_pairs(block), [], path.name)
+
+    def test_edicts_carry_the_rule(self):
+        for path in EDICTS:
+            self.assertIn(RULE, path.read_text(encoding="utf-8"), path)
+
+
+class HelperTests(unittest.TestCase):
+    def test_detects_pairs(self):
+        self.assertEqual(len(opus_max_pairs({"a": {"model": "amorphic/claude-opus-5-5", "thinking": "max"}})), 1)
+        self.assertEqual(len(opus_max_pairs(["anthropic/claude-opus-5-5:max"])), 1)
+        self.assertEqual(opus_max_pairs({"model": "anthropic/claude-fable-5-1", "thinking": "max"}), [])
+        self.assertEqual(opus_max_pairs(["fireworks/x/deepseek-v4p1-flash:max"]), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

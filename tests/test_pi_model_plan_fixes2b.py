@@ -150,7 +150,7 @@ class EffectiveRelaunch(RenderCase):
         # deep-reasoner: candidates main (Opus), Opus, Sol; runs Opus
         self.assertEqual(result["roles"]["deep-reasoner"]["effectiveRelaunch"]["model"], SOL)
         self.assertEqual(rows["steward.deep-reasoner"][5], SOL + ":xhigh")
-        self.assertEqual(rows["steward.top-reviewer"][5], ANTHROPIC_OPUS + ":max")
+        self.assertEqual(rows["steward.top-reviewer"][5], ANTHROPIC_OPUS + ":xhigh")
 
     def test_no_override_matches_plan_relaunch(self):
         self.user_plan(doc_operator_plan())

@@ -1,6 +1,6 @@
 # Routing knowledge base
 
-Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5; revised 2026-10-09 for Haiku 5.5 and the mechanic's move to it; revised 2026-10-11 for per-call effort, the top reviewer's move to Opus 5.5 max, and the decision to keep everyday review on Sonnet 5.5 high; revised 2026-10-12 for routing ad-hoc browser chores to the Haiku mechanic.
+Routing knowledge base for the orchestrator. WHICH model and effort to pick is here; HOW to set it is in "Model and effort mechanics" below. Built 2026-09-03 from Anthropic's pricing and docs via web search; revised 2026-09-22 for Opus 5.5's launch, the drop of Haiku 4.5 and Opus 5 from the matrix, and the move of the coder profile from Sonnet 5 xhigh to Opus 5.5 medium; revised 2026-10-03 for Sonnet 5.5 replacing Sonnet 5; revised 2026-10-09 for Haiku 5.5 and the mechanic's move to it; revised 2026-10-11 for per-call effort, the top reviewer's move to Opus 5.5 max, and the decision to keep everyday review on Sonnet 5.5 high; revised 2026-10-12 for routing ad-hoc browser chores to the Haiku mechanic, and for the top reviewer's move to Opus 5.5 xhigh (Opus never runs at max).
 
 ## Cost ranking (per MTok, input / output / cache read), cheapest to dearest (cited: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-09-22, re-fetched 2026-10-03 and 2026-10-08)
 | Model | Input | Output | Cache read |
@@ -10,7 +10,7 @@ Routing knowledge base for the orchestrator. WHICH model and effort to pick is h
 | Opus 5.5 | $4 | $20 | $0.20 |
 | Fable 5.1 = Mythos 5.1 | $10 | $50 | $0.25 |
 
-Fable 5.1 is no longer pinned to any profile (2026-10-11); it runs only when the operator asks for it by name, through a per-call model override on the top reviewer. See "Top reviewer on Opus 5.5 max" below.
+Fable 5.1 is no longer pinned to any profile (2026-10-11); it runs only when the operator asks for it by name, through a per-call model override on the top reviewer. See "Top reviewer on Opus 5.5 xhigh; Opus never at max" below.
 
 The 2026-10-03 pricing page lists Sonnet 5.5 at the same $2/$10/$0.20 as Sonnet 5 and now includes Opus 5.5 at $4/$20/$0.20 (its cache reads are priced at 0.05x input). On 2026-09-22 the page said the $2/$10 Sonnet 5 price, originally introductory, had become standard; the planned 2026-09-01 increase to $3/$15 did not happen. Sonnet 5.5 cache reads were halved to $0.10 on 2026-10-07 (anthropic.com/claude-haiku-5-5), so Sonnet and Opus no longer tie on cache reads (Opus $0.20).
 
@@ -25,7 +25,7 @@ Prices and model ids are as of 2026-10-08; the Claude Code profiles use aliases 
 - "much less likely than recent models to take hard-to-reverse actions or act outside the boundaries it's been given, and it's more resistant than Opus 5 to prompt injection."
 - "Because Opus 5.5 is comparable to Claude Mythos 5.1 in biology and cybersecurity, we're deploying it with safeguards similar to those on Claude Fable 5.1."
 
-Effort: Opus 5.5 accepts low, medium, high, xhigh, max. Anthropic's pre-launch Opus 5.5 migration guide (bundled inside Claude Code's `claude-api` skill, cached 2026-06-24; not a public web page, so treat as unconfirmed on the web) says the API default effort is `medium` (Opus 5's was `high`), thinking cannot be disabled, and at a given level Opus 5.5 thinks more per turn than Opus 5, especially at xhigh and max, so turns run longer. Steward profiles set effort explicitly, so the default does not affect them; the longer-turn point is why steward:deep-reasoner-opus-xhigh stays at xhigh only for the hardest work.
+Effort: Opus 5.5 accepts low, medium, high, xhigh, max. Anthropic's pre-launch Opus 5.5 migration guide (bundled inside Claude Code's `claude-api` skill, cached 2026-06-24; not a public web page, so treat as unconfirmed on the web) says the API default effort is `medium` (Opus 5's was `high`), thinking cannot be disabled, and at a given level Opus 5.5 thinks more per turn than Opus 5, especially at xhigh and max, so turns run longer. Steward never runs Opus at max (operator decision 2026-10-12). Steward profiles set effort explicitly, so the default does not affect them; the longer-turn point is why steward:deep-reasoner-opus-xhigh stays at xhigh only for the hardest work.
 
 ### Coder on Opus 5.5 (2026-09-22)
 The earlier "Sonnet 5 xhigh for pure coding" preference was a Sonnet-versus-Haiku choice made 2026-09-03, before Opus 5.5 existed. It was never a preference against Opus 5.5, so Opus 5.5's launch supersedes it rather than overriding it.
@@ -69,7 +69,18 @@ Closes the 2026-10-09 open question on moving everyday review to Opus 5.5 medium
 - Re-check when CodeRabbit publishes Sonnet 5.5's judged scores on the 44-PR set, or when any Sonnet 5.5 versus Opus 5.5 head-to-head on ordinary PRs appears.
 Full figures: `docs/evaluations/2026-10-09-model-assignment-evidence.md`, section "Reviewer question, 2026-10-11".
 
+## Top reviewer on Opus 5.5 xhigh; Opus never at max (operator decision 2026-10-12)
+The operator decided on 2026-10-12: "Opus max must never be used." "max will always be opus 5.5 xhigh." From 0.13.0 the top reviewer runs Opus 5.5 at xhigh on Claude Code (`steward:reviewer-opus-max`, `effort: xhigh`), pi (`steward.top-reviewer`, `thinking: xhigh`) and GitHub Copilot (`steward:top-reviewer`, `reasoning_effort: xhigh`).
+- Claude Opus never runs at max effort or thinking. Where a brief, a skill or the operator names max for Opus, use xhigh. Each edict states this rule; `tests/test_no_opus_max.py` checks the profiles, the edicts, this repo's `.pi/settings.json` and the example plans.
+- The Claude Code profile keeps the name `reviewer-opus-max`. Renaming would break saved briefs, and Claude Code has no profile aliases.
+- The top reviewer and `steward:deep-reasoner-opus-xhigh` now share model and effort. The top reviewer stays a separate profile for its role: a gap-review prompt, used on the operator's request or when a deep-reasoner pass is not enough.
+- Fable 5.1 stays unpinned. A request for Fable by name still runs the top reviewer with a per-call Fable model at the level the operator names (`xhigh` if none).
+- Codex is unchanged: its top reviewer is `gpt-6-astra`, not Opus.
+
+This supersedes the 2026-10-11 section below, which stays as history.
+
 ## Top reviewer on Opus 5.5 max (operator decision 2026-10-11)
+Superseded on 2026-10-12 by "Top reviewer on Opus 5.5 xhigh; Opus never at max" above; kept as history.
 The top reviewer moved from Fable 5.1 at xhigh to `steward:reviewer-opus-max` (Opus 5.5, max) in 0.9.0. Fable 5.1 runs only when the operator asks for it by name: `subagent_type: steward:reviewer-opus-max`, `model: fable`, `effort` as the operator names (`xhigh` if none). Figures read 2026-10-11; cite them with that date, since one outlet notes Artificial Analysis rescaled its index between September snapshots.
 
 Artificial Analysis (AA):
@@ -117,7 +128,7 @@ Other matrix models' tentative retirement floors, same deprecations page: Sonnet
 - **steward:researcher-sonnet-low** (sonnet, low): thorough read-only investigation/search, plan inputs, findings docs.
 - **steward:writer-sonnet-medium** (sonnet, medium): docs, README sections, substantive PR bodies, plain-language rewrites.
 - **steward:mechanic-haiku-medium** (haiku, medium): single lookups, rote edits, file ops, running known commands, status collation, trivial PR one-liners. Returned to Haiku on 2026-10-09 (0.6.0), after running on Sonnet at low effort from 0.2.0, when Haiku 4.5 was dropped; see "Haiku 5.5" above.
-- **steward:reviewer-opus-max** (opus, max): highest-stakes gap reviews of plans/specs; use on the operator's request or when a deep-reasoner pass is not enough (cost: highest of the pinned profiles; max turns run long). Moved off Fable 5.1 xhigh on 2026-10-11; Fable runs only by per-call `model: fable` override on the operator's request. See "Top reviewer on Opus 5.5 max" above.
+- **steward:reviewer-opus-max** (opus, xhigh): highest-stakes gap reviews of plans/specs; use on the operator's request or when a deep-reasoner pass is not enough. Moved off Fable 5.1 xhigh on 2026-10-11 and to xhigh on 2026-10-12, since Claude Opus never runs at max; the name stays. Fable runs only by per-call `model: fable` override on the operator's request. See "Top reviewer on Opus 5.5 xhigh; Opus never at max" above.
 
 ## Rubric (task to profile)
 | Task | Profile |

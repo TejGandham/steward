@@ -48,7 +48,7 @@ PHASE0_SETTINGS = {
             "steward.mechanic": {"model": OLLAMA, "thinking": "low"},
             "steward.reviewer": {"model": SONNET, "thinking": "high"},
             "steward.deep-reasoner": {"model": "inherit", "thinking": "xhigh"},
-            "steward.top-reviewer": {"model": OPUS, "thinking": "max"},
+            "steward.top-reviewer": {"model": OPUS, "thinking": "xhigh"},
         },
         "agentOverridesByProvider": {
             "amorphic": {"steward.reviewer": {"model": SOL, "thinking": "medium"}},
@@ -113,7 +113,7 @@ class OperatorCaseTests(RenderCase):
             "steward.deep-reasoner", SOL + " (inherits the main thread)", "xhigh", "yes", "gpt",
             OPUS + ":xhigh", "keep it on the main thread"])
         self.assertEqual(rows["steward.top-reviewer"], [
-            "steward.top-reviewer", OPUS, "max", "yes", "claude", "anthropic/claude-opus-5-5:max",
+            "steward.top-reviewer", OPUS, "xhigh", "yes", "claude", "anthropic/claude-opus-5-5:xhigh",
             "keep it on the main thread"])
         self.assertIn("At most 3 children at a time on ollama-cloud.", lines)
 
