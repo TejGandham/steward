@@ -85,15 +85,15 @@ Location: `get_config_dir(env)/steward/model-plan.json`, the same directory as t
     },
     "top-reviewer": {
       "model": "amorphic/claude-opus-5-5",
-      "thinking": "max",
-      "fallback": ["anthropic/claude-opus-5-5:max"],
+      "thinking": "xhigh",
+      "fallback": ["anthropic/claude-opus-5-5:xhigh"],
       "escalate": null
     }
   }
 }
 ```
 
-What this does: coder, researcher, writer and mechanic run on Flash through Ollama Cloud and fall back to the same model on Fireworks. Thinking is `high`, except mechanic on `low`, never `off` (see the Flash thinking section). Deep-reasoner runs on whatever the main thread runs (`inherit`), at `xhigh` where the model supports it. The three non-Flash roles never inherit the `"*"` escalation to `main:high`: the reviewer escalates to `steward.deep-reasoner` (`role:deep-reasoner`, which launches on that profile's own model and thinking), and deep-reasoner and top-reviewer clear it with `"escalate": null`, so a failed check on either stays on the main thread. Their fallbacks are never Flash either: deep-reasoner relaunches on Opus or Sol, top-reviewer on `anthropic/claude-opus-5-5:max` (same model and level, other provider), the reviewer on Sol at `medium`. `main.models` and `main.thinking` are only what the check compares the session against; steward never sets the main thread. The reviewer is never DeepSeek, and it is never the main thread's family either: Sonnet when the main thread is Sol, Sol when the main thread is Opus on `amorphic`. Top-reviewer is Opus 5.5 at `max` (operator decision 2026-10-11; it was Fable 5.1 at `xhigh` when this plan was written). `~/.pi/agent/models.json` declares `max` for `amorphic/claude-opus-5-5` (`thinkingLevelMap` `xhigh` and `max`, `maxTokens` 128000), so pi does not clamp it. A request for Fable by name runs the top reviewer with per-call `model: "anthropic/claude-fable-5-1:xhigh"`; `amorphic/claude-fable-5-1` also declares `max`.
+What this does: coder, researcher, writer and mechanic run on Flash through Ollama Cloud and fall back to the same model on Fireworks. Thinking is `high`, except mechanic on `low`, never `off` (see the Flash thinking section). Deep-reasoner runs on whatever the main thread runs (`inherit`), at `xhigh` where the model supports it. The three non-Flash roles never inherit the `"*"` escalation to `main:high`: the reviewer escalates to `steward.deep-reasoner` (`role:deep-reasoner`, which launches on that profile's own model and thinking), and deep-reasoner and top-reviewer clear it with `"escalate": null`, so a failed check on either stays on the main thread. Their fallbacks are never Flash either: deep-reasoner relaunches on Opus or Sol, top-reviewer on `anthropic/claude-opus-5-5:xhigh` (same model and level, other provider), the reviewer on Sol at `medium`. `main.models` and `main.thinking` are only what the check compares the session against; steward never sets the main thread. The reviewer is never DeepSeek, and it is never the main thread's family either: Sonnet when the main thread is Sol, Sol when the main thread is Opus on `amorphic`. Top-reviewer is Opus 5.5 at `xhigh` (operator decision 2026-10-12: Claude Opus never runs at max; it was Opus 5.5 at `max` from 2026-10-11 and Fable 5.1 at `xhigh` when this plan was written). `~/.pi/agent/models.json` declares `xhigh` for `amorphic/claude-opus-5-5` (`thinkingLevelMap` `xhigh` and `max`, `maxTokens` 128000), so pi does not clamp it. A request for Fable by name runs the top reviewer with per-call `model: "anthropic/claude-fable-5-1:xhigh"`; `amorphic/claude-fable-5-1` also declares `max`.
 
 The "everything on Flash" variant is the `"*"` entry alone, with no other roles listed. It is allowed but is not the operator's choice. The check and the edict then warn that deep-reasoner and top-reviewer are below the judgment floor and that the reviewer shares the coder's family, and the edict tells the main thread to keep judgment work inline.
 
@@ -231,7 +231,7 @@ Main thread: openai-codex/gpt-6.1-sol at xhigh. In the plan: yes. Judgment-grade
 | steward.researcher | ollama-cloud/deepseek-v4.1-flash | high | no | deepseek | fireworks/accounts/fireworks/models/deepseek-v4p1-flash:high | openai-codex/gpt-6.1-sol:high |
 | steward.reviewer | amorphic/claude-sonnet-5-5 | high | no | claude | openai-codex/gpt-6.1-sol:medium | use steward.deep-reasoner |
 | steward.deep-reasoner | openai-codex/gpt-6.1-sol (inherits the main thread) | xhigh | yes | gpt | amorphic/claude-opus-5-5:xhigh | keep it on the main thread |
-| steward.top-reviewer | amorphic/claude-opus-5-5 | max | yes | claude | anthropic/claude-opus-5-5:max | keep it on the main thread |
+| steward.top-reviewer | amorphic/claude-opus-5-5 | xhigh | yes | claude | anthropic/claude-opus-5-5:xhigh | keep it on the main thread |
 | ... | | | | | | |
 At most 3 children at a time on ollama-cloud.
 ```
@@ -300,7 +300,7 @@ Main thread: `/model`, select Sol, Ctrl+S. Then `/thinking`, `xhigh`, Ctrl+S. If
       "steward.mechanic": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "low" },
       "steward.reviewer": { "model": "amorphic/claude-sonnet-5-5", "thinking": "high" },
       "steward.deep-reasoner": { "model": "inherit", "thinking": "xhigh" },
-      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "max" }
+      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "xhigh" }
     },
     "agentOverridesByProvider": {
       "amorphic": { "steward.reviewer": { "model": "openai-codex/gpt-6.1-sol", "thinking": "medium" } }
@@ -446,7 +446,7 @@ Still open:
 - whether a synchronous single-child `subagent` result carries the resolved model in `details.results[]` (findings say sync runs likely do; not probed live);
 - whether Fireworks honors `max` beyond recording the level (not measured).
 
-Confirmed since 2026-10-09: `amorphic/claude-opus-5-5` declares `max` in `~/.pi/agent/models.json` (`thinkingLevelMap` `xhigh` and `max`), so the top reviewer's `max` is not clamped. pi-subagents 0.77.0 shipped the project-trust change and the built-in `parallel` workflow noted above (`PS/CHANGELOG.md:5-13`).
+Confirmed since 2026-10-09: `amorphic/claude-opus-5-5` declares `max` in `~/.pi/agent/models.json` (`thinkingLevelMap` `xhigh` and `max`), so the top reviewer's `max` (2026-10-11 to 2026-10-12) was not clamped; it runs at `xhigh` since 2026-10-12. pi-subagents 0.77.0 shipped the project-trust change and the built-in `parallel` workflow noted above (`PS/CHANGELOG.md:5-13`).
 
 ## Operator decisions, 2026-10-09
 
@@ -463,7 +463,7 @@ Confirmed since 2026-10-09: `amorphic/claude-opus-5-5` declares `max` in `~/.pi/
 
 Changes since the plan was written; the 2026-10-09 text above stays as history.
 
-1. **Top reviewer moved from Fable 5.1 at `xhigh` to Opus 5.5 at `max`** (steward 0.9.0, `skills/delegating/routing.md`, section "Top reviewer on Opus 5.5 max (operator decision 2026-10-11)"; evidence in `docs/evaluations/2026-10-09-model-assignment-evidence.md`). This replaces the Fable half of 2026-10-09 decision 2. The pi profile `reviewer-fable-xhigh` became `reviewer-opus-max` with no alias at that point; the operator-case plan JSON now uses `amorphic/claude-opus-5-5` at `max`, which that model declares (see Operator's case).
+1. **Top reviewer moved from Fable 5.1 at `xhigh` to Opus 5.5 at `max`** (steward 0.9.0, `skills/delegating/routing.md`, section "Top reviewer on Opus 5.5 max (operator decision 2026-10-11)"; evidence in `docs/evaluations/2026-10-09-model-assignment-evidence.md`). This replaces the Fable half of 2026-10-09 decision 2. The pi profile `reviewer-fable-xhigh` became `reviewer-opus-max` with no alias at that point; the operator-case plan JSON now uses `amorphic/claude-opus-5-5` at `max`, which that model declares (see Operator's case). (Superseded on 2026-10-12, decision 5: Opus never runs at max; the top reviewer runs at `xhigh`.)
 2. **Fable by name is a per-call override.** A request for Fable runs the top reviewer with `model: "anthropic/claude-fable-5-1:xhigh"` (the `:level` suffix sets thinking). This is the one case where the edict allows a per-call `model` besides relaunch, escalation and operator requests.
 3. **Everyday review stays on Sonnet 5.5 at `high`** (steward 0.9.1, `routing.md`, section "Reviewer stays on Sonnet 5.5 high (operator decision 2026-10-11)"). Diffs touching auth, payments, concurrency or data migrations go to deep-reasoner. The plan's `reviewer` role keeps its Sonnet default and cross-family rule.
 4. **Both old top-reviewer names stay as aliases** (today, 0.10.0): `steward.top-reviewer` lists `steward.reviewer-opus-max` and `steward.reviewer-fable-xhigh`, so a saved launch under either name resolves.
@@ -472,9 +472,10 @@ Changes since the plan was written; the 2026-10-09 text above stays as history.
 ## Operator decisions, 2026-10-12
 
 1. **Escalation can name a role.** `escalate` accepts `role:<role>`: the failed check is relaunched on that steward profile with its own model and thinking, so the target takes no `:level`. An unknown role or the role itself is a schema error. The allow/deny lists are checked against the target's effective binding too, so a role target cannot bypass them.
-2. **Operator's case plan updated** (see Operator's case): deep-reasoner gets `"escalate": null`; reviewer gets `"escalate": "role:deep-reasoner"`; top-reviewer gets `"fallback": ["anthropic/claude-opus-5-5:max"]` and `"escalate": null`, and stays on `amorphic/claude-opus-5-5` at `max`. No judgment role binds, relaunches or escalates to Flash.
+2. **Operator's case plan updated** (see Operator's case): deep-reasoner gets `"escalate": null`; reviewer gets `"escalate": "role:deep-reasoner"`; top-reviewer gets `"fallback": ["anthropic/claude-opus-5-5:max"]` and `"escalate": null`, and stays on `amorphic/claude-opus-5-5` at `max`. No judgment role binds, relaunches or escalates to Flash. (Thinking and fallback level changed to `xhigh` by decision 5.)
 3. **Untrusted projects keep their provider lists.** From an untrusted project's plan files only `allowProviders` and `denyProviders` are read, validated and size-capped; every other field stays ignored. An untrusted project's `.pi/settings.json` stays ignored, as in pi-subagents 0.77.0 (Scope section).
 4. **S5: `byMainProvider` drops the replaced model.** When a `byMainProvider` entry replaces a role's model, the replaced model is not kept as a relaunch candidate, so a relaunch never returns to the main thread's family.
+5. **Claude Opus never runs at max; the top reviewer runs Opus 5.5 at `xhigh`** (steward 0.13.0; `skills/delegating/routing.md`, section "Top reviewer on Opus 5.5 xhigh; Opus never at max (operator decision 2026-10-12)"). The operator's case plan moves top-reviewer to `"thinking": "xhigh"` with fallback `anthropic/claude-opus-5-5:xhigh`. Where max is named for Opus, by a brief, a skill or the operator, use `xhigh`. This reverses 2026-10-11 decision 1. Fable 5.1 stays unpinned, and Fable by name is unchanged.
 
 ### Release review of Phase 2, 2026-10-12
 

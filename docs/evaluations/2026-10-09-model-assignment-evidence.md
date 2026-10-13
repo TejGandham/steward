@@ -151,6 +151,8 @@ Max against xhigh for Opus 5.5: AA index 58 vs 56, cost per index task $5.98 vs 
 
 Decision: the operator moved the top reviewer to Opus 5.5 at max on 2026-10-11 (steward 0.9.0); see `skills/delegating/routing.md`, section "Top reviewer on Opus 5.5 max (operator decision 2026-10-11)".
 
+Reversal, 2026-10-12: the operator ruled that Claude Opus never runs at max; the top reviewer runs Opus 5.5 at xhigh from steward 0.13.0 (`skills/delegating/routing.md`, section "Top reviewer on Opus 5.5 xhigh; Opus never at max (operator decision 2026-10-12)"). The figures above stay as the record of the 2026-10-11 choice.
+
 ## Reviewer question, 2026-10-11
 Question: move everyday review from Sonnet 5.5 high to Opus 5.5 medium? Sources read 2026-10-11 from paired exa and parallelai searches. CodeRabbit's figures came from exa; the cost analyses and the ReviewBench pointer came from parallelai.
 

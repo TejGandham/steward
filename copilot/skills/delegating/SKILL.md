@@ -25,11 +25,12 @@ Copilot does not resolve the `opus`, `sonnet`, `haiku` and `fable` aliases, and 
 | steward:researcher | Claude Sonnet 5.5 | `low` |
 | steward:writer | Claude Sonnet 5.5 | `medium` |
 | steward:mechanic | Claude Haiku 5.5 | `medium` |
-| steward:top-reviewer | Claude Opus 5.5 | `max` |
+| steward:top-reviewer | Claude Opus 5.5 | `xhigh` |
 
 On every `task` call to a steward profile:
 - Pass `model`: the role's model from the table, copied exactly from the task tool's own list of allowed models. IDs may carry a provider prefix, for example `<provider>/claude-opus-5-5`; use the listed string as it is.
 - Pass `reasoning_effort`: the role's level from the table.
+- Claude Opus never runs at max effort; where a brief, a skill or the operator names `max` for Opus, pass `xhigh`.
 - Use steward:top-reviewer only when the operator asks for the top reviewer or when a steward:deep-reasoner pass is not enough.
 - When the operator asks for Fable by name, call steward:top-reviewer with `model` set to the Claude Fable 5.1 ID from the task tool's list and `reasoning_effort` set to the level the operator names (`xhigh` if none).
 - If Claude Haiku 5.5 is not in the list, run the mechanic on Claude Sonnet 5.5 at `low`. If a role's model is missing altogether, tell the operator and use the nearest Claude model that is listed.

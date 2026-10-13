@@ -81,7 +81,7 @@ OPERATOR_PLAN = {
             "byMainProvider": {"amorphic": {"model": SOL, "thinking": "medium"}},
         },
         "deep-reasoner": {"model": "main", "thinking": "xhigh", "fallback": [OPUS, SOL], "escalate": None},
-        "top-reviewer": {"model": OPUS, "thinking": "max", "fallback": ["anthropic/claude-opus-5-5:max"],
+        "top-reviewer": {"model": OPUS, "thinking": "xhigh", "fallback": ["anthropic/claude-opus-5-5:xhigh"],
                          "escalate": None},
     },
 }

@@ -42,9 +42,9 @@ An `update-pr-summary` command at `<config dir>/commands/update-pr-summary.md` i
 | `steward:researcher-sonnet-low` | Sonnet | low | Read-only investigation and search |
 | `steward:writer-sonnet-medium` | Sonnet | medium | Docs, PR bodies, plain-language rewrites |
 | `steward:mechanic-haiku-medium` | Haiku | medium | Single lookups, rote edits, running known commands |
-| `steward:reviewer-opus-max` | Opus | max | Highest-stakes gap review, on request or when a deep-reasoner pass is not enough |
+| `steward:reviewer-opus-max` | Opus | xhigh | Highest-stakes gap review, on request or when a deep-reasoner pass is not enough |
 
-As of 0.9.0 the pinned profiles run on three models: Haiku 5.5, Sonnet 5.5 and Opus 5.5. The top reviewer moved from Fable 5.1 at xhigh to Opus 5.5 at max, because Opus 5.5 now scores higher. Fable 5.1 runs only when you ask for it by name: the edict then calls the top reviewer with a one-off model override to Fable, at the effort you name (xhigh if you name none). The mechanic runs on Haiku 5.5 at medium effort, and pure coding runs on Opus 5.5 at medium effort. Haiku 4.5 and Opus 5 were dropped earlier. On Claude Code the profiles use the `haiku`, `sonnet` and `opus` aliases, which resolve to those three models on Claude Code 2.1.295; the Fable override uses the `fable` alias.
+As of 0.9.0 the pinned profiles run on three models: Haiku 5.5, Sonnet 5.5 and Opus 5.5. The top reviewer moved from Fable 5.1 at xhigh to Opus 5.5, because Opus 5.5 now scores higher. Since 0.13.0 it runs at xhigh: Claude Opus never runs at max, and the profile keeps the name `reviewer-opus-max` so saved briefs still work. Fable 5.1 runs only when you ask for it by name: the edict then calls the top reviewer with a one-off model override to Fable, at the effort you name (xhigh if you name none). The mechanic runs on Haiku 5.5 at medium effort, and pure coding runs on Opus 5.5 at medium effort. Haiku 4.5 and Opus 5 were dropped earlier. On Claude Code the profiles use the `haiku`, `sonnet` and `opus` aliases, which resolve to those three models on Claude Code 2.1.295; the Fable override uses the `fable` alias.
 
 Each profile sets its own effort. Claude Code 2.1.292 and later also let a single Agent call pass an `effort` that overrides the profile's. The edict passes one only when it, a skill, or you name a level.
 
@@ -133,7 +133,7 @@ Each profile ships with a default model ID and thinking level. Settings override
 | `steward.researcher` | `anthropic/claude-sonnet-5-5` | low |
 | `steward.writer` | `anthropic/claude-sonnet-5-5` | medium |
 | `steward.mechanic` | `anthropic/claude-haiku-5-5` | medium |
-| `steward.top-reviewer` | `anthropic/claude-opus-5-5` | max |
+| `steward.top-reviewer` | `anthropic/claude-opus-5-5` | xhigh |
 
 Version 0.11.0 added the model plan and 0.12.0 its `apply` command (see [Model plan on pi](#model-plan-on-pi)). Version 0.10.0 renamed the pi profiles to role-only names. The old names, such as `steward.coder-opus-medium`, still launch the same profile through pi-subagents aliases, and `steward.reviewer-fable-xhigh` launches `steward.top-reviewer`. Settings are different: pi-subagents reads config such as `subagents.agentOverrides` under the new name only, so rename any override keys you saved under an old name, or let `/steward-models apply` move them.
 
@@ -167,7 +167,7 @@ To run some profiles on other providers today, add overrides to `~/.pi/agent/set
       "steward.mechanic": { "model": "ollama-cloud/deepseek-v4.1-flash", "thinking": "low" },
       "steward.reviewer": { "model": "amorphic/claude-sonnet-5-5", "thinking": "high" },
       "steward.deep-reasoner": { "model": "inherit", "thinking": "xhigh" },
-      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "max" }
+      "steward.top-reviewer": { "model": "amorphic/claude-opus-5-5", "thinking": "xhigh" }
     },
     "agentOverridesByProvider": {
       "amorphic": {
@@ -238,7 +238,7 @@ A small plan:
     },
     "top-reviewer": {
       "model": "anthropic/claude-opus-5-5",
-      "thinking": "max",
+      "thinking": "xhigh",
       "fallback": null,
       "escalate": null
     }
@@ -354,7 +354,7 @@ The Copilot profiles carry role-only names. Each profile sets a reasoning effort
 | `steward:researcher` | Claude Sonnet 5.5 | low |
 | `steward:writer` | Claude Sonnet 5.5 | medium |
 | `steward:mechanic` | Claude Haiku 5.5 | medium |
-| `steward:top-reviewer` | Claude Opus 5.5 | max |
+| `steward:top-reviewer` | Claude Opus 5.5 | xhigh |
 
 Copilot does not resolve the `opus`, `sonnet`, `haiku`, and `fable` aliases, and model IDs differ by account and provider (for example a provider-prefixed `<provider>/claude-opus-5-5`). So the Copilot profiles set only `reasoning-effort`.
 
