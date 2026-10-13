@@ -7,7 +7,7 @@
 
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -288,11 +288,11 @@ test("child sessions do not log", async () => {
 	assert.deepEqual(listeners, {});
 });
 
-test("the log rotates to .1 above the cap", async () => {
+test("the log rotates to a stamped name above the cap", async () => {
 	const { fire } = load({ delegationLogMaxBytes: 200 });
 	await fire("session_start", { type: "session_start", reason: "startup" });
 	for (let i = 0; i < 3; i++) await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: `r${i}`, results: [syncRow()] }));
-	assert.ok(existsSync(`${logPath()}.1`));
+	assert.ok(readdirSync(join(tmp, "state", "steward")).some((n) => /^pi-delegations\.jsonl\.\d{8}T\d{9}Z-\d+$/.test(n)));
 	assert.ok(logLines().length >= 1 && logLines().length < 3);
 });
 
@@ -308,4 +308,113 @@ test("/steward-models stats prints the summary", async () => {
 	stdout.length = 0;
 	await commands["steward-models"].handler("stats --days x", ctx);
 	assert.match(stdout.join(""), /Usage/);
+});
+
+// Phase 4 review fixes.
+
+test("errorClass reads anchored transport phrases, not any number or word", () => {
+	for (const text of [
+		"429 Too Many Requests",
+		"HTTP 503 Service Unavailable",
+		"status 502: bad gateway",
+		"Error: 500 Internal Server Error",
+		"provider returned rate_limit_error",
+		"overloaded_error: Overloaded",
+		"request timed out",
+		"read ECONNRESET",
+		"fetch failed",
+	]) assert.equal(errorClass(text), "provider", text);
+	for (const text of [
+		"expected 500 items, got 499",
+		"tests failed: assert status == 500",
+		"network test suite failed",
+		"provider config file missing",
+		"forbidden word found in output",
+		"Child exited with code 1",
+	]) assert.equal(errorClass(text), "other", text);
+});
+
+test("a failed sync row is classified from its error field, never from the child's output", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: "e1", results: [syncRow({ exitCode: 1 })] }, { isError: true, text: "HTTP 503 rate limit overloaded" }));
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: "e2", results: [syncRow({ exitCode: 1, error: "429 Too Many Requests" })] }, { isError: true, text: "x" }));
+	assert.deepEqual(logLines().map((l) => [l.status, l.errorClass]), [["error", "other"], ["error", "provider"]]);
+});
+
+test("detached and interrupted rows are not logged; the later completion is logged once with launch-time kind", async () => {
+	writePlan();
+	const { fire, emit } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	const strings = launchStrings();
+	const input = { agent: "steward.mechanic", task: SECRET, model: strings.relaunch };
+	await fire("tool_result", result(input, { mode: "single", runId: "D1", results: [syncRow({ exitCode: -2, detached: true, detachedReason: "user request" })] }, { text: "Detached at user request: steward.mechanic." }));
+	await fire("tool_result", result(input, { mode: "single", runId: "I1", results: [syncRow({ interrupted: true })] }, { text: "Run paused after interrupt (steward.mechanic)." }));
+	await fire("tool_result", result(input, { mode: "single", runId: "S1", results: [syncRow({ exitCode: 1, stopped: true })] }, { text: "stopped" }));
+	assert.equal(logLines().length, 0);
+	emit("subagent:async-complete", { id: "D1", runId: "D1", agent: "steward.mechanic", mode: "single", success: true, results: [{ agent: "steward.mechanic", success: true, model: "anthropic/claude-haiku-5-5:low" }] });
+	emit("subagent:async-complete", { id: "D1", runId: "D1", agent: "steward.mechanic", mode: "single", success: true, results: [{ agent: "steward.mechanic", success: true }] });
+	const lines = logLines();
+	assert.equal(lines.length, 1);
+	assert.deepEqual([lines[0].runId, lines[0].status, lines[0].mode, lines[0].kind, lines[0].modelParam], ["D1", "ok", "async", "relaunch", strings.relaunch]);
+	// a stopped row with an error is a real outcome and is logged
+	await fire("tool_result", result(input, { mode: "single", runId: "S2", results: [syncRow({ exitCode: 1, stopped: true, error: "Subagent stopped by user." })] }, { isError: true }));
+	assert.equal(logLines().length, 2);
+});
+
+test("async kind is decided at launch, not at completion", async () => {
+	writePlan();
+	const { fire, emit } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	const strings = launchStrings();
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, async: true, model: strings.escalation }, { mode: "single", runId: "K1", asyncId: "K1", results: [] }));
+	// the plan changes before the run finishes
+	writeFileSync(join(tmp, "config", "steward", "model-plan.json"), JSON.stringify({ version: 1, roles: { mechanic: { model: "anthropic/claude-haiku-5-5", thinking: "low" } } }));
+	await fire("session_start", { type: "session_start", reason: "reload" });
+	emit("subagent:async-complete", { id: "K1", runId: "K1", agent: "steward.mechanic", mode: "single", success: true, results: [{ agent: "steward.mechanic", success: true }] });
+	assert.equal(logLines()[0].kind, "escalation");
+});
+
+test("top-level tasks and chain launches are logged", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ tasks: [{ agent: "steward.mechanic", task: SECRET }, { agent: "steward.mechanic", task: SECRET, model: "other/model" }] },
+		{ mode: "parallel", runId: "P1", results: [syncRow({ index: 0 }), syncRow({ index: 1 })] }));
+	await fire("tool_result", result({ chain: [{ agent: "steward.mechanic", task: SECRET, model: "other/model" }] },
+		{ mode: "chain", runId: "C1", results: [syncRow({ index: 0 })] }));
+	assert.deepEqual(logLines().map((l) => [l.runId, l.kind]), [["P1", "plain"], ["P1", "operator"], ["C1", "operator"]]);
+});
+
+test("the log directory is 0700 and the file 0600, tightened when looser", async () => {
+	const dir = join(tmp, "state", "steward");
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: "m1", results: [syncRow()] }));
+	assert.equal(statSync(dir).mode & 0o777, 0o700);
+	assert.equal(statSync(logPath()).mode & 0o777, 0o600);
+	chmodSync(dir, 0o755);
+	chmodSync(logPath(), 0o644);
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: "m2", results: [syncRow()] }));
+	assert.equal(statSync(dir).mode & 0o777, 0o700);
+	assert.equal(statSync(logPath()).mode & 0o777, 0o600);
+});
+
+test("a rejected launch caps and cleans the agent name and model param", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ agent: `steward.x\n"${"y".repeat(300)}`, task: SECRET, model: `bad model\u0000${"z".repeat(300)}` }, {}, { isError: true, text: "Unknown agent" }));
+	const [line] = logLines();
+	assert.ok(line.agent.length <= 100 && /^[\w.:/@+-]+$/.test(line.agent), line.agent);
+	assert.ok(line.modelParam.length <= 100 && /^[\w.:/@+-]+$/.test(line.modelParam), line.modelParam);
+	assert.ok(line.agent.startsWith("steward.x_"));
+});
+
+test("rotation never overwrites an earlier rotated file", async () => {
+	const { fire } = load({ delegationLogMaxBytes: 200 });
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	for (let i = 0; i < 6; i++) await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: `q${i}`, results: [syncRow()] }));
+	const dir = join(tmp, "state", "steward");
+	const rotated = readdirSync(dir).filter((n) => n.startsWith("pi-delegations.jsonl."));
+	assert.ok(rotated.length >= 1 && rotated.length <= 2, rotated.join(","));
+	for (const n of rotated) assert.equal(statSync(join(dir, n)).mode & 0o777, 0o600);
 });

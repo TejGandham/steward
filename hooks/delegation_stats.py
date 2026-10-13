@@ -15,6 +15,9 @@ The pi extension appends one JSON line per finished steward.* child launch to
 a JSON object, has no parseable ``ts`` or no ``agent`` is corrupt: skipped and
 counted. The log holds no task text, outputs or file contents, so neither does
 the report.
+
+Only the live file is read; rotated files (``pi-delegations.jsonl.<stamp>-<pid>``)
+are not.
 """
 
 import json

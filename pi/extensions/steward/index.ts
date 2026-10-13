@@ -33,7 +33,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, renameSync, statSync, writeSync } from "node:fs";
+import { appendFileSync, chmodSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -151,7 +151,9 @@ export function runHook(
 
 /**
  * True when a `subagent` call starts work, so it counts as a delegation: a direct child
- * (`agent`), a workflow, or `action: "resume"` of a retained child. Other management calls
+ * (`agent`), top-level parallel `tasks` or a `chain` (pi-subagents 0.77.0
+ * `src/extension/schemas.js:278-280`), a workflow, or `action: "resume"` of a retained child.
+ * Other management calls
  * (`action: "list"`, `"status"`, `"guide"`, ...) and the `subagents_enable` loader do not.
  */
 export function launchesWork(input: unknown): boolean {
@@ -159,7 +161,8 @@ export function launchesWork(input: unknown): boolean {
 	const args = input as Record<string, unknown>;
 	if (args.action === "resume") return true;
 	if (args.action !== undefined) return false;
-	return Boolean(args.agent) || Boolean(args.workflow);
+	const nonEmpty = (v: unknown) => Array.isArray(v) && v.length > 0;
+	return Boolean(args.agent) || Boolean(args.workflow) || nonEmpty(args.tasks) || nonEmpty(args.chain);
 }
 
 /** Text of the most recent assistant message, or undefined when it has none. */
@@ -278,7 +281,7 @@ const SUBAGENT_NOT_ACTIVE_WARNING =
 	"/reload, or starting a new session, makes it available. Restarting pi and resuming this " +
 	"conversation does not, because pi restores the conversation's recorded tools on resume.";
 
-/** Rotate the outcome log to `<file>.1` when it grows past this size. */
+/** Rotate the outcome log to `<file>.<stamp>-<pid>` when it grows past this size. */
 export const DELEGATION_LOG_MAX_BYTES = 5 * 1024 * 1024;
 const DELEGATION_LOG_NAME = "pi-delegations.jsonl";
 /** pi-subagents 0.77.0 events (`PS/src/shared/types.js:11,15`). */
@@ -309,12 +312,35 @@ export function classifyKind(agent: string, modelParam: string | undefined, stri
 	return "operator";
 }
 
-const PROVIDER_ERROR =
-	/\b(?:408|429|5\d\d)\b|rate.?limit|too many requests|overloaded|quota|provider|api error|upstream|unauthori[sz]ed|forbidden|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|network|service unavailable|bad gateway|first token|stream (?:error|ended)/i;
+/** An HTTP status in an error line: at the start, or after "HTTP", "status", "code" or "error". */
+const PROVIDER_STATUS = /(?:^|\n)\s*(?:(?:error|http|status(?: code)?|code)\s*[:=]?\s*)?(?:408|429|5\d\d)\b(?!\s*(?:items?|tests?|lines?|ms|bytes)\b)/i;
+/** Transport and provider phrases as SDKs and pi-ai word them. */
+const PROVIDER_PHRASE =
+	/rate[ _-]?limit|too many requests|overloaded|insufficient_quota|quota exceeded|timed out|\btimeout\b|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed|service unavailable|bad gateway|gateway timeout|internal server error|api error|unauthori[sz]ed|invalid api key|stream (?:error|ended)|first token/i;
 
-/** "provider" when an error text reads as a provider or transport failure, else "other". */
+/**
+ * "provider" when an error text reads as a provider or transport failure, else "other". Callers
+ * pass pi-subagents' structured `error` field only, never the child's output.
+ */
 export function errorClass(text: unknown): "provider" | "other" {
-	return typeof text === "string" && PROVIDER_ERROR.test(text) ? "provider" : "other";
+	return typeof text === "string" && (PROVIDER_STATUS.test(text) || PROVIDER_PHRASE.test(text)) ? "provider" : "other";
+}
+
+/** Model-supplied strings in the log: at most 100 characters of `[\w.:/@+-]`. */
+export function cleanLogField(value: string): string {
+	return value.slice(0, 100).replace(/[^\w.:/@+-]/g, "_");
+}
+
+/** Keep this many rotated log files; older ones are removed. */
+const ROTATED_KEEP = 2;
+
+/** Tightens a path to `mode` when its group or other bits are set. */
+function tighten(path: string, mode: number): void {
+	try {
+		if ((statSync(path).mode & 0o077) !== 0) chmodSync(path, mode);
+	} catch {
+		// missing or not ours: leave it
+	}
 }
 
 /** Splits "provider/id:level" into model and thinking; a non-level suffix stays in the model. */
@@ -335,13 +361,30 @@ function finiteMs(...values: unknown[]): number | null {
 function appendDelegationLine(entry: Record<string, unknown>, maxBytes: number): void {
 	try {
 		const path = delegationLogPath();
-		mkdirSync(dirname(path), { recursive: true });
+		const dir = dirname(path);
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		tighten(dir, 0o700);
 		try {
-			if (statSync(path).size >= maxBytes) renameSync(path, `${path}.1`);
+			if (statSync(path).size >= maxBytes) {
+				// A unique name per rotation, so two sessions rotating at once never overwrite
+				// each other's file; the loser only moves a fresh, small file aside.
+				const stamp = new Date().toISOString().replace(/[-:.]/g, "");
+				renameSync(path, `${path}.${stamp}-${process.pid}`);
+				const base = `${DELEGATION_LOG_NAME}.`;
+				const rotated = readdirSync(dir).filter((n) => n.startsWith(base)).sort();
+				for (const old of rotated.slice(0, Math.max(0, rotated.length - ROTATED_KEEP))) {
+					try {
+						unlinkSync(resolve(dir, old));
+					} catch {
+						// another session removed it
+					}
+				}
+			}
 		} catch {
 			// no file yet
 		}
-		appendFileSync(path, `${JSON.stringify(entry)}\n`);
+		appendFileSync(path, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+		tighten(path, 0o600);
 	} catch {
 		// fail open: the log never affects the session
 	}
@@ -697,7 +740,9 @@ function register(
 	// workflow's children finish inside the workflow's completion. Never logs task text,
 	// outputs or file contents; every step fails open.
 	let session: { id?: string; cwd?: string } = {};
-	const asyncLaunches = new Map<string, { modelParam?: string; at: number }>();
+	// Launch-time record of an async or detached run: its kind uses the relaunch and escalation
+	// strings current at launch. In memory only, so a completion after /reload logs as plain.
+	const asyncLaunches = new Map<string, { modelParam?: string; kind: string; at: number }>();
 	const started = new Map<string, number>();
 	const ended = new Map<string, number>();
 	const logged = new Set<string>();
@@ -730,7 +775,7 @@ function register(
 		errorText?: unknown;
 		durationMs: number | null;
 		mode: "sync" | "async" | "workflow-child";
-		kindKnown?: boolean;
+		kind?: string;
 	}): void {
 		if (typeof fields.agent !== "string" || !fields.agent.startsWith(STEWARD_PREFIX)) return;
 		if (logged.has(fields.key)) return;
@@ -742,9 +787,9 @@ function register(
 				ts: new Date().toISOString(),
 				sessionId: session.id ?? null,
 				cwd: session.cwd ?? null,
-				agent: fields.agent,
-				runId: typeof fields.runId === "string" ? fields.runId : null,
-				modelParam: fields.modelParam ?? null,
+				agent: cleanLogField(fields.agent),
+				runId: typeof fields.runId === "string" ? cleanLogField(fields.runId) : null,
+				modelParam: fields.modelParam !== undefined ? cleanLogField(fields.modelParam) : null,
 				model: resolved.model,
 				thinking: resolved.thinking,
 				status: fields.ok ? "ok" : "error",
@@ -752,7 +797,7 @@ function register(
 				errorClass: fields.ok ? null : errorClass(fields.errorText),
 				durationMs: fields.durationMs,
 				mode: fields.mode,
-				kind: classifyKind(fields.agent, fields.modelParam, launchStrings),
+				kind: fields.kind ?? classifyKind(fields.agent, fields.modelParam, launchStrings),
 			},
 			logMaxBytes,
 		);
@@ -770,17 +815,30 @@ function register(
 			const details = (event.details && typeof event.details === "object" ? event.details : {}) as Record<string, any>;
 			const modelParam = typeof input.model === "string" && input.model ? input.model : undefined;
 			const asyncId = typeof details.asyncId === "string" ? details.asyncId : undefined;
+			const agentOf = (a: unknown) => (typeof a === "string" ? a : "");
 			if (asyncId && !event.isError) {
-				remember(asyncLaunches, asyncId, { modelParam, at: Date.now() });
+				remember(asyncLaunches, asyncId, { modelParam, kind: classifyKind(agentOf(input.agent), modelParam, launchStrings), at: Date.now() });
 				return;
 			}
+			const steps = Array.isArray(input.tasks) ? input.tasks : Array.isArray(input.chain) ? input.chain : undefined;
 			const rows = Array.isArray(details.results) ? details.results : [];
 			if (rows.length > 0) {
 				rows.forEach((row: Record<string, any>, i: number) => {
 					if (!row || typeof row !== "object") return;
 					const index = Number.isInteger(row.index) ? row.index : i;
-					const task = Array.isArray(input.tasks) ? input.tasks[index] : undefined;
+					const task = steps ? steps[index] : undefined;
 					const param = typeof task?.model === "string" && task.model ? task.model : modelParam;
+					// Not finished: a detached child keeps running and an interrupted one waits for
+					// the next action (pi-subagents 0.77.0 src/runs/foreground/execution.js:503,1407,
+					// subagent-executor.js:3951-3968); a stop without an error is the same. The real
+					// outcome arrives later under the same run id, so keep the launch-time record.
+					if (row.detached || row.interrupted || (row.stopped && !row.error)) {
+						const runId = typeof details.runId === "string" ? details.runId : undefined;
+						if (runId && !asyncLaunches.has(runId)) {
+							remember(asyncLaunches, runId, { modelParam: param, kind: classifyKind(agentOf(row.agent), param, launchStrings), at: Date.now() });
+						}
+						return;
+					}
 					const ok = row.exitCode === 0 && !row.error && event.isError !== true;
 					writeLaunch({
 						key: `${details.runId ?? event.toolCallId}:${index}`,
@@ -790,7 +848,7 @@ function register(
 						model: row.model,
 						thinking: row.thinking,
 						ok,
-						errorText: row.error ?? (ok ? undefined : textOf(event.content)),
+						errorText: row.error,
 						durationMs: finiteMs(row.progressSummary?.durationMs, row.durationMs),
 						mode: "sync",
 					});
@@ -804,6 +862,7 @@ function register(
 					agent: input.agent,
 					modelParam,
 					ok: false,
+					// pi-subagents' own rejection text: no child ran, so there is no child output.
 					errorText: textOf(event.content),
 					durationMs: null,
 					mode: input.async === true ? "async" : "sync",
@@ -870,6 +929,7 @@ function register(
 					agent: row.agent ?? d.agent,
 					runId: id,
 					modelParam: launch?.modelParam,
+					kind: launch?.kind,
 					model: row.model,
 					thinking: row.thinking,
 					ok,
