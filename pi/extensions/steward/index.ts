@@ -373,18 +373,61 @@ export interface StewardOptions {
 /**
  * pi 1.1.0 takes over process.stdout in every non-interactive mode (main.js calls
  * takeOverStdout, which sends process.stdout.write to stderr), so print-mode output goes
- * straight to fd 1. A non-blocking pipe can refuse a write; retry briefly, then give up.
+ * straight to fd 1. A non-blocking pipe can refuse a write; retry with a short blocking
+ * sleep, then give up and say so on stderr.
  */
 function defaultWriteStdout(text: string): void {
+	writeAllSync(text);
+}
+
+export interface WriteAllDeps {
+	/** Writes buf[off, off+len) and returns the bytes written; throws like fs.writeSync. */
+	write?: (buf: Buffer, off: number, len: number) => number;
+	/** Blocks for ms milliseconds. */
+	sleep?: (ms: number) => void;
+	/** Receives the one-line give-up notice. */
+	notice?: (text: string) => void;
+	/** Refused writes (EAGAIN) tolerated before giving up. */
+	maxTries?: number;
+}
+
+const WRITE_RETRY_SLEEP_MS = 5;
+const WRITE_MAX_TRIES = 400; // about 2 s of refusals in all
+
+function blockingSleep(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+export function writeAllSync(text: string, deps: WriteAllDeps = {}): void {
+	const write = deps.write ?? ((buf: Buffer, off: number, len: number) => writeSync(1, buf, off, len));
+	const sleep = deps.sleep ?? blockingSleep;
+	const notice =
+		deps.notice ??
+		((t: string) => {
+			try {
+				writeSync(2, t);
+			} catch {
+				// Nowhere left to report it.
+			}
+		});
+	const maxTries = deps.maxTries ?? WRITE_MAX_TRIES;
 	const buf = Buffer.from(text, "utf8");
 	let off = 0;
 	let tries = 0;
 	while (off < buf.length) {
 		try {
-			off += writeSync(1, buf, off, buf.length - off);
+			off += write(buf, off, buf.length - off);
 		} catch (err) {
 			const code = (err as NodeJS.ErrnoException)?.code;
-			if ((code !== "EAGAIN" && code !== "EWOULDBLOCK") || ++tries > 1000) return;
+			const retry = code === "EAGAIN" || code === "EWOULDBLOCK";
+			if (retry && tries < maxTries) {
+				tries++;
+				sleep(WRITE_RETRY_SLEEP_MS);
+				continue;
+			}
+			const why = retry ? `stdout refused writes ${tries} times` : `stdout write failed (${code ?? "error"})`;
+			notice(`steward: ${why}; ${buf.length - off} of ${buf.length} bytes of the report were not written.\n`);
+			return;
 		}
 	}
 }

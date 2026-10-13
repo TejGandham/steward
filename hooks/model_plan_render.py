@@ -372,18 +372,31 @@ def _source(value):
     return _text(value, mp.MAX_SOURCE_CHARS) if value else "built-in default"
 
 
+def _finding_line(f):
+    who = ", ".join(x for x in (("steward." + f["role"]) if f["role"] and f["role"] != "main" else f["role"],
+                                f["subject"]) if x)
+    line = "- %s %s%s: %s" % (f["severity"], f["code"], " (%s)" % who if who else "", f["message"])
+    if f["source"]:
+        line += " Source: %s" % f["source"]
+    return line
+
+
 def render_report(result):
     """The full check report for /steward-models check."""
     lines = [render_block(result, capped=False), "", "## Findings"]
     if not result["findings"]:
         lines.append("None.")
     for f in result["findings"]:
-        who = ", ".join(x for x in (("steward." + f["role"]) if f["role"] and f["role"] != "main" else f["role"],
-                                    f["subject"]) if x)
-        line = "- %s %s%s: %s" % (f["severity"], f["code"], " (%s)" % who if who else "", f["message"])
-        if f["source"]:
-            line += " Source: %s" % f["source"]
+        line = _finding_line(f)
         lines.append(_text(line, mp.MAX_MESSAGE_CHARS + mp.MAX_SOURCE_CHARS + 200))
+    lines += ["", "## Plan binding",
+              "Warnings for plan bindings that do not launch yet, because another binding wins; "
+              "they apply once the plan binding launches (after /steward-models apply)."]
+    plan_warnings = result.get("planWarnings") or []
+    if not plan_warnings:
+        lines.append("None.")
+    for f in plan_warnings:
+        lines.append(_text(_finding_line(f), mp.MAX_MESSAGE_CHARS + mp.MAX_SOURCE_CHARS + 200))
     lines += ["", "## Where each binding comes from"]
     for role in mp.ROLES:
         row = (result.get("roles") or {}).get(role)

@@ -807,8 +807,12 @@ def apply(facts, env=None, dry_run=True, expect=None, now=None, before_write=Non
         "settingsChanged": settings_changed, "profileChanged": profile_changed,
         "planFile": plan_path, "settingsFile": settings_path, "profileFile": profile_path,
         "changes": changes, "findings": findings.items, "backups": [], "hashes": hashes,
-        "newSettings": new_settings, "partial": False,
+        "newSettings": new_settings, "partial": False, "planWarnings": [],
     }
+    if dry_run:
+        # Per-model warnings for plan bindings that do not launch yet: the
+        # session block leaves them out, so the preview shows them.
+        result["planWarnings"] = mp.evaluate(facts, env=env).get("planWarnings") or []
     if dry_run or not result["changed"]:
         result["report"] = render(result)
         return result
@@ -894,4 +898,8 @@ def render(result):
     if shown or notes:
         lines += ["", "Findings:"]
         lines += ["- %s %s: %s" % (f["severity"], f["code"], f["message"]) for f in shown + notes]
+    if result.get("planWarnings"):
+        lines += ["", "Plan binding warnings:"]
+        lines += ["- %s %s (steward.%s): %s" % (f["severity"], f["code"], f["role"], f["message"])
+                  for f in result["planWarnings"]]
     return "\n".join(lines)

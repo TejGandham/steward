@@ -69,7 +69,13 @@ Output
       "listsActive": bool, "listsFailClosed": [path, ...],
       "concurrency": {"parallel": int, "global": int, "source": path|None},
       "findings": [{"severity": "error"|"warn"|"info", "code", "role",
-                    "message", "source", "subject"}] }
+                    "message", "source", "subject"}],
+      "planWarnings": [same shape as findings] }
+
+``planWarnings`` holds the per-model warnings (``thinking-clamped``,
+``max-tokens-low``, ``below-judgment-floor``) for a plan binding that does
+not launch because a different effective binding does. The session block
+leaves them out; the ``apply`` preview and the full check report list them.
 
 ``plan.setting`` is what Phase 3 ``apply`` would write as the model
 (``"inherit"`` for ``main``). ``plan.source`` and ``effective.modelSource``
@@ -787,7 +793,7 @@ def _empty_result(findings):
             "listsActive": False, "listsFailClosed": [],
             "concurrency": {"parallel": DEFAULT_PARALLEL_CONCURRENCY, "global": DEFAULT_GLOBAL_CONCURRENCY,
                             "source": None},
-            "findings": findings}
+            "findings": findings, "planWarnings": []}
 
 
 # ---------------------------------------------------------------- plan schema
@@ -2021,6 +2027,8 @@ def _evaluate(facts, env, agent_dir, agents_dir):
 
     # ---- per-role checks
     model_drift = {}
+    plan_warnings = _Findings()
+    plan_warning = plan_warnings.add
     for role, row in roles.items():
         plan, eff = row["plan"], row["effective"]
         settings_files = {p for p in (user_found, project_found) if p}
@@ -2055,33 +2063,40 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         for label, model, thinking, explicit, source in subjects:
             entry = ctx.catalog.get(model)
             # Per-model warnings (clamp, maxTokens, judgment floor) follow the
-            # binding a launch gets: a plan binding is checked only when no
-            # effective binding is known, since binding-drift reports any
-            # mismatch and apply makes the plan binding the launch. Scope keeps
-            # the narrower rule: a plan binding overridden in settings is skipped.
+            # binding a launch gets. A plan binding that does not launch (an
+            # effective binding is known and differs) gets them in planWarnings,
+            # which the apply preview and the full check report show and the
+            # session block does not; binding-drift reports the mismatch. Scope
+            # keeps the narrower rule: a plan binding overridden in settings is skipped.
             warn_ok = not (label == "plan binding" and overridden)
-            model_ok = not (label == "plan binding" and eff["model"])
-            if model_ok and entry and entry["thinkingLevels"] is not None and thinking in THINKING_LEVELS:
+            launches = not (label == "plan binding" and eff["model"])
+            if not launches and not (model_differs or thinking_differs):
+                per_model = None  # the effective binding row carries the same warnings
+            elif launches:
+                per_model = findings.add
+            else:
+                per_model = plan_warning
+            if per_model and entry and entry["thinkingLevels"] is not None and thinking in THINKING_LEVELS:
                 level = clamp_thinking(thinking, entry["thinkingLevels"])
                 if level != thinking:
-                    findings.add("warn", "thinking-clamped", role,
-                                 "%s at %s is clamped to %s: the model does not declare %s. A declared level is not "
-                                 "proof the provider honors it." % (model, thinking, level, thinking), source, label)
-            if model_ok and role in LARGE_OUTPUT_ROLES and not explicit and entry and entry["maxTokens"] is not None \
+                    per_model("warn", "thinking-clamped", role,
+                              "%s at %s is clamped to %s: the model does not declare %s. A declared level is not "
+                              "proof the provider honors it." % (model, thinking, level, thinking), source, label)
+            if per_model and role in LARGE_OUTPUT_ROLES and not explicit and entry and entry["maxTokens"] is not None \
                     and entry["maxTokens"] < MIN_OUTPUT_TOKENS:
-                findings.add("warn", "max-tokens-low", role,
-                             "%s allows only %d output tokens; large %s output can be truncated (below 32K)."
-                             % (model, entry["maxTokens"], role), source, label)
+                per_model("warn", "max-tokens-low", role,
+                          "%s allows only %d output tokens; large %s output can be truncated (below 32K)."
+                          % (model, entry["maxTokens"], role), source, label)
             if max_thinking in THINKING_LEVELS and thinking in THINKING_LEVELS \
                     and THINKING_LEVELS.index(thinking) > THINKING_LEVELS.index(max_thinking):
                 findings.add("error", "thinking-above-max", role,
                              "The %s %s asks for %s, above subagents.maxThinking %s; the launch fails before start."
                              % (label, model, thinking, max_thinking), max_src, label)
             _check_scope(ctx, role, label, model, explicit, scope, scope_src, warn_ok)
-            if model_ok and role in JUDGMENT_ROLES and ctx.judgment is not None and not ctx.judgment_grade(model):
-                findings.add("warn", "below-judgment-floor", role,
-                             "The %s %s for %s is outside judgmentModels." % (label, model, role),
-                             ctx.merged["judgmentSource"], label)
+            if per_model and role in JUDGMENT_ROLES and ctx.judgment is not None and not ctx.judgment_grade(model):
+                per_model("warn", "below-judgment-floor", role,
+                          "The %s %s for %s is outside judgmentModels." % (label, model, role),
+                          ctx.merged["judgmentSource"], label)
 
         if ctx.lists_active:
             _check_binding_policy(ctx, role, "effective binding", eff["inheritsMain"], eff["requested"],
@@ -2108,7 +2123,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                         project_root, ".pi", "settings.json")
                 else:
                     # The user plan: apply writes it into user settings.
-                    hint = "run /steward-models apply"
+                    hint = "run /steward-models apply; its preview lists warnings for the plan binding"
                 plan_model = plan["setting"] or plan["model"]
                 if not plan_model:
                     wanted = "thinking %s" % plan["thinking"]
@@ -2144,9 +2159,11 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                          "The reviewer and the coder are both %s models; cross-family review is lost." % rev,
                          rev_src)
         rplan = roles["reviewer"]["plan"]
-        if rplan and rplan["byMainProvider"] and ctx.main and rev and rev == ctx.family(ctx.main):
+        # A plan-level check: byMainProvider chose the plan binding, so compare its family.
+        pfam = rplan["family"] if rplan else None
+        if rplan and rplan["byMainProvider"] and ctx.main and pfam and pfam == ctx.family(ctx.main):
             findings.add("warn", "reviewer-main-family", "reviewer",
-                         "byMainProvider.%s puts the reviewer on the main thread's family (%s)." % (rplan["byMainProvider"], rev),
+                         "byMainProvider.%s puts the reviewer on the main thread's family (%s)." % (rplan["byMainProvider"], pfam),
                          rplan["source"])
 
     concurrency = _read_concurrency(agent_dir)
@@ -2233,6 +2250,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         "listsFailClosed": sorted({path for path, _ in ctx.closed}),
         "concurrency": concurrency,
         "findings": findings.items,
+        "planWarnings": plan_warnings.items,
     }
 
 
