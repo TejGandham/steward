@@ -24,7 +24,7 @@ from pathlib import Path
 
 from test_pi_model_plan import mp
 
-PI_SUBAGENTS_MIRRORED = "0.77.0"
+PI_SUBAGENTS_MIRRORED = "0.78.0"
 HELPER = Path(__file__).resolve().parent / "pi" / "resolve_model.mjs"
 
 # The mirrors that are not differential-tested here; re-read them on a version change.

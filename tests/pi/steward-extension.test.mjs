@@ -267,6 +267,46 @@ test("runs that skip before_agent_start get the edict in their messages", async 
 	assert.equal((await fire("context", { type: "context", messages })).messages.length, 2);
 });
 
+// pi 1.2.0 (dist/core/extensions/types.d.ts: BeforeAgentStartEvent = BeforeAgentStartUserEvent |
+// BeforeAgentStartCustomEvent) also fires before_agent_start for an idle
+// sendMessage({ triggerTurn: true }) run, with messageType "custom", a `message` and no `prompt`.
+function customRunEvent() {
+	const { prompt, ...rest } = promptEvent();
+	return { ...rest, messageType: "custom", message: { role: "custom", customType: "subagent-done", content: "child finished", display: true } };
+}
+
+test("pi 1.2.0 user run: the edict section is injected as before", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	const event = { ...promptEvent(), messageType: "user" };
+	assert.equal(await fire("before_agent_start", event), undefined);
+	assert.match(event.systemPromptOptions.sections.steward, /steward\.coder(?![\w-])/);
+	assert.equal(await fire("context", { type: "context", messages: [] }), undefined);
+});
+
+test("pi 1.2.0 triggerTurn run: the edict goes in the system prompt once, not also in the messages", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	const user = { ...promptEvent(), messageType: "user" };
+	await fire("before_agent_start", user);
+	await fire("agent_settled", { type: "agent_settled" });
+
+	const event = customRunEvent();
+	assert.equal(await fire("before_agent_start", event), undefined);
+	// the same section text as a user run, so the system prompt (and its cache) is unchanged
+	assert.equal(event.systemPromptOptions.sections.steward, user.systemPromptOptions.sections.steward);
+	assert.deepEqual(Object.keys(event.systemPromptOptions.sections), ["steward"]);
+	const messages = [event.message];
+	assert.equal(await fire("context", { type: "context", messages }), undefined);
+	assert.equal(await fire("context", { type: "context", messages }), undefined);
+
+	// a forced prompt on a custom run gets the section appended once
+	await fire("agent_settled", { type: "agent_settled" });
+	const forced = { ...customRunEvent(), systemPrompt: "forced", systemPromptOptions: { sections: {}, forceSystemPrompt: "forced" } };
+	const result = await fire("before_agent_start", forced);
+	assert.equal(result.systemPrompt.match(/<steward>/g).length, 1);
+});
+
 test("read-only bash and allowlisted paths pass", async () => {
 	const { fire } = load();
 	for (let i = 0; i < 3; i++) {

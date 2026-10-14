@@ -687,6 +687,11 @@ function register(
 		void rebuild(ctx);
 	});
 
+	// pi 1.2.0 also fires this for an idle sendMessage({ triggerTurn: true }) run
+	// (BeforeAgentStartEvent is a union on messageType: "user" | "custom"). Both kinds get the
+	// same section, so the system prompt and its prompt cache match a user run, and the run is
+	// marked as carrying the edict, so the context handler below adds no second copy. The handler
+	// reads neither `prompt` nor `message`.
 	pi.on("before_agent_start", async (event, ctx) => {
 		try {
 			// Share a running load. With none running, keep the last good edict even when the newest
@@ -712,8 +717,8 @@ function register(
 		return undefined;
 	});
 
-	// A run that pi starts without a user prompt (for example a pi-subagents background-completion
-	// notice) skips before_agent_start and uses the base system prompt, which has no edict. For
+	// A run that pi starts without before_agent_start (on pi 1.1.0, a sendMessage triggerTurn run
+	// such as a background-completion notice) uses the base system prompt, which has no edict. For
 	// those runs, add the edict to the end of each request's messages. Request-local: nothing is
 	// stored in the session.
 	pi.on("context", async (event) => {
