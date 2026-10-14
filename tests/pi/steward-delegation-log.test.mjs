@@ -418,3 +418,190 @@ test("rotation never overwrites an earlier rotated file", async () => {
 	assert.ok(rotated.length >= 1 && rotated.length <= 2, rotated.join(","));
 	for (const n of rotated) assert.equal(statSync(join(dir, n)).mode & 0o777, 0o600);
 });
+
+// 0.14.2: `cwd` is where the child ran, `sessionCwd` where the session ran; line schema v2.
+// pi-subagents 0.78.0 reports the run directory as `cwd` on `subagent:async-started`
+// (src/runs/background/async-execution.js:1520,2105; workflows src/runs/foreground/
+// subagent-executor.js:5219) and in the async result file the completion spreads
+// (src/runs/background/subagent-runner.js:4783, src/runs/foreground/subagent-executor.js:5830).
+// Sync results and workflow child records carry no cwd, so those fall back to the launch input.
+
+test("a sync launch without a cwd logs the session directory as both fields, v2", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: "cw1", results: [syncRow()] }));
+	const [line] = logLines();
+	assert.equal(line.v, 2);
+	assert.equal(line.cwd, join(tmp, "project"));
+	assert.equal(line.sessionCwd, join(tmp, "project"));
+});
+
+test("a sync launch with an absolute or relative cwd logs the launch directory", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, cwd: "/tmp" }, { mode: "single", runId: "cw2", results: [syncRow()] }));
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, cwd: "sub/dir" }, { mode: "single", runId: "cw3", results: [syncRow()] }));
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, cwd: "../other" }, { mode: "single", runId: "cw4", results: [syncRow()] }));
+	assert.deepEqual(logLines().map((l) => [l.cwd, l.sessionCwd]), [
+		["/tmp", join(tmp, "project")],
+		[join(tmp, "project", "sub", "dir"), join(tmp, "project")],
+		[join(tmp, "other"), join(tmp, "project")],
+	]);
+});
+
+test("per-item cwd in tasks and chain resolves against the top-level cwd", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result(
+		{ cwd: "/srv", tasks: [{ agent: "steward.mechanic", task: SECRET, cwd: "a" }, { agent: "steward.mechanic", task: SECRET }, { agent: "steward.mechanic", task: SECRET, cwd: "/opt/x" }] },
+		{ mode: "parallel", runId: "cw5", results: [syncRow({ index: 0 }), syncRow({ index: 1 }), syncRow({ index: 2 })] }));
+	await fire("tool_result", result(
+		{ chain: [{ agent: "steward.mechanic", task: SECRET, cwd: "c" }] },
+		{ mode: "chain", runId: "cw6", results: [syncRow({ index: 0 })] }));
+	assert.deepEqual(logLines().map((l) => l.cwd), ["/srv/a", "/srv", "/opt/x", join(tmp, "project", "c")]);
+});
+
+test("an async launch takes the cwd pi-subagents reports, else the launch input", async () => {
+	const { fire, emit } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	// reported on async-started
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, async: true, cwd: "/tmp" }, { mode: "single", runId: "B1", asyncId: "B1", results: [] }));
+	emit("subagent:async-started", { id: "B1", agent: "steward.mechanic", mode: "single", cwd: "/tmp/real" });
+	emit("subagent:async-complete", { id: "B1", runId: "B1", agent: "steward.mechanic", mode: "single", success: true, results: [{ agent: "steward.mechanic", success: true }] });
+	// reported only on the completion payload
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, async: true }, { mode: "single", runId: "B2", asyncId: "B2", results: [] }));
+	emit("subagent:async-complete", { id: "B2", runId: "B2", agent: "steward.mechanic", mode: "single", success: true, cwd: "/var/tmp", results: [{ agent: "steward.mechanic", success: true }] });
+	// not reported: relative launch cwd against the session
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, async: true, cwd: "rel" }, { mode: "single", runId: "B3", asyncId: "B3", results: [] }));
+	emit("subagent:async-complete", { id: "B3", runId: "B3", agent: "steward.mechanic", mode: "single", success: true, results: [{ agent: "steward.mechanic", success: true }] });
+	// not reported and no launch cwd
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, async: true }, { mode: "single", runId: "B4", asyncId: "B4", results: [] }));
+	emit("subagent:async-complete", { id: "B4", runId: "B4", agent: "steward.mechanic", mode: "single", success: true, results: [{ agent: "steward.mechanic", success: true }] });
+	const lines = logLines();
+	assert.deepEqual(lines.map((l) => [l.mode, l.v, l.cwd, l.sessionCwd]), [
+		["async", 2, "/tmp/real", join(tmp, "project")],
+		["async", 2, "/var/tmp", join(tmp, "project")],
+		["async", 2, join(tmp, "project", "rel"), join(tmp, "project")],
+		["async", 2, join(tmp, "project"), join(tmp, "project")],
+	]);
+});
+
+test("workflow children log the child's reported cwd, else the workflow's, else the launch input", async () => {
+	const { fire, emit } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ workflow: "parallel", cwd: "wf", args: { tasks: [{ agent: "steward.mechanic", task: SECRET }] } },
+		{ mode: "workflow", runId: "W2", asyncId: "W2", results: [], workflowChildren: { children: [] } }));
+	emit("subagent:async-started", { id: "d1", mode: "single", agent: "steward.mechanic", parentWorkflowRunId: "W2", cwd: "/child/dir" });
+	emit("subagent:async-complete", {
+		id: "W2", runId: "W2", agent: "workflow", mode: "workflow", success: true, cwd: "/wf/reported",
+		workflowChildren: { children: [
+			{ childId: "k1", state: "completed", runId: "d1", agent: "steward.mechanic", model: "x/y" },
+			{ childId: "k2", state: "completed", runId: "d2", agent: "steward.mechanic", model: "x/y" },
+		] },
+		results: [],
+	});
+	// no reported workflow cwd: the launch input, relative to the session
+	await fire("tool_result", result({ workflow: "parallel", cwd: "wf", args: {} },
+		{ mode: "workflow", runId: "W3", asyncId: "W3", results: [], workflowChildren: { children: [] } }));
+	emit("subagent:async-complete", {
+		id: "W3", runId: "W3", agent: "workflow", mode: "workflow", success: true,
+		workflowChildren: { children: [{ childId: "k1", state: "completed", runId: "e1", agent: "steward.mechanic", model: "x/y" }] },
+		results: [],
+	});
+	// no launch cwd at all: the session directory
+	await fire("tool_result", result({ workflow: "parallel", args: {} },
+		{ mode: "workflow", runId: "W4", asyncId: "W4", results: [], workflowChildren: { children: [] } }));
+	emit("subagent:async-complete", {
+		id: "W4", runId: "W4", agent: "workflow", mode: "workflow", success: true,
+		workflowChildren: { children: [{ childId: "k1", state: "completed", runId: "f1", agent: "steward.mechanic", model: "x/y" }] },
+		results: [],
+	});
+	assert.deepEqual(logLines().map((l) => [l.mode, l.v, l.cwd, l.sessionCwd]), [
+		["workflow-child", 2, "/child/dir", join(tmp, "project")],
+		["workflow-child", 2, "/wf/reported", join(tmp, "project")],
+		["workflow-child", 2, join(tmp, "project", "wf"), join(tmp, "project")],
+		["workflow-child", 2, join(tmp, "project"), join(tmp, "project")],
+	]);
+});
+
+test("a rejected launch logs its launch cwd", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, cwd: "/nowhere" }, { results: [] }, { isError: true, text: "cwd does not exist" }));
+	const [line] = logLines();
+	assert.equal(line.cwd, "/nowhere");
+	assert.equal(line.sessionCwd, join(tmp, "project"));
+});
+
+// Review fixes: async per-item cwd, chain parallel groups, cleaned cwd fields, remote launches.
+test("an async tasks or chain run logs each row's own item cwd over the run-level cwd", async () => {
+	const { fire, emit } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	const mech = (over = {}) => ({ agent: "steward.mechanic", task: SECRET, ...over });
+	await fire("tool_result", result(
+		{ async: true, cwd: "/srv", tasks: [mech({ cwd: "a", model: "x/one" }), mech(), mech({ cwd: "/opt/x" })] },
+		{ mode: "parallel", runId: "P1", asyncId: "P1", results: [] }));
+	// pi-subagents reports only the top-level runner directory for the whole run
+	emit("subagent:async-started", { id: "P1", mode: "parallel", cwd: "/srv/real" });
+	emit("subagent:async-complete", { id: "P1", runId: "P1", mode: "parallel", success: true, results: [
+		{ agent: "steward.mechanic", success: true, index: 0 },
+		{ agent: "steward.mechanic", success: true, index: 1 },
+		{ agent: "steward.mechanic", success: true, index: 2 },
+	] });
+	// a single async launch keeps the reported run directory
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, async: true, cwd: "/tmp" }, { mode: "single", runId: "P2", asyncId: "P2", results: [] }));
+	emit("subagent:async-started", { id: "P2", mode: "single", cwd: "/tmp/real" });
+	emit("subagent:async-complete", { id: "P2", runId: "P2", mode: "single", success: true, results: [{ agent: "steward.mechanic", success: true }] });
+	assert.deepEqual(logLines().map((l) => [l.cwd, l.modelParam]), [
+		["/srv/real/a", "x/one"],
+		["/srv/real", null],
+		["/opt/x", null],
+		["/tmp/real", null],
+	]);
+});
+
+test("a chain with a parallel group indexes its flattened steps for cwd and model", async () => {
+	const { fire, emit } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	const mech = (over = {}) => ({ agent: "steward.mechanic", task: SECRET, ...over });
+	const chain = [
+		mech({ cwd: "/a", model: "x/one" }),
+		{ parallel: [mech({ cwd: "/b", model: "x/two" }), mech({ cwd: "/c" })] },
+		mech({ cwd: "/d", model: "x/four" }),
+	];
+	await fire("tool_result", result({ chain }, { mode: "chain", runId: "G1", results: [0, 1, 2, 3].map((index) => syncRow({ index })) }));
+	await fire("tool_result", result({ chain, async: true }, { mode: "chain", runId: "G2", asyncId: "G2", results: [] }));
+	emit("subagent:async-complete", { id: "G2", runId: "G2", mode: "chain", success: true, results: [0, 1, 2, 3].map((index) => ({ agent: "steward.mechanic", success: true, index })) });
+	const expected = [["/a", "x/one"], ["/b", "x/two"], ["/c", null], ["/d", "x/four"]];
+	assert.deepEqual(logLines().map((l) => [l.cwd, l.modelParam]), [...expected, ...expected]);
+});
+
+test("cwd and sessionCwd are capped at 4096 characters with control characters stripped", async () => {
+	const { fire } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, cwd: "/tmp/a\nb\u0007c\u001b[2Jd e" }, { mode: "single", runId: "S1", results: [syncRow()] }));
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, cwd: "/" + "x".repeat(5000) }, { mode: "single", runId: "S2", results: [syncRow()] }));
+	const [a, b] = logLines();
+	assert.equal(a.cwd, "/tmp/abc[2Jd e");
+	assert.equal(b.cwd.length, 4096);
+	assert.equal(a.sessionCwd, join(tmp, "project"));
+});
+
+test("a launch on a machine logs the session directory as cwd and names the machine as remote", async () => {
+	const { fire, emit } = load();
+	await fire("session_start", { type: "session_start", reason: "startup" });
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, machine: "build box", cwd: "/remote/dir" }, { mode: "single", runId: "R1", results: [syncRow()] }));
+	await fire("tool_result", result(
+		{ tasks: [{ agent: "steward.mechanic", task: SECRET, machine: "gpu1", cwd: "/r" }, { agent: "steward.mechanic", task: SECRET, cwd: "/local" }] },
+		{ mode: "parallel", runId: "R2", results: [syncRow({ index: 0 }), syncRow({ index: 1 })] }));
+	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, async: true, machine: "gpu1", cwd: "/remote/dir" }, { mode: "single", runId: "R3", asyncId: "R3", results: [] }));
+	emit("subagent:async-started", { id: "R3", mode: "single", cwd: "/remote/dir" });
+	emit("subagent:async-complete", { id: "R3", runId: "R3", mode: "single", success: true, cwd: "/remote/dir", results: [{ agent: "steward.mechanic", success: true }] });
+	const project = join(tmp, "project");
+	assert.deepEqual(logLines().map((l) => [l.cwd, l.remote]), [
+		[project, "build_box"],
+		[project, "gpu1"],
+		["/local", null],
+		[project, "gpu1"],
+	]);
+});

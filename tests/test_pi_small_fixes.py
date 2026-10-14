@@ -133,6 +133,61 @@ class PerModelWarningsTests(PlanTestCase):
                          {("coder", "effective binding"), ("writer", "effective binding")})
 
 
+class RelaunchWarningTests(PlanTestCase):
+    """0.14.2: per-model warnings about the relaunch model follow effectiveRelaunch, the
+    model the block's relaunch column shows; the plan's relaunch, when it differs, is
+    reported with the plan-binding warnings."""
+
+    # The operator's user plan: every role on Ollama Flash, relaunch on Fireworks Flash.
+    USER_PLAN = {"version": 1, "main": {"models": [OPUS], "thinking": "xhigh"},
+                 "judgmentModels": ["amorphic/claude-opus-5*"],
+                 "roles": {"*": {"model": OLLAMA, "thinking": "high", "fallback": [FIREWORKS + ":max"]}}}
+
+    def relaunch_floor(self, items):
+        return [f for f in items if f["code"] == "below-judgment-floor" and f.get("subject") == "relaunch model"]
+
+    def test_pinned_repo_block_has_no_relaunch_warning(self):
+        # This repo: .pi/settings.json pins every profile to Claude, so the effective
+        # relaunch is none and the block's column says so.
+        self.user_plan(self.USER_PLAN)
+        self.project_settings(CLAUDE_PINS)
+        result = self.run_plan(main=OPUS)
+        for role in ("deep-reasoner", "top-reviewer"):
+            self.assertIsNone(result["roles"][role]["effectiveRelaunch"], role)
+        self.assertEqual(self.relaunch_floor(result["findings"]), [])
+        for capped in (True, False):
+            block = render.render_block(result, capped=capped)
+            self.assertNotIn("relaunch model", block)
+            self.assertNotIn("outside judgmentModels", block)
+        plan_hits = self.relaunch_floor(result["planWarnings"])
+        self.assertEqual(sorted(f["role"] for f in plan_hits), ["deep-reasoner", "top-reviewer"])
+        self.assertTrue(all(FIREWORKS in f["message"] for f in plan_hits))
+        section = render.render_report(result).split("## Plan binding", 1)[1].split("\n## ", 1)[0]
+        self.assertEqual(section.count("The relaunch model %s for deep-reasoner is outside judgmentModels" % FIREWORKS), 1)
+
+    def test_pinned_repo_apply_preview_lists_the_plan_relaunch(self):
+        self.user_plan(self.USER_PLAN)
+        self.project_settings(CLAUDE_PINS)
+        result = mpa.apply(self.facts(main=OPUS), env=self.env, dry_run=True)
+        self.assertIn("The relaunch model %s for deep-reasoner is outside judgmentModels" % FIREWORKS, result["report"])
+
+    def test_unpinned_block_still_warns_on_the_effective_relaunch(self):
+        # The profile launches on the plan, so the block's relaunch column shows Fireworks
+        # Flash and the warning stays in the block, once, and not in planWarnings.
+        # (An Opus binding would skip a relaunch outside judgmentModels; this one is applied.)
+        self.user_plan(self.USER_PLAN)
+        self.user_settings({"subagents": {"agentOverrides": {
+            "steward.deep-reasoner": {"model": OLLAMA, "thinking": "high"}}}})
+        result = self.run_plan(main=OPUS)
+        eff = result["roles"]["deep-reasoner"]["effectiveRelaunch"]
+        self.assertEqual(eff and eff["model"], FIREWORKS)
+        hits = [f for f in self.relaunch_floor(result["findings"]) if f["role"] == "deep-reasoner"]
+        self.assertEqual(len(hits), 1)
+        self.assertIn("The relaunch model %s for deep-reasoner is outside judgmentModels" % FIREWORKS,
+                      render.render_block(result, capped=False))
+        self.assertEqual([f for f in self.relaunch_floor(result["planWarnings"]) if f["role"] == "deep-reasoner"], [])
+
+
 class ReviewerMainFamilyTests(PlanTestCase):
     PLAN = {"version": 1, "roles": {
         "coder": {"model": OLLAMA},

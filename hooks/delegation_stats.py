@@ -4,11 +4,15 @@ The pi extension appends one JSON line per finished steward.* child launch to
 ``$XDG_STATE_HOME/steward/pi-delegations.jsonl`` (default
 ``~/.local/state/steward/pi-delegations.jsonl``)::
 
-    {"v": 1, "ts": ISO-8601, "sessionId", "cwd", "agent", "runId",
+    {"v": 2, "ts": ISO-8601, "sessionId", "cwd", "sessionCwd", "agent", "runId",
      "modelParam": str|None, "model": str|None, "thinking": str|None,
      "status": "ok"|"error", "isError": bool, "errorClass": "provider"|"other"|None,
      "durationMs": int|None, "mode": "sync"|"async"|"workflow-child",
      "kind": "plain"|"relaunch"|"escalation"|"operator"}
+
+``cwd`` is the directory the child ran in and ``sessionCwd`` the session's. v1
+lines (before steward 0.14.2) have no ``sessionCwd`` and their ``cwd`` is the
+session's directory. Both versions are summarized the same way.
 
 ``summarize`` groups the lines inside the window by (agent, model) and
 ``render`` turns that into the /steward-models stats text. A line that is not
