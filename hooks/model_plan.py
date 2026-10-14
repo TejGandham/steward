@@ -74,8 +74,10 @@ Output
 
 ``planWarnings`` holds the per-model warnings (``thinking-clamped``,
 ``max-tokens-low``, ``below-judgment-floor``) for a plan binding that does
-not launch because a different effective binding does. The session block
-leaves them out; the ``apply`` preview and the full check report list them.
+not launch because a different effective binding does, and for a plan
+relaunch model that is not ``effectiveRelaunch`` (the relaunch the block
+shows, which can be None). The session block leaves them out; the ``apply``
+preview and the full check report list them.
 
 ``plan.setting`` is what Phase 3 ``apply`` would write as the model
 (``"inherit"`` for ``main``). ``plan.source`` and ``effective.modelSource``
@@ -2039,20 +2041,26 @@ def _evaluate(facts, env, agent_dir, agents_dir):
         overridden = (model_differs and eff["modelSource"]["file"] in settings_files) or (
             thinking_differs and eff["thinkingSource"]["file"] in settings_files)
         model_drift[role] = model_differs
-        subjects = []  # (label, model, thinking, explicit, source)
+        subjects = []  # (label, model, thinking, explicit, source, launches)
         if plan and plan["model"]:
-            subjects.append(("plan binding", plan["model"], plan["thinking"], False, plan["source"]))
+            # A plan binding does not launch when an effective binding is known (and
+            # differs); binding-drift reports the mismatch.
+            subjects.append(("plan binding", plan["model"], plan["thinking"], False, plan["source"],
+                             not eff["model"]))
         if eff["model"]:
-            subjects.append(("effective binding", eff["model"], eff["thinking"], False, eff["modelSource"]["file"]))
-        if row["relaunch"]:
-            subjects.append(("relaunch model", row["relaunch"]["model"], row["relaunch"]["thinking"], True, plan and plan["source"]))
+            subjects.append(("effective binding", eff["model"], eff["thinking"], False, eff["modelSource"]["file"], True))
         eff_relaunch = row["effectiveRelaunch"]
+        if row["relaunch"]:
+            # The plan's relaunch is offered only when it is the effective relaunch, the
+            # model the block's relaunch column shows; otherwise it is a plan-level warning.
+            subjects.append(("relaunch model", row["relaunch"]["model"], row["relaunch"]["thinking"], True,
+                             plan and plan["source"], eff_relaunch == row["relaunch"]))
         if eff_relaunch and eff_relaunch != row["relaunch"]:
             subjects.append(("relaunch model", eff_relaunch["model"], eff_relaunch["thinking"], True,
-                             plan and plan["source"]))
+                             plan and plan["source"], True))
         esc = row["escalate"]
         if esc and not esc["role"]:
-            subjects.append(("escalation model", esc["model"], esc["thinking"], True, plan and plan["source"]))
+            subjects.append(("escalation model", esc["model"], esc["thinking"], True, plan and plan["source"], True))
         elif esc and esc["model"] and role in JUDGMENT_ROLES and ctx.judgment is not None \
                 and not ctx.judgment_grade(esc["model"]):
             # The target role's own row carries its clamp, scope and maxThinking checks.
@@ -2060,17 +2068,17 @@ def _evaluate(facts, env, agent_dir, agents_dir):
                          "The escalation target %s of %s runs %s, outside judgmentModels."
                          % (esc["agent"], role, esc["model"]), ctx.merged["judgmentSource"], "escalation model")
 
-        for label, model, thinking, explicit, source in subjects:
+        for label, model, thinking, explicit, source, launches in subjects:
             entry = ctx.catalog.get(model)
             # Per-model warnings (clamp, maxTokens, judgment floor) follow the
-            # binding a launch gets. A plan binding that does not launch (an
-            # effective binding is known and differs) gets them in planWarnings,
-            # which the apply preview and the full check report show and the
-            # session block does not; binding-drift reports the mismatch. Scope
-            # keeps the narrower rule: a plan binding overridden in settings is skipped.
+            # binding a launch gets and the relaunch the block shows. A plan
+            # binding that does not launch (an effective binding is known and
+            # differs), or a plan relaunch that is not the effective relaunch, gets
+            # them in planWarnings, which the apply preview and the full check
+            # report show and the session block does not. Scope keeps the narrower
+            # rule: a plan binding overridden in settings is skipped.
             warn_ok = not (label == "plan binding" and overridden)
-            launches = not (label == "plan binding" and eff["model"])
-            if not launches and not (model_differs or thinking_differs):
+            if label == "plan binding" and not launches and not (model_differs or thinking_differs):
                 per_model = None  # the effective binding row carries the same warnings
             elif launches:
                 per_model = findings.add
