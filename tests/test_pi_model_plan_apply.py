@@ -562,7 +562,7 @@ class ProfileFileTests(ApplyTestCase):
 
 @unittest.skipIf(skip_reason(), skip_reason() or "")
 class PiSubagentsProfileTests(ApplyTestCase):
-    """The written profile goes through pi-subagents 0.77.0's own code."""
+    """The written profile goes through pi-subagents 0.78.0's own code."""
 
     def node(self, action, stdin=None):
         env = dict(os.environ, PI_CODING_AGENT_DIR=str(self.agent_dir), HOME=str(self.home))
@@ -572,7 +572,7 @@ class PiSubagentsProfileTests(ApplyTestCase):
         return json.loads(proc.stdout.strip().splitlines()[-1])
 
     def test_version_is_pinned(self):
-        self.assertEqual(self.node("format", "{}")["version"], "0.77.0",
+        self.assertEqual(self.node("format", "{}")["version"], "0.78.0",
                          "pi-subagents changed version: re-verify the profile format (src/profiles/profiles.js)")
 
     def test_profile_passes_validation_and_load_restores_mapping(self):
