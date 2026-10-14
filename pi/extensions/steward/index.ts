@@ -331,6 +331,11 @@ export function cleanLogField(value: string): string {
 	return value.slice(0, 100).replace(/[^\w.:/@+-]/g, "_");
 }
 
+/** Directories in the log: control characters stripped, at most 4096 characters. */
+export function cleanLogPath(value: string): string {
+	return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 4096);
+}
+
 /** Keep this many rotated log files; older ones are removed. */
 const ROTATED_KEEP = 2;
 
@@ -745,9 +750,12 @@ function register(
 	// workflow's children finish inside the workflow's completion. Never logs task text,
 	// outputs or file contents; every step fails open.
 	let session: { id?: string; cwd?: string } = {};
+	/** Where one launch item runs: `ownCwd` is the item's own `cwd`, `remote` its cleaned machine name. */
+	type ItemPlace = { cwd?: string; ownCwd?: string; remote: string | null; modelParam?: string; kind: string };
+	type LaunchRecord = { modelParam?: string; kind: string; at: number; cwd?: string; remote: string | null; items?: ItemPlace[] };
 	// Launch-time record of an async or detached run: its kind uses the relaunch and escalation
 	// strings current at launch. In memory only, so a completion after /reload logs as plain.
-	const asyncLaunches = new Map<string, { modelParam?: string; kind: string; at: number; cwd?: string }>();
+	const asyncLaunches = new Map<string, LaunchRecord>();
 	const started = new Map<string, number>();
 	// The run directory pi-subagents reports on `subagent:async-started`, by run id.
 	const startedCwd = new Map<string, string>();
@@ -783,6 +791,50 @@ function register(
 		return dir;
 	}
 
+	const isObject = (v: unknown): v is Record<string, any> => Boolean(v) && typeof v === "object" && !Array.isArray(v);
+
+	/**
+	 * The launch's items in the order pi-subagents numbers its result rows: `tasks` as given, or
+	 * `chain` with each parallel group's tasks in place and a dynamic group as one slot
+	 * (pi-subagents 0.78.0 src/runs/background/async-execution.js:1451-1467). A group's `machine`
+	 * passes to its tasks (async-execution.js:1116). Undefined for a single launch.
+	 */
+	function flatItems(input: Record<string, any>): (Record<string, any> | undefined)[] | undefined {
+		if (Array.isArray(input.tasks)) return input.tasks.map((t: unknown) => (isObject(t) ? t : undefined));
+		if (!Array.isArray(input.chain)) return undefined;
+		const out: (Record<string, any> | undefined)[] = [];
+		for (const step of input.chain) {
+			if (isObject(step) && Array.isArray(step.parallel)) {
+				for (const t of step.parallel) out.push(isObject(t) ? { ...t, machine: t.machine ?? step.machine } : undefined);
+			} else if (isObject(step) && isObject(step.parallel)) out.push(step.parallel);
+			else out.push(isObject(step) ? step : undefined);
+		}
+		return out;
+	}
+
+	/**
+	 * Where a launch item runs. With a `machine` its `cwd` is the directory on that machine
+	 * (pi-subagents 0.78.0 src/extension/schemas.js:229, subagent-executor.js:6193), so the
+	 * local directory logged is the session's and `remote` names the machine.
+	 */
+	function placeOf(input: Record<string, any>, item?: Record<string, any>): { cwd?: string; ownCwd?: string; remote: string | null } {
+		const machine = item?.machine ?? input.machine;
+		if (typeof machine === "string" && machine) return { cwd: session.cwd, remote: cleanLogField(machine) };
+		const own = typeof item?.cwd === "string" && item.cwd ? item.cwd : undefined;
+		return { cwd: inputCwd(input, item), ownCwd: own, remote: null };
+	}
+
+	/** The launch-time record of an async or detached run, one entry per item for tasks and chains. */
+	function launchRecord(input: Record<string, any>, modelParam: string | undefined, agent: unknown): LaunchRecord {
+		const items = flatItems(input)?.map((item) => {
+			const param = typeof item?.model === "string" && item.model ? item.model : modelParam;
+			return { ...placeOf(input, item), modelParam: param, kind: classifyKind(typeof item?.agent === "string" ? item.agent : "", param, launchStrings) };
+		});
+		const place = placeOf(input);
+		const name = typeof agent === "string" ? agent : "";
+		return { modelParam, kind: classifyKind(name, modelParam, launchStrings), at: Date.now(), cwd: place.cwd, remote: place.remote, items };
+	}
+
 	function remember<V>(map: Map<string, V> | Set<string>, key: string, value?: V): void {
 		if (map.size >= MAX_TRACKED) {
 			const first = map.keys().next().value;
@@ -805,6 +857,7 @@ function register(
 		mode: "sync" | "async" | "workflow-child";
 		kind?: string;
 		cwd?: string;
+		remote?: string | null;
 	}): void {
 		if (typeof fields.agent !== "string" || !fields.agent.startsWith(STEWARD_PREFIX)) return;
 		if (logged.has(fields.key)) return;
@@ -815,8 +868,9 @@ function register(
 				v: 2,
 				ts: new Date().toISOString(),
 				sessionId: session.id ?? null,
-				cwd: fields.cwd ?? session.cwd ?? null,
-				sessionCwd: session.cwd ?? null,
+				cwd: cleanNullable(fields.cwd ?? session.cwd),
+				sessionCwd: cleanNullable(session.cwd),
+				remote: fields.remote ?? null,
 				agent: cleanLogField(fields.agent),
 				runId: typeof fields.runId === "string" ? cleanLogField(fields.runId) : null,
 				modelParam: fields.modelParam !== undefined ? cleanLogField(fields.modelParam) : null,
@@ -833,6 +887,10 @@ function register(
 		);
 	}
 
+	function cleanNullable(value: string | undefined): string | null {
+		return typeof value === "string" ? cleanLogPath(value) : null;
+	}
+
 	function textOf(content: unknown): string | undefined {
 		if (!Array.isArray(content)) return undefined;
 		return content.map((part) => (part && typeof part.text === "string" ? part.text : "")).join("\n");
@@ -845,12 +903,11 @@ function register(
 			const details = (event.details && typeof event.details === "object" ? event.details : {}) as Record<string, any>;
 			const modelParam = typeof input.model === "string" && input.model ? input.model : undefined;
 			const asyncId = typeof details.asyncId === "string" ? details.asyncId : undefined;
-			const agentOf = (a: unknown) => (typeof a === "string" ? a : "");
 			if (asyncId && !event.isError) {
-				remember(asyncLaunches, asyncId, { modelParam, kind: classifyKind(agentOf(input.agent), modelParam, launchStrings), at: Date.now(), cwd: inputCwd(input) });
+				remember(asyncLaunches, asyncId, launchRecord(input, modelParam, input.agent));
 				return;
 			}
-			const steps = Array.isArray(input.tasks) ? input.tasks : Array.isArray(input.chain) ? input.chain : undefined;
+			const steps = flatItems(input);
 			const rows = Array.isArray(details.results) ? details.results : [];
 			if (rows.length > 0) {
 				rows.forEach((row: Record<string, any>, i: number) => {
@@ -859,7 +916,7 @@ function register(
 					const task = steps ? steps[index] : undefined;
 					const param = typeof task?.model === "string" && task.model ? task.model : modelParam;
 					// Sync results carry no cwd (pi-subagents 0.78.0 SingleResult, src/shared/types.d.ts:1127).
-					const cwd = inputCwd(input, task && typeof task === "object" ? task : undefined);
+					const { cwd, remote } = placeOf(input, task);
 					// Not finished: a detached child keeps running and an interrupted one waits for
 					// the next action (pi-subagents 0.77.0 src/runs/foreground/execution.js:503,1407,
 					// subagent-executor.js:3951-3968); a stop without an error is the same. The real
@@ -867,7 +924,7 @@ function register(
 					if (row.detached || row.interrupted || (row.stopped && !row.error)) {
 						const runId = typeof details.runId === "string" ? details.runId : undefined;
 						if (runId && !asyncLaunches.has(runId)) {
-							remember(asyncLaunches, runId, { modelParam: param, kind: classifyKind(agentOf(row.agent), param, launchStrings), at: Date.now(), cwd });
+							remember(asyncLaunches, runId, launchRecord(input, modelParam, row.agent));
 						}
 						return;
 					}
@@ -884,12 +941,14 @@ function register(
 						durationMs: finiteMs(row.progressSummary?.durationMs, row.durationMs),
 						mode: "sync",
 						cwd,
+						remote,
 					});
 				});
 				return;
 			}
 			if (event.isError && typeof input.agent === "string") {
 				// Rejected before it ran (unknown model, launch failure): no resolved model.
+				const place = placeOf(input);
 				writeLaunch({
 					key: `rejected:${event.toolCallId ?? Date.now()}`,
 					agent: input.agent,
@@ -899,7 +958,8 @@ function register(
 					errorText: textOf(event.content),
 					durationMs: null,
 					mode: input.async === true ? "async" : "sync",
-					cwd: inputCwd(input),
+					cwd: place.cwd,
+					remote: place.remote,
 				});
 			}
 		} catch {
@@ -969,19 +1029,28 @@ function register(
 			const list = rows.length > 0 ? rows : [{ agent: d.agent, success: d.success, error: d.error }];
 			list.forEach((row, i) => {
 				const ok = row.success !== false && d.success !== false && !row.error;
+				const index = Number.isInteger(row.index) ? row.index : i;
+				// The reported run directory is the top-level one only (async-execution.js:1520); an
+				// item with its own cwd resolves that against it (child-launch-plan.js:70).
+				const item = launch?.items?.[index];
+				const remote = item ? item.remote : (launch?.remote ?? null);
+				let cwd = runCwd;
+				if (remote) cwd = session.cwd;
+				else if (item?.ownCwd) cwd = isAbsolute(item.ownCwd) ? resolve(item.ownCwd) : runCwd ? resolve(runCwd, item.ownCwd) : item.cwd;
 				writeLaunch({
-					key: `${id}:${Number.isInteger(row.index) ? row.index : i}`,
+					key: `${id}:${index}`,
 					agent: row.agent ?? d.agent,
 					runId: id,
-					modelParam: launch?.modelParam,
-					kind: launch?.kind,
+					modelParam: item ? item.modelParam : launch?.modelParam,
+					kind: item ? item.kind : launch?.kind,
 					model: row.model,
 					thinking: row.thinking,
 					ok,
 					errorText: row.error ?? d.error,
 					durationMs: finiteMs(row.durationMs, d.durationMs, start !== undefined ? now - start : undefined),
 					mode: "async",
-					cwd: runCwd,
+					cwd,
+					remote,
 				});
 			});
 		} catch {
