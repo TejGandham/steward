@@ -108,7 +108,7 @@ pi install git:github.com/tejgandham/steward
 
 Then restart pi, or run `/reload` in a running session. Both commands write to `~/.pi/agent/settings.json`; add `-l` to install for the current project only.
 
-This installs the latest pi-subagents, and `pi update` keeps it current. Steward was last tested with pi-subagents 0.77.0. pi-subagents ships new versions every few days, so if an update breaks delegation, hold it at a known version with `pi install npm:pi-subagents@0.77.0`.
+This installs the latest pi-subagents, and `pi update` keeps it current. Steward was last tested with pi 1.2.0 and pi-subagents 0.78.0. pi-subagents ships new versions every few days, so if an update breaks delegation, hold it at a known version with `pi install npm:pi-subagents@0.78.0`.
 
 To check the install, ask pi to "list the available subagents". You should see seven agents whose names start with `steward.`.
 
