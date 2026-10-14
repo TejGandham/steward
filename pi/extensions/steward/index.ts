@@ -35,7 +35,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { spawn } from "node:child_process";
 import { appendFileSync, chmodSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -747,8 +747,10 @@ function register(
 	let session: { id?: string; cwd?: string } = {};
 	// Launch-time record of an async or detached run: its kind uses the relaunch and escalation
 	// strings current at launch. In memory only, so a completion after /reload logs as plain.
-	const asyncLaunches = new Map<string, { modelParam?: string; kind: string; at: number }>();
+	const asyncLaunches = new Map<string, { modelParam?: string; kind: string; at: number; cwd?: string }>();
 	const started = new Map<string, number>();
+	// The run directory pi-subagents reports on `subagent:async-started`, by run id.
+	const startedCwd = new Map<string, string>();
 	const ended = new Map<string, number>();
 	const logged = new Set<string>();
 
@@ -758,6 +760,27 @@ function register(
 		} catch {
 			// keep the last one
 		}
+	}
+
+	/** An absolute directory pi-subagents reported, or undefined. */
+	function reportedCwd(value: unknown): string | undefined {
+		return typeof value === "string" && isAbsolute(value) ? resolve(value) : undefined;
+	}
+
+	/**
+	 * Where a launch runs by its input: the top-level `cwd` against the session directory, then a
+	 * per-item `cwd` against that, as pi-subagents 0.78.0 resolves them (src/shared/utils.js:110,
+	 * src/runs/shared/child-launch-plan.js:70). Undefined when nothing anchors a relative path.
+	 */
+	function inputCwd(input: Record<string, any>, item?: Record<string, any>): string | undefined {
+		let dir = session.cwd;
+		for (const value of [input?.cwd, item?.cwd]) {
+			if (typeof value !== "string" || !value) continue;
+			if (isAbsolute(value)) dir = resolve(value);
+			else if (dir !== undefined) dir = resolve(dir, value);
+			else return undefined;
+		}
+		return dir;
 	}
 
 	function remember<V>(map: Map<string, V> | Set<string>, key: string, value?: V): void {
@@ -781,6 +804,7 @@ function register(
 		durationMs: number | null;
 		mode: "sync" | "async" | "workflow-child";
 		kind?: string;
+		cwd?: string;
 	}): void {
 		if (typeof fields.agent !== "string" || !fields.agent.startsWith(STEWARD_PREFIX)) return;
 		if (logged.has(fields.key)) return;
@@ -788,10 +812,11 @@ function register(
 		const resolved = splitModel(fields.model, fields.thinking);
 		appendDelegationLine(
 			{
-				v: 1,
+				v: 2,
 				ts: new Date().toISOString(),
 				sessionId: session.id ?? null,
-				cwd: session.cwd ?? null,
+				cwd: fields.cwd ?? session.cwd ?? null,
+				sessionCwd: session.cwd ?? null,
 				agent: cleanLogField(fields.agent),
 				runId: typeof fields.runId === "string" ? cleanLogField(fields.runId) : null,
 				modelParam: fields.modelParam !== undefined ? cleanLogField(fields.modelParam) : null,
@@ -822,7 +847,7 @@ function register(
 			const asyncId = typeof details.asyncId === "string" ? details.asyncId : undefined;
 			const agentOf = (a: unknown) => (typeof a === "string" ? a : "");
 			if (asyncId && !event.isError) {
-				remember(asyncLaunches, asyncId, { modelParam, kind: classifyKind(agentOf(input.agent), modelParam, launchStrings), at: Date.now() });
+				remember(asyncLaunches, asyncId, { modelParam, kind: classifyKind(agentOf(input.agent), modelParam, launchStrings), at: Date.now(), cwd: inputCwd(input) });
 				return;
 			}
 			const steps = Array.isArray(input.tasks) ? input.tasks : Array.isArray(input.chain) ? input.chain : undefined;
@@ -833,6 +858,8 @@ function register(
 					const index = Number.isInteger(row.index) ? row.index : i;
 					const task = steps ? steps[index] : undefined;
 					const param = typeof task?.model === "string" && task.model ? task.model : modelParam;
+					// Sync results carry no cwd (pi-subagents 0.78.0 SingleResult, src/shared/types.d.ts:1127).
+					const cwd = inputCwd(input, task && typeof task === "object" ? task : undefined);
 					// Not finished: a detached child keeps running and an interrupted one waits for
 					// the next action (pi-subagents 0.77.0 src/runs/foreground/execution.js:503,1407,
 					// subagent-executor.js:3951-3968); a stop without an error is the same. The real
@@ -840,7 +867,7 @@ function register(
 					if (row.detached || row.interrupted || (row.stopped && !row.error)) {
 						const runId = typeof details.runId === "string" ? details.runId : undefined;
 						if (runId && !asyncLaunches.has(runId)) {
-							remember(asyncLaunches, runId, { modelParam: param, kind: classifyKind(agentOf(row.agent), param, launchStrings), at: Date.now() });
+							remember(asyncLaunches, runId, { modelParam: param, kind: classifyKind(agentOf(row.agent), param, launchStrings), at: Date.now(), cwd });
 						}
 						return;
 					}
@@ -856,6 +883,7 @@ function register(
 						errorText: row.error,
 						durationMs: finiteMs(row.progressSummary?.durationMs, row.durationMs),
 						mode: "sync",
+						cwd,
 					});
 				});
 				return;
@@ -871,6 +899,7 @@ function register(
 					errorText: textOf(event.content),
 					durationMs: null,
 					mode: input.async === true ? "async" : "sync",
+					cwd: inputCwd(input),
 				});
 			}
 		} catch {
@@ -882,6 +911,10 @@ function register(
 		try {
 			const d = data as Record<string, any> | null;
 			if (d && typeof d.id === "string" && !started.has(d.id)) remember(started, d.id, Date.now());
+			// pi-subagents 0.78.0 reports the resolved run directory here (src/runs/background/
+			// async-execution.js:1520,2105; workflows src/runs/foreground/subagent-executor.js:5219).
+			const cwd = d ? reportedCwd(d.cwd) : undefined;
+			if (d && typeof d.id === "string" && cwd && !startedCwd.has(d.id)) remember(startedCwd, d.id, cwd);
 		} catch {
 			// fail open
 		}
@@ -899,6 +932,10 @@ function register(
 				remember(ended, id, now);
 				return;
 			}
+			// The completion spreads the run's result file, which records its directory as `cwd`
+			// (pi-subagents 0.78.0 src/runs/background/result-watcher.js:525 over
+			// src/runs/background/subagent-runner.js:4783; workflows subagent-executor.js:5830,5892).
+			const runCwd = startedCwd.get(id) ?? reportedCwd(d.cwd) ?? asyncLaunches.get(id)?.cwd;
 			const rows: Record<string, any>[] = Array.isArray(d.results) ? d.results.filter((r: unknown) => r && typeof r === "object") : [];
 			const children = d.workflowChildren?.children;
 			if (d.mode === "workflow" || Array.isArray(children)) {
@@ -920,6 +957,9 @@ function register(
 						errorText: row?.error ?? child.error,
 						durationMs: finiteMs(row?.durationMs, start !== undefined ? (end ?? now) - start : undefined),
 						mode: "workflow-child",
+						// Child records carry no cwd (src/workflows/scripted-workflow.d.ts:23); an async
+						// child reports its own on async-started, the rest ran in the workflow's.
+						cwd: (childId ? startedCwd.get(childId) : undefined) ?? runCwd,
 					});
 				}
 				return;
@@ -941,6 +981,7 @@ function register(
 					errorText: row.error ?? d.error,
 					durationMs: finiteMs(row.durationMs, d.durationMs, start !== undefined ? now - start : undefined),
 					mode: "async",
+					cwd: runCwd,
 				});
 			});
 		} catch {

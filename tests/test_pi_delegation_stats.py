@@ -84,6 +84,19 @@ class SummarizeTests(unittest.TestCase):
         self.assertEqual(row["model"], "unknown")
         self.assertIsNone(row["medianMs"])
 
+    def test_v1_and_v2_lines_are_summarized_together(self):
+        # 0.14.2 writes v2 lines (cwd is the child's directory, sessionCwd the session's); a
+        # log can still hold v1 lines from before the upgrade.
+        lines = [
+            line(cwd="/repo"),
+            line(v=2, cwd="/tmp", sessionCwd="/repo", duration=3000),
+        ]
+        summary = ds.summarize(lines, now=NOW, days=7)
+        self.assertEqual(summary["corrupt"], 0)
+        rows = {(r["agent"], r["model"]): r for r in summary["rows"]}
+        self.assertEqual(rows[("steward.mechanic", FLASH)]["launches"], 2)
+        self.assertEqual(rows[("steward.mechanic", FLASH)]["ok"], 2)
+
     def test_empty_log(self):
         summary = ds.summarize([], now=NOW, days=7)
         self.assertEqual(summary["rows"], [])
