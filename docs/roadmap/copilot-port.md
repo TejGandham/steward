@@ -2,6 +2,19 @@
 
 Status: built in steward 0.7.0, live-verified 2026-10-09 in the Copilot app (runtime 1.0.94). Scope is the delegation half of steward only (profiles, edict, delegation gate, prose gate, PR gate). The primary/secondary roles stay out, as on pi; see [orchestration-split.md](orchestration-split.md). The sections after "Built in 0.7.0" are the proposal as recorded before the build. Where the build differs, this section wins.
 
+## Open items
+
+Each item points at the prose that discusses it, with the line number in this file.
+
+- [ ] 1. Confirm the effort actually sent to a Copilot subagent by reading the request log, not `subagent.configured`. karta observed `configured` claiming `xhigh` while the model received `medium`. (prose: Open questions, `:246`)
+- [ ] 2. Determine precedence when both `effortLevel` in `subagents.agents` and frontmatter `reasoning-effort` are set. (prose: Open questions, `:247`)
+- [ ] 3. Document and test `disabledSubagents`, `excludedBuiltinAgents` and `includedBuiltinAgents`; hiding `general-purpose` and `explore` is untested. (prose: Open questions, `:248`)
+- [ ] 4. Establish whether `${PLUGIN_ROOT}` or `${CLAUDE_PLUGIN_ROOT}` works in `.github/plugin/` hook commands. Only the Claude manifest has been probed. (prose: Open questions, `:249`)
+- [ ] 5. Test whether a provider-prefixed model ID bound for the app resolves in the terminal CLI, which shares `settings.json`. On this machine `gpt-5.4-mini` and `gpt-5.6-luna` could not start because the account is Copilot Free. (prose: Caveat under model binding, `:153`)
+- [ ] 6. Establish whether BYOK lets a subagent name a different model on the same provider. (prose: BYOK, `:236`)
+
+VS Code and the Copilot cloud agent stay out of scope (`:250-251`), and nothing on this list blocks running steward on Copilot.
+
 ## Built in 0.7.0
 
 Operator decision, 2026-10-09: pinning a model per profile is too hard on Copilot, so assume a Copilot install runs Anthropic models.
@@ -137,7 +150,7 @@ The `/subagents` picker writes the same keys. The session-start hook should warn
 
 The edict also tells the main agent to pass `model` and `reasoning_effort` on a `task` call when the profile is not bound. Copilot honors explicit model and effort preferences from instructions (changelog 1.0.85), and the `task` tool's `model` enum lists the IDs that are valid in that session.
 
-Caveat: the app and the terminal CLI share `settings.json`. On this machine the terminal CLI could not start with `gpt-5.4-mini` or `gpt-5.6-luna`, and its CAPI catalog lists Claude 5.x as disabled: the account is on Copilot Free, and those models list Pro (Sonnet) or Pro+ (Opus, Fable) and up. A provider-prefixed ID bound for the app may not resolve in a terminal session. Not tested.
+Caveat: the app and the terminal CLI share `settings.json`. On this machine the terminal CLI could not start with `gpt-5.4-mini` or `gpt-5.6-luna`, and its CAPI catalog lists Claude 5.x as disabled: the account is on Copilot Free, and those models list Pro (Sonnet) or Pro+ (Opus, Fable) and up. A provider-prefixed ID bound for the app may not resolve in a terminal session. Not tested. (see Open items 5)
 
 ### Edict: `copilot/skills/steward-delegating/SKILL.md`
 
@@ -220,7 +233,7 @@ Open, for the operator:
 
 Operator decision, 2026-10-09: role-only names (`coder`, `deep-reasoner`, `reviewer`, `researcher`, `writer`, `mechanic`, `top-reviewer`), the same as the Codex port. A role-and-effort name would be wrong whenever a machine binds a model whose effort differs from Claude's, as coder, researcher and mechanic do. Built in 0.8.0.
 
-**BYOK.** The CLI's documented BYOK mode (`COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`) points a whole session at one provider. Whether a subagent binding can then name a different model on that provider was not tested.
+**BYOK.** The CLI's documented BYOK mode (`COPILOT_PROVIDER_BASE_URL`, `COPILOT_MODEL`) points a whole session at one provider. Whether a subagent binding can then name a different model on that provider was not tested. (see Open items 6)
 
 ## Doing it today with no code change
 
@@ -230,9 +243,9 @@ Operator decision, 2026-10-09: role-only names (`coder`, `deep-reasoner`, `revie
 
 ## Open questions
 
-- The effort actually sent was read from `subagent.configured`, not from the request log. karta saw `configured` claim `xhigh` while a model without `xhigh` received `medium`. Claude 5.x offers `low` to `max`, so this should hold, but it is unverified.
-- Whether `effortLevel` in `subagents.agents` or frontmatter `reasoning-effort` wins when both are set.
-- `subagents.disabledSubagents`, `excludedBuiltinAgents` and `includedBuiltinAgents` are present in the 1.0.94 runtime but undocumented. Hiding `general-purpose` and `explore` could push the model toward steward profiles. Untested.
-- `${PLUGIN_ROOT}` versus `${CLAUDE_PLUGIN_ROOT}` in a `.github/plugin/` manifest's hook commands (both env vars are set; substitution was probed only for the Claude manifest).
+- The effort actually sent was read from `subagent.configured`, not from the request log. karta saw `configured` claim `xhigh` while a model without `xhigh` received `medium`. Claude 5.x offers `low` to `max`, so this should hold, but it is unverified. (see Open items 1)
+- Whether `effortLevel` in `subagents.agents` or frontmatter `reasoning-effort` wins when both are set. (see Open items 2)
+- `subagents.disabledSubagents`, `excludedBuiltinAgents` and `includedBuiltinAgents` are present in the 1.0.94 runtime but undocumented. Hiding `general-purpose` and `explore` could push the model toward steward profiles. Untested. (see Open items 3)
+- `${PLUGIN_ROOT}` versus `${CLAUDE_PLUGIN_ROOT}` in a `.github/plugin/` manifest's hook commands (both env vars are set; substitution was probed only for the Claude manifest). (see Open items 4)
 - VS Code reads the same `.agent.md` files, but its `model` takes "Name (vendor)" strings or a priority list, and agent-scoped hooks are preview-only (`chat.useCustomAgentHooks`). Not in scope here.
 - Copilot cloud agent: hooks fire there (`preToolUse`, `agentStop`), and agents load from `.github/agents/` on the default branch. Not in scope here.
