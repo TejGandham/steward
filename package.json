@@ -21,7 +21,8 @@
   },
   "pi": {
     "extensions": [
-      "./pi/extensions/steward/index.ts"
+      "./pi/extensions/steward/index.ts",
+      "./plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts"
     ],
     "skills": [
       "./plugins/steward-delegation/pi/skills"
