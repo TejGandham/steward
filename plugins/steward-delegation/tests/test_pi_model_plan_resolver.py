@@ -170,7 +170,7 @@ FRONTMATTER = [
 
 HELPER_INPUT_CORRUPTED = 3  # resolve_model.mjs: stdin did not match the sha256 it was given
 HELPER_ATTEMPTS = 3
-MIRROR_DRIFT = "the mirror in hooks/model_plan.py and the installed pi-subagents disagree: re-verify the mirror"
+MIRROR_DRIFT = "the mirror in plugins/steward-delegation/hooks/model_plan.py and the installed pi-subagents disagree: re-verify the mirror"
 
 
 class TransportFault(Exception):
@@ -259,7 +259,7 @@ class ResolverDriftGuardTests(unittest.TestCase):
     def test_installed_version_is_the_mirrored_one(self):
         self.assertEqual(
             self.js["version"], PI_SUBAGENTS_MIRRORED,
-            "pi-subagents %s is installed but hooks/model_plan.py mirrors %s: re-verify the mirror, then update "
+            "pi-subagents %s is installed but plugins/steward-delegation/hooks/model_plan.py mirrors %s: re-verify the mirror, then update "
             "PI_SUBAGENTS_MIRRORED. The differential tests here cover model resolution, normalizeModelSegment, "
             "parsePackageName and parseFrontmatter; re-read these by hand: %s"
             % (self.js["version"], PI_SUBAGENTS_MIRRORED, "; ".join(NON_DIFFERENTIAL_MIRRORS)))

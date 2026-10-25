@@ -20,22 +20,18 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from test_pi_model_plan import (CATALOG, FIREWORKS, OLLAMA, OPUS, REPO_ROOT, SOL, SONNET,
-                                PlanTestCase, model, mp)
-from test_pi_model_plan_review2 import doc_operator_plan
-from test_steward_hook import EM_DASH, StewardTestCase, hook
+from helpers import SCRIPT, StewardTestCase, load_hook_module
+from test_pi_model_plan import (CATALOG, FIREWORKS, OLLAMA, OPUS, PLUGIN_ROOT, SOL, SONNET,
+                                PlanTestCase, model, mp, operator_plan)
 
-PLAN_HOOKS = REPO_ROOT / "plugins" / "steward-delegation" / "hooks"
-HOOK = REPO_ROOT / "hooks" / "steward_hook.py"
+PLAN_HOOKS = PLUGIN_ROOT / "hooks"
+HOOK = SCRIPT
 if str(PLAN_HOOKS) not in sys.path:
     sys.path.insert(0, str(PLAN_HOOKS))
 render = importlib.import_module("model_plan_render")
+hook = load_hook_module()
 
-# The commit 2b builds on; regression output is captured from its script.
-BASE_COMMIT = "eb80786"
-# Set to 1 to skip, not fail, the regression tests when BASE_COMMIT is missing
-# (a shallow clone, say).
-ALLOW_MISSING_BASE_ENV = "STEWARD_ALLOW_MISSING_BASE_COMMIT"
+EM_DASH = chr(0x2014)  # the character itself is never written literally here
 BOX_DRAWING = re.compile("[\u2500-\u257f]")
 
 # The operator's Phase 0 settings from the doc, equal to what apply writes
@@ -77,7 +73,7 @@ def header_cells(block):
 
 class RenderCase(PlanTestCase):
     def operator(self):
-        self.user_plan(doc_operator_plan())
+        self.user_plan(operator_plan())
         self.user_settings(dict(PHASE0_SETTINGS, defaultThinkingLevel="xhigh"))
 
     def block(self, capped=True, **kw):
@@ -233,7 +229,7 @@ class CapTests(RenderCase):
         self.assertEqual(render.MAX_BLOCK_CHARS, 5000)
 
     def test_worst_case_files(self):
-        self.user_plan(doc_operator_plan())
+        self.user_plan(operator_plan())
         self.user_settings({"subagents": {"agentOverrides": {"steward.coder": {"model": OLLAMA}}}})
         path = self.project / ".pi" / "steward-model-plan.json"
         saw_more = False
@@ -247,7 +243,7 @@ class CapTests(RenderCase):
         self.assertTrue(saw_more)
 
     def test_many_findings_end_with_more_line(self):
-        plan = doc_operator_plan()
+        plan = operator_plan()
         plan["providers"] = {"p%d" % i: {"maxConcurrent": 1} for i in range(60)}
         plan["roles"]["*"]["fallback"] = ["nope%d/model-%d" % (i, i) for i in range(40)]
         self.user_plan(plan)
@@ -273,7 +269,7 @@ class CapTests(RenderCase):
     def test_one_line_per_problem(self):
         self.operator()
         # the same clamp shows up for the plan binding and the effective binding
-        plan = doc_operator_plan()
+        plan = operator_plan()
         plan["roles"]["*"]["thinking"] = "xhigh"
         self.user_plan(plan)
         block = self.block(main=SOL)
@@ -286,31 +282,19 @@ class FactsCase(StewardTestCase):
 
     def setUp(self):
         super().setUp()
-        claude_skill = os.path.join(
-            self.plugin_root, "plugins", "steward-delegation", "skills", "delegating", "SKILL.md")
-        with open(claude_skill, encoding="utf-8") as f:
-            claude_body = f.read()
-        fixtures = (
-            (("pi", "skills", "steward-delegating"),
-             "---\nname: steward-delegating\ndescription: fixture\n---\nPi body of the edict.\n"),
-            (("copilot", "skills", "delegating"),
-             "---\nname: delegating\ndescription: fixture\n---\nCopilot body.\n"),
-            (("skills", "delegating"), claude_body),
-        )
-        # The hook reads each skill under plugins/steward-delegation/; the
-        # BASE_COMMIT hook that base_script() runs reads it at the root.
-        for rel, body in fixtures:
-            for prefix in (("plugins", "steward-delegation"), ()):
-                skill_dir = os.path.join(self.plugin_root, *prefix, *rel)
-                os.makedirs(skill_dir, exist_ok=True)
-                with open(os.path.join(skill_dir, "SKILL.md"), "w", encoding="utf-8") as f:
-                    f.write(body)
+        # helpers.py already wrote the Claude Code skill (skills/delegating).
+        self.write_plugin_file("pi/skills/steward-delegating/SKILL.md",
+                               "---\nname: steward-delegating\ndescription: fixture\n---\nPi body of the edict.\n")
+        self.write_plugin_file("copilot/skills/delegating/SKILL.md",
+                               "---\nname: delegating\ndescription: fixture\n---\nCopilot body.\n")
+        self.write_plugin_file("codex/skills/delegating/SKILL.md",
+                               "---\nname: delegating\ndescription: fixture\n---\nCodex body.\n")
         self.project = os.path.join(self.tmp, "work", "repo")
         os.makedirs(os.path.join(self.project, ".pi"), exist_ok=True)
         plan_dir = os.path.join(self.config, "steward")
         os.makedirs(plan_dir, exist_ok=True)
         with open(os.path.join(plan_dir, "model-plan.json"), "w", encoding="utf-8") as f:
-            json.dump(doc_operator_plan(), f)
+            json.dump(operator_plan(), f)
         with open(os.path.join(self.config, "settings.json"), "w", encoding="utf-8") as f:
             json.dump(PHASE0_SETTINGS, f)
 
@@ -320,51 +304,43 @@ class FactsCase(StewardTestCase):
                 "models": copy.deepcopy(CATALOG), "projectTrusted": True, "cwd": self.project}
 
     def pi_env(self):
-        return self.make_env(STEWARD_HARNESS="pi", PI_CODING_AGENT_DIR=self.config)
+        return self.make_env(PI_CODING_AGENT_DIR=self.config)
 
-    def run_text(self, script, subcommand, payload, env, raw=None):
-        result = subprocess.run([sys.executable, str(script), subcommand],
+    def run_text(self, harness, mode, payload, env, raw=None):
+        result = subprocess.run([sys.executable, str(HOOK), harness, mode],
                                 input=raw if raw is not None else json.dumps(payload),
                                 capture_output=True, text=True, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
-    def base_script(self):
-        """steward_hook.py as it was at BASE_COMMIT, written to a temp dir."""
-        try:
-            source = subprocess.run(["git", "-C", str(REPO_ROOT), "show", "%s:hooks/steward_hook.py" % BASE_COMMIT],
-                                    capture_output=True, check=True).stdout
-        except (OSError, subprocess.CalledProcessError):
-            message = ("base commit %s is not in this checkout, so the regression tests cannot run; fetch it, "
-                       "or set %s=1 to skip them" % (BASE_COMMIT, ALLOW_MISSING_BASE_ENV))
-            if os.environ.get(ALLOW_MISSING_BASE_ENV) == "1":
-                self.skipTest(message)
-            self.fail(message)
-        path = Path(self.tmp) / "base" / "hooks" / "steward_hook.py"
-        path.parent.mkdir(parents=True)
-        path.write_bytes(source)
-        return path
-
     def pi_env_dict(self):
-        return self.env_dict(STEWARD_HARNESS="pi", PI_CODING_AGENT_DIR=self.config)
+        return self.env_dict(PI_CODING_AGENT_DIR=self.config)
+
+
+# pi session-start output for FactsCase's skill fixture and no usable
+# model_facts: the edict alone, no tags and no plainlanguage warning.
+PI_SESSION_START_WITHOUT_FACTS = json.dumps({"hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": (
+        "You run under the steward delegation edict. The full text of the steward-delegating "
+        "skill follows; read it as standing instructions.\n\nPi body of the edict."),
+}}) + "\n"
 
 
 class FailOpenTests(FactsCase):
     """Session start appends the block only for harness pi with valid facts."""
 
     def test_pi_without_facts_matches_base(self):
-        base = self.base_script()
         env = self.pi_env()
         for payload, raw in (({"session_id": "s1"}, None), ({}, None), (None, "not json"),
                              ({"session_id": "s1", "model_facts": None}, None)):
-            self.assertEqual(self.run_text(HOOK, "session-start", payload, env, raw),
-                             self.run_text(base, "session-start", payload, env, raw))
+            self.assertEqual(self.run_text("pi", "session-start", payload, env, raw),
+                             PI_SESSION_START_WITHOUT_FACTS)
 
     def test_pi_with_facts_appends_block(self):
-        base = self.base_script()
         env = self.pi_env()
-        today = json.loads(self.run_text(base, "session-start", {"session_id": "s1"}, env))
-        out = json.loads(self.run_text(HOOK, "session-start",
+        today = json.loads(PI_SESSION_START_WITHOUT_FACTS)
+        out = json.loads(self.run_text("pi", "session-start",
                                        {"session_id": "s1", "model_facts": self.facts()}, env))
         text = out["hookSpecificOutput"]["additionalContext"]
         before = today["hookSpecificOutput"]["additionalContext"]
@@ -374,42 +350,36 @@ class FailOpenTests(FactsCase):
         self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
 
     def test_other_harnesses_ignore_facts(self):
-        base = self.base_script()
         payloads = ({"session_id": "s1"}, {"session_id": "s1", "model_facts": self.facts()})
-        for harness in ("claude", "copilot"):
-            env = self.make_env(STEWARD_HARNESS=harness, COPILOT_HOME=self.config)
-            outputs = {self.run_text(script, "session-start", p, env)
-                       for script in (HOOK, base) for p in payloads}
+        env = self.make_env(COPILOT_HOME=self.config, CODEX_HOME=self.config)
+        for harness in ("claude", "copilot", "codex"):
+            outputs = {self.run_text(harness, "session-start", p, env) for p in payloads}
             self.assertEqual(len(outputs), 1, harness)
-        env = self.make_env(STEWARD_HARNESS="codex", CODEX_HOME=self.config)
-        codex = REPO_ROOT / "codex" / "steward.py"
-        self.assertEqual(self.run_text(codex, "session-start", payloads[0], env),
-                         self.run_text(codex, "session-start", payloads[1], env))
+            self.assertNotIn("Model plan", outputs.pop(), harness)
 
     def test_fail_open_cases(self):
-        base = self.base_script()
         env = self.pi_env()
-        today = self.run_text(base, "session-start", {"session_id": "s1"}, env)
         bad = self.facts()
         del bad["models"]
         wrong_types = self.facts()
         wrong_types["projectTrusted"] = "yes"
         for facts in (bad, wrong_types, "facts", [1, 2], 7, {"main": None}):
-            self.assertEqual(self.run_text(HOOK, "session-start",
-                                           {"session_id": "s1", "model_facts": facts}, env), today, facts)
+            self.assertEqual(self.run_text("pi", "session-start",
+                                           {"session_id": "s1", "model_facts": facts}, env),
+                             PI_SESSION_START_WITHOUT_FACTS, facts)
 
     def test_exception_inside_evaluate_fails_open(self):
         env = self.pi_env_dict()
         payload = {"session_id": "s1", "model_facts": self.facts()}
-        without = hook.cmd_session_start({"session_id": "s1"}, env)
-        self.assertIn("## Model plan", hook.cmd_session_start(payload, env))
+        without = hook.cmd_pi_session_start({"session_id": "s1"}, env)
+        self.assertIn("## Model plan", hook.cmd_pi_session_start(payload, env))
         model_plan = importlib.import_module("model_plan")
         with mock.patch.object(model_plan, "_evaluate", side_effect=RuntimeError("boom")):
-            self.assertEqual(hook.cmd_session_start(payload, env), without)
+            self.assertEqual(hook.cmd_pi_session_start(payload, env), without)
         with mock.patch.object(model_plan, "evaluate", side_effect=RuntimeError("boom")):
-            self.assertEqual(hook.cmd_session_start(payload, env), without)
+            self.assertEqual(hook.cmd_pi_session_start(payload, env), without)
         with mock.patch.object(render, "render_block", side_effect=ValueError("bad")):
-            self.assertEqual(hook.cmd_session_start(payload, env), without)
+            self.assertEqual(hook.cmd_pi_session_start(payload, env), without)
 
     def test_real_size_facts_are_fast(self):
         facts = self.facts()
@@ -418,7 +388,7 @@ class FailOpenTests(FactsCase):
                                          available=bool(i % 3)))
         env = self.pi_env()
         start = time.monotonic()
-        out = self.run_text(HOOK, "session-start",
+        out = self.run_text("pi", "session-start",
                             {"session_id": "s1", "model_facts": facts}, env)
         elapsed = time.monotonic() - start
         self.assertIn("## Model plan", out)
@@ -427,7 +397,7 @@ class FailOpenTests(FactsCase):
 
 class ModelPlanSubcommandTests(FactsCase):
     def run_cmd(self, raw, env=None):
-        return subprocess.run([sys.executable, str(HOOK), "model-plan"],
+        return subprocess.run([sys.executable, str(HOOK), "pi", "model-plan"],
                               input=raw, capture_output=True, text=True, env=env or self.pi_env())
 
     def test_report_has_every_finding_and_source(self):
@@ -473,9 +443,13 @@ class ModelPlanSubcommandTests(FactsCase):
             self.assertIn("error", json.loads(out.stdout))
 
     def test_pi_only(self):
-        out = self.run_cmd(json.dumps({"model_facts": self.facts()}), env=self.make_env())
-        self.assertNotEqual(out.returncode, 0)
-        self.assertIn("pi", out.stderr)
+        # Another harness has no model-plan mode: unknown modes exit 0 with
+        # no output.
+        for harness in ("claude", "copilot", "codex"):
+            out = subprocess.run([sys.executable, str(HOOK), harness, "model-plan"],
+                                 input=json.dumps({"model_facts": self.facts()}),
+                                 capture_output=True, text=True, env=self.pi_env())
+            self.assertEqual((out.returncode, out.stdout), (0, ""), harness)
 
 
 if __name__ == "__main__":

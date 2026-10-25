@@ -14,8 +14,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-MODULE = REPO_ROOT / "plugins" / "steward-delegation" / "hooks" / "model_plan.py"
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+MODULE = PLUGIN_ROOT / "hooks" / "model_plan.py"
 
 _spec = importlib.util.spec_from_file_location("model_plan", str(MODULE))
 mp = importlib.util.module_from_spec(_spec)
@@ -87,6 +87,11 @@ OPERATOR_PLAN = {
 }
 
 
+def operator_plan():
+    """A fresh copy of OPERATOR_PLAN, which tests may change."""
+    return copy.deepcopy(OPERATOR_PLAN)
+
+
 class PlanTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="steward-model-plan-"))
@@ -152,14 +157,15 @@ class PlanTestCase(unittest.TestCase):
 
 
 class AgentDirTests(unittest.TestCase):
-    def test_matches_steward_hook_config_dir(self):
-        spec = importlib.util.spec_from_file_location("steward_hook_for_plan", str(REPO_ROOT / "hooks" / "steward_hook.py"))
+    def test_matches_delegation_hook_config_dir(self):
+        spec = importlib.util.spec_from_file_location("delegation_hook_for_plan",
+                                                      str(PLUGIN_ROOT / "hooks" / "delegation_hook.py"))
         hook = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(hook)
         for extra in ({}, {"PI_CODING_AGENT_DIR": "/x/agent"}, {"PI_CODING_AGENT_DIR": "~/alt"},
                       {"PI_CODING_AGENT_DIR": "~"}):
-            env = dict({"HOME": "/h", "STEWARD_HARNESS": "pi"}, **extra)
-            self.assertEqual(mp.agent_dir_from_env(env), hook.get_config_dir(env))
+            env = dict({"HOME": "/h"}, **extra)
+            self.assertEqual(mp.agent_dir_from_env(env), hook.get_config_dir(env, "pi"))
 
 
 class ClampTests(unittest.TestCase):

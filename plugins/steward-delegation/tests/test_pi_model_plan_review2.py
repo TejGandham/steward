@@ -7,18 +7,10 @@ import re
 import unittest
 from pathlib import Path
 
-from test_pi_model_plan import (OLLAMA, OPERATOR_PLAN, OPUS, REPO_ROOT, SOL, SONNET,
+from test_pi_model_plan import (OLLAMA, OPERATOR_PLAN, OPUS, SOL, SONNET,
                                 PlanTestCase, mp)
 
-DOC = REPO_ROOT / "docs" / "roadmap" / "pi-model-plan.md"
 POLICY_CODES = ("provider-denied", "provider-not-allowed", "effective-model-unverifiable")
-
-
-def doc_operator_plan():
-    text = DOC.read_text(encoding="utf-8")
-    section = text.split("### Operator's case", 1)[1]
-    block = section.split("```json", 1)[1].split("```", 1)[0]
-    return json.loads(block)
 
 
 class Helpers(PlanTestCase):
@@ -270,10 +262,6 @@ class BoundedFindingsTests(Helpers):
 
 
 class NitTests2(Helpers):
-    def test_doc_operator_plan_matches_tests(self):
-        self.assertEqual(doc_operator_plan(), OPERATOR_PLAN)
-        self.assertIn("anthropic/claude-opus-5*", OPERATOR_PLAN["judgmentModels"])
-
     def test_operator_plan_after_apply_has_no_warnings(self):
         self.user_plan(OPERATOR_PLAN)
         overrides = {}
