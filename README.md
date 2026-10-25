@@ -1,5 +1,18 @@
 # steward
 
+> **Staying on 0.14.2.** Steward 0.14.2 is the last release as one plugin. The repo is being split into separate plugins, and the files at the repo root will change. The tag `v0.14.2` keeps the 0.14.2 code.
+>
+> - Claude Code and Copilot `steward@steward`, and Codex `steward@steward-codex`: the marketplace entry now points at the tag `v0.14.2`. You stay on 0.14.2 and need to do nothing.
+> - Copilot installed straight from the repo (`copilot plugin install TejGandham/steward`): that install follows the repo root. To stay on 0.14.2, uninstall it and install `steward@steward` from the marketplace.
+> - pi: an unpinned `git:github.com/tejgandham/steward` follows the main branch. To stay on 0.14.2, pin it before you next run `pi update`:
+>
+>   ```
+>   pi install git:github.com/tejgandham/steward@v0.14.2
+>   ```
+>
+>   If pi refuses because the package is already installed, run `pi remove git:github.com/tejgandham/steward` first.
+> - If an install moves off 0.14.2 anyway, reinstall it from the tag `v0.14.2`.
+
 For Codex CLI and the ChatGPT desktop app (formerly the Codex app), see the separate [Codex port](docs/roadmap/codex-port.md). It packages seven OpenAI role profiles and Codex-specific hooks. The Claude Code installation and behavior described below are unchanged.
 
 A Claude Code plugin that packages a delegation edict: the main session hands off every non-trivial task to a pinned subagent chosen by task complexity, and all user-facing prose passes a plain-language check. It also installs as a pi package and as a GitHub Copilot plugin; see [Pi](#pi) and [GitHub Copilot](#github-copilot).
