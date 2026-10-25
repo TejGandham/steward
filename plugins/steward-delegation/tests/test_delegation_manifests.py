@@ -8,7 +8,7 @@ import unittest
 from helpers import PLUGIN_ROOT
 
 NAME = "steward-delegation"
-VERSION = "0.15.0"
+VERSION = "1.0.0"
 MANIFESTS = (
     ".claude-plugin/plugin.json",
     ".codex-plugin/plugin.json",
