@@ -106,7 +106,7 @@ Pi has no subagents of its own. Steward uses the community [pi-subagents](https:
 ### What you need
 
 - pi 1.0 or newer (`pi --version`).
-- `python3` on your PATH. The pi gates run the same `hooks/steward_hook.py` as Claude Code.
+- `python3` on your PATH. The pi gates run the same hook scripts as Claude Code: `plugins/steward-delegation/hooks/delegation_hook.py` and `plugins/steward-prose-gate/hooks/prose_gate_hook.py`.
 - The `plainlanguage` skill, in `~/.agents/skills/plainlanguage/` or `~/.pi/agent/skills/plainlanguage/`.
 - Optional: an `update-pr-summary` prompt template at `~/.pi/agent/prompts/update-pr-summary.md`. If it is there, the edict uses it to draft PR bodies.
 
@@ -130,7 +130,7 @@ To check the install, ask pi to "list the available subagents". You should see s
 The pi package has three parts:
 - `pi/skills/steward-delegating/`: the edict, written for pi. A pi extension adds it to the system prompt of every main session.
 - `pi/agents/`: the seven profiles. pi-subagents loads them as `steward.<name>`, for example `steward.coder`.
-- `pi/extensions/steward/`: the extension that adds the edict and runs the gates. It passes each pi event to `hooks/steward_hook.py`, so both harnesses share one set of rules and tests.
+- `pi/extensions/steward/`: the extension that adds the edict and runs the gates. It passes each pi event to `plugins/steward-delegation/hooks/delegation_hook.py` or `plugins/steward-prose-gate/hooks/prose_gate_hook.py`, so both harnesses share one set of rules and tests.
 
 The model delegates with pi-subagents' `subagent` tool, for example `subagent({ agent: "steward.mechanic", task: "...", async: false })`.
 
@@ -436,7 +436,7 @@ python3 -m unittest discover -s tests
 node --test 'tests/pi/*.test.mjs'
 ```
 
-The Python tests cover the hook script for both harnesses and check that the pi profiles stay in step with the Claude Code ones. They also cover the Copilot harness (`tests/test_copilot_harness.py`), including parity between `copilot/agents/` and `agents/`. The node tests run the pi extension's handlers against the real hook script. Node 22.18 or newer runs the TypeScript extension without a build step.
+The Python tests cover the hook script for both harnesses and check that the pi profiles stay in step with the Claude Code ones. They also cover the Copilot harness (`plugins/steward-delegation/tests/test_delegation_copilot.py` and `plugins/steward-prose-gate/tests/test_prose_gate_copilot.py`). The node tests run the pi extension's handlers against the real hook script. Node 22.18 or newer runs the TypeScript extension without a build step.
 
 ## If you already have these rules in CLAUDE.md
 
