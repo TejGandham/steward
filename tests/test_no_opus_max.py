@@ -11,11 +11,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 PLAN_DOC = REPO_ROOT / "docs" / "roadmap" / "pi-model-plan.md"
-ROUTING = REPO_ROOT / "skills" / "delegating" / "routing.md"
+DELEGATION_DIR = REPO_ROOT / "plugins" / "steward-delegation"
+ROUTING = DELEGATION_DIR / "skills" / "delegating" / "routing.md"
 EDICTS = (
-    REPO_ROOT / "skills" / "delegating" / "SKILL.md",
-    REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md",
-    REPO_ROOT / "copilot" / "skills" / "delegating" / "SKILL.md",
+    DELEGATION_DIR / "skills" / "delegating" / "SKILL.md",
+    DELEGATION_DIR / "pi" / "skills" / "steward-delegating" / "SKILL.md",
+    DELEGATION_DIR / "copilot" / "skills" / "delegating" / "SKILL.md",
     REPO_ROOT / "plugins" / "steward-orchestration" / "skills" / "orchestrating" / "onboarding-template.md",
 )
 PROFILE_DOCS = (README, ROUTING) + EDICTS
@@ -76,13 +77,13 @@ def json_blocks(text):
 
 class NoOpusMaxTests(unittest.TestCase):
     def test_claude_code_agents(self):
-        for path in sorted((REPO_ROOT / "agents").glob("*.md")):
+        for path in sorted((DELEGATION_DIR / "agents").glob("*.md")):
             fm = frontmatter(path)
             if is_opus(fm.get("model")):
                 self.assertNotEqual(fm.get("effort"), "max", path.name)
 
     def test_pi_agents(self):
-        for path in sorted((REPO_ROOT / "pi" / "agents").glob("*.md")):
+        for path in sorted((DELEGATION_DIR / "pi" / "agents").glob("*.md")):
             fm = frontmatter(path)
             if is_opus(fm.get("model")):
                 self.assertNotEqual(fm.get("thinking"), "max", path.name)
@@ -93,7 +94,7 @@ class NoOpusMaxTests(unittest.TestCase):
         rows = dict(re.findall(r"^\| steward:([a-z-]+) \| ([^|]+?) \|", edict, re.M))
         self.assertIn("top-reviewer", rows)
         efforts = dict(re.findall(r"^\| steward:([a-z-]+) \| [^|]+ \| `([a-z]+)` \|", edict, re.M))
-        for path in sorted((REPO_ROOT / "copilot" / "agents").glob("*.agent.md")):
+        for path in sorted((DELEGATION_DIR / "copilot" / "agents").glob("*.agent.md")):
             role = frontmatter(path)["name"]
             if "opus" in rows.get(role, "").lower():
                 self.assertNotEqual(frontmatter(path).get("reasoning-effort"), "max", path.name)

@@ -24,11 +24,11 @@
       "./pi/extensions/steward/index.ts"
     ],
     "skills": [
-      "./pi/skills"
+      "./plugins/steward-delegation/pi/skills"
     ],
     "subagents": {
       "agents": [
-        "./pi/agents"
+        "./plugins/steward-delegation/pi/agents"
       ]
     }
   },

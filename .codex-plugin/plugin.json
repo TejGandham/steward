@@ -12,7 +12,7 @@
     "subagents",
     "plain-language"
   ],
-  "skills": "./codex/skills/",
+  "skills": "./plugins/steward-delegation/codex/skills/",
   "hooks": "./codex/hooks.json",
   "interface": {
     "displayName": "Steward",

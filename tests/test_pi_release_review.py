@@ -13,7 +13,7 @@ import unittest
 from test_pi_model_plan import OPUS, SOL, SONNET, OLLAMA, REPO_ROOT, PlanTestCase, mp
 from test_pi_model_plan_render import render, table_rows
 
-PI_SKILL = REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md"
+PI_SKILL = REPO_ROOT / "plugins" / "steward-delegation" / "pi" / "skills" / "steward-delegating" / "SKILL.md"
 README = REPO_ROOT / "README.md"
 NOCREDS = "openai/gpt-6.1-nocreds"
 # Edict size at 55106f6 was 10,251 bytes; the fixes may add a little.

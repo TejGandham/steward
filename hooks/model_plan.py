@@ -168,7 +168,8 @@ PROVIDER_FIELDS = {"maxConcurrent", "enabled"}
 ROLE_FIELDS = {"model", "thinking", "fallback", "escalate", "byMainProvider"}
 BY_MAIN_FIELDS = {"model", "thinking"}
 
-DEFAULT_AGENTS_DIR = Path(__file__).resolve().parent.parent / "pi" / "agents"
+DEFAULT_AGENTS_DIR = (Path(__file__).resolve().parent.parent
+                      / "plugins" / "steward-delegation" / "pi" / "agents")
 
 # Agent discovery (PS/src/agents/agents.js:1611-1621,1688-1758).
 DISCOVERY_PRUNED_DIR_NAMES = {".git", "node_modules", ".pi", "sync-backups"}
