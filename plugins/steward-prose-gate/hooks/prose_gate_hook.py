@@ -5,11 +5,14 @@ Called as `prose_gate_hook.py <harness> <mode>`. Reads one JSON object
 from stdin and prints at most one JSON object to stdout. Stdlib only,
 python3.9+.
 
-Harnesses: claude and copilot. Modes: pr-gate (PreToolUse on Bash: deny
-a `gh pr create|edit` whose body has AI tells) and prose-gate (Stop:
-block a reply that has AI tells). Copilot also has session-start, which
-records the main session and prints nothing; Copilot sends no agent_id,
-so its gates run only for a recorded main session.
+Harnesses: claude, copilot and codex. Modes: pr-gate (PreToolUse on
+Bash: deny a `gh pr create|edit` whose body has AI tells) and prose-gate
+(Stop: block a reply that has AI tells). Copilot also has session-start,
+which records the main session and prints nothing; Copilot sends no
+agent_id, so its gates run only for a recorded main session. Codex
+children share the parent's session_id, so its gates run for every
+call, and its prose gate reads only last_assistant_message, never a
+transcript.
 
 This script must never raise to whoever called it. Any error, bad
 input, unknown harness or mode, or missing file means: exit 0, no
@@ -32,13 +35,14 @@ PLUGIN_DIR_NAME = "steward-prose-gate"
 
 def get_config_dir(harness, env):
     """Where the harness keeps its config. Claude Code: $CLAUDE_CONFIG_DIR
-    or ~/.claude. Copilot: $COPILOT_HOME or ~/.copilot."""
+    or ~/.claude. Copilot: $COPILOT_HOME or ~/.copilot. Codex:
+    $CODEX_HOME or ~/.codex."""
     home = env.get("HOME") or os.path.expanduser("~")
-    if harness == "copilot":
-        value = env.get("COPILOT_HOME")
+    if harness in ("copilot", "codex"):
+        value = env.get(harness.upper() + "_HOME")
         if value:
             return _expand_user(value, env)
-        return os.path.join(home, ".copilot")
+        return os.path.join(home, "." + harness)
     value = env.get("CLAUDE_CONFIG_DIR")
     if value:
         return value
@@ -115,7 +119,10 @@ def _is_copilot_main_session(env, session_id):
 def _skip_session(harness, payload, env):
     """True when this call is not the main session's. Claude Code marks a
     subagent with agent_id. Copilot sends no agent_id; a subagent's calls
-    carry its own session_id, which session-start never recorded."""
+    carry its own session_id, which session-start never recorded. Codex
+    children share the parent's session_id, so no Codex call is skipped."""
+    if harness == "codex":
+        return False
     if _non_empty_str(payload.get("agent_id")):
         return True
     if harness == "copilot":
@@ -602,7 +609,9 @@ def cmd_prose_gate(harness, payload, env):
         return None
 
     text = payload.get("last_assistant_message")
-    if not (isinstance(text, str) and text.strip()):
+    # Codex transcripts are not a stable hook interface: on Codex the
+    # gate reads only last_assistant_message and fails open without it.
+    if harness != "codex" and not (isinstance(text, str) and text.strip()):
         transcript_path = payload.get("transcript_path")
         text = None
         if isinstance(transcript_path, str) and transcript_path:
@@ -615,7 +624,7 @@ def cmd_prose_gate(harness, payload, env):
             else:
                 text = _extract_last_assistant_text(transcript_path)
 
-    if not text:
+    if not (isinstance(text, str) and text.strip()):
         return None
 
     cleaned = _clean_text(text)
@@ -649,6 +658,10 @@ _MODES = {
     },
     "copilot": {
         "session-start": cmd_session_start,
+        "pr-gate": cmd_pr_gate,
+        "prose-gate": cmd_prose_gate,
+    },
+    "codex": {
         "pr-gate": cmd_pr_gate,
         "prose-gate": cmd_prose_gate,
     },
