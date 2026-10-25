@@ -25,9 +25,10 @@ from test_pi_model_plan import (CATALOG, FIREWORKS, OLLAMA, OPUS, REPO_ROOT, SOL
 from test_pi_model_plan_review2 import doc_operator_plan
 from test_steward_hook import EM_DASH, StewardTestCase, hook
 
-HOOKS = REPO_ROOT / "hooks"
-if str(HOOKS) not in sys.path:
-    sys.path.insert(0, str(HOOKS))
+PLAN_HOOKS = REPO_ROOT / "plugins" / "steward-delegation" / "hooks"
+HOOK = REPO_ROOT / "hooks" / "steward_hook.py"
+if str(PLAN_HOOKS) not in sys.path:
+    sys.path.insert(0, str(PLAN_HOOKS))
 render = importlib.import_module("model_plan_render")
 
 # The commit 2b builds on; regression output is captured from its script.
@@ -356,14 +357,14 @@ class FailOpenTests(FactsCase):
         env = self.pi_env()
         for payload, raw in (({"session_id": "s1"}, None), ({}, None), (None, "not json"),
                              ({"session_id": "s1", "model_facts": None}, None)):
-            self.assertEqual(self.run_text(HOOKS / "steward_hook.py", "session-start", payload, env, raw),
+            self.assertEqual(self.run_text(HOOK, "session-start", payload, env, raw),
                              self.run_text(base, "session-start", payload, env, raw))
 
     def test_pi_with_facts_appends_block(self):
         base = self.base_script()
         env = self.pi_env()
         today = json.loads(self.run_text(base, "session-start", {"session_id": "s1"}, env))
-        out = json.loads(self.run_text(HOOKS / "steward_hook.py", "session-start",
+        out = json.loads(self.run_text(HOOK, "session-start",
                                        {"session_id": "s1", "model_facts": self.facts()}, env))
         text = out["hookSpecificOutput"]["additionalContext"]
         before = today["hookSpecificOutput"]["additionalContext"]
@@ -378,7 +379,7 @@ class FailOpenTests(FactsCase):
         for harness in ("claude", "copilot"):
             env = self.make_env(STEWARD_HARNESS=harness, COPILOT_HOME=self.config)
             outputs = {self.run_text(script, "session-start", p, env)
-                       for script in (HOOKS / "steward_hook.py", base) for p in payloads}
+                       for script in (HOOK, base) for p in payloads}
             self.assertEqual(len(outputs), 1, harness)
         env = self.make_env(STEWARD_HARNESS="codex", CODEX_HOME=self.config)
         codex = REPO_ROOT / "codex" / "steward.py"
@@ -394,7 +395,7 @@ class FailOpenTests(FactsCase):
         wrong_types = self.facts()
         wrong_types["projectTrusted"] = "yes"
         for facts in (bad, wrong_types, "facts", [1, 2], 7, {"main": None}):
-            self.assertEqual(self.run_text(HOOKS / "steward_hook.py", "session-start",
+            self.assertEqual(self.run_text(HOOK, "session-start",
                                            {"session_id": "s1", "model_facts": facts}, env), today, facts)
 
     def test_exception_inside_evaluate_fails_open(self):
@@ -417,7 +418,7 @@ class FailOpenTests(FactsCase):
                                          available=bool(i % 3)))
         env = self.pi_env()
         start = time.monotonic()
-        out = self.run_text(HOOKS / "steward_hook.py", "session-start",
+        out = self.run_text(HOOK, "session-start",
                             {"session_id": "s1", "model_facts": facts}, env)
         elapsed = time.monotonic() - start
         self.assertIn("## Model plan", out)
@@ -426,7 +427,7 @@ class FailOpenTests(FactsCase):
 
 class ModelPlanSubcommandTests(FactsCase):
     def run_cmd(self, raw, env=None):
-        return subprocess.run([sys.executable, str(HOOKS / "steward_hook.py"), "model-plan"],
+        return subprocess.run([sys.executable, str(HOOK), "model-plan"],
                               input=raw, capture_output=True, text=True, env=env or self.pi_env())
 
     def test_report_has_every_finding_and_source(self):

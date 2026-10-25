@@ -301,9 +301,11 @@ MODEL_PLAN_USAGE_EXIT = 2
 
 
 def _hook_module(name):
-    """Import a sibling module from hooks/ (only harness pi needs them)."""
+    """Import a module from plugins/steward-delegation/hooks/ (only harness
+    pi needs them), found relative to this file."""
     import importlib
-    here = os.path.dirname(os.path.abspath(__file__))
+    here = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "plugins", "steward-delegation", "hooks")
     if here not in sys.path:
         sys.path.insert(0, here)
     return importlib.import_module(name)

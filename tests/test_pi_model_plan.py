@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MODULE = REPO_ROOT / "hooks" / "model_plan.py"
+MODULE = REPO_ROOT / "plugins" / "steward-delegation" / "hooks" / "model_plan.py"
 
 _spec = importlib.util.spec_from_file_location("model_plan", str(MODULE))
 mp = importlib.util.module_from_spec(_spec)

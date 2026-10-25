@@ -168,8 +168,7 @@ PROVIDER_FIELDS = {"maxConcurrent", "enabled"}
 ROLE_FIELDS = {"model", "thinking", "fallback", "escalate", "byMainProvider"}
 BY_MAIN_FIELDS = {"model", "thinking"}
 
-DEFAULT_AGENTS_DIR = (Path(__file__).resolve().parent.parent
-                      / "plugins" / "steward-delegation" / "pi" / "agents")
+DEFAULT_AGENTS_DIR = Path(__file__).resolve().parent.parent / "pi" / "agents"
 
 # Agent discovery (PS/src/agents/agents.js:1611-1621,1688-1758).
 DISCOVERY_PRUNED_DIR_NAMES = {".git", "node_modules", ".pi", "sync-backups"}
@@ -329,10 +328,9 @@ def resolve_subagent_model(model, available, preferred):
 
 
 def agent_dir_from_env(env):
-    """$PI_CODING_AGENT_DIR or ~/.pi/agent. Same result as
-    steward_hook.get_config_dir for harness pi (hooks/steward_hook.py:42-62)
-    and pi-subagents getAgentDir (PS/src/shared/utils.js:80-87). Inlined so
-    steward_hook can import this module without a cycle."""
+    """$PI_CODING_AGENT_DIR or ~/.pi/agent. Same result as pi-subagents
+    getAgentDir (PS/src/shared/utils.js:80-87). Inlined so the delegation
+    hook (hooks/delegation_hook.py) can import this module without a cycle."""
     home = env.get("HOME") or os.path.expanduser("~")
     value = env.get("PI_CODING_AGENT_DIR")
     if value:
