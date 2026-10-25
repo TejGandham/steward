@@ -11,16 +11,16 @@ The plugin ships:
 
 ## Install
 
-The plugin relies on steward-delegation: the orchestrating skill applies the "Everyone" rules of the `steward-delegation:delegating` skill. The manifest has no dependency field, so install steward-delegation yourself. If its skill is missing, the session tells you once.
+The plugin relies on steward-delegation: the orchestrating skill applies the "Everyone" rules of the `steward-delegation:delegating` skill. The manifest has no dependency field, so install steward-delegation yourself. If its skill is missing, the session tells you once. Both plugins install from the Engen-Tech marketplace, [Engen-Tech/plugin-marketplace](https://github.com/Engen-Tech/plugin-marketplace).
 
 ```
-claude plugin marketplace add tejgandham/steward
-claude plugin install steward-orchestration@steward --scope user
+claude plugin marketplace add https://github.com/Engen-Tech/plugin-marketplace.git
+claude plugin install steward-orchestration@engen-tech --scope user
 ```
 
 If you use several `CLAUDE_CONFIG_DIR` profiles, install once per profile.
 
-For local development, run Claude Code against this folder:
+For local development from a steward checkout, run Claude Code against this folder. This is not a way to install the plugin.
 
 ```
 claude --plugin-dir /path/to/steward/plugins/steward-orchestration

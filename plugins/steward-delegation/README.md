@@ -23,18 +23,20 @@ Codex has no delegation gate because Codex subagents share the parent's session 
 
 The plugin declares no dependencies on any harness. Install these yourself:
 
-- **plainlanguage** (recommended): the writing skill the edict tells the agent to use for prose it writes to you and for PR bodies. It is not part of this plugin; install it alongside. If it is missing, the agent applies the edict's short writing rules directly; on Claude Code, Copilot and pi it also tells you once.
+- **plainlanguage** (recommended): the writing skill the edict tells the agent to use for prose it writes to you and for PR bodies. It is a separate plugin, `plainlanguage@engen-tech`; install it alongside. If it is missing, the agent applies the edict's short writing rules directly; on Claude Code, Copilot and pi it also tells you once.
 - **pi-subagents** (pi only, required): pi has no subagents of its own, and the steward profiles run through this extension. Without it, the gate reminds instead of blocking, because the agent has no way to delegate.
 - **steward-prose-gate** (optional): enforces the prose half of the edict by sending back replies and PR bodies that read like AI-generated text.
 - **An `update-pr-summary` command** (optional): if you have one, for example `<config>/commands/update-pr-summary.md` on Claude Code, the edict uses it to draft PR bodies. If not, PR bodies are drafted from the branch's diff against its base.
 
 ## Install
 
+The plugin installs from the Engen-Tech marketplace, [Engen-Tech/plugin-marketplace](https://github.com/Engen-Tech/plugin-marketplace). Add `plainlanguage@engen-tech` the same way if you want the writing skill.
+
 Claude Code:
 
 ```
-claude plugin marketplace add tejgandham/steward
-claude plugin install steward-delegation@steward --scope user
+claude plugin marketplace add https://github.com/Engen-Tech/plugin-marketplace.git
+claude plugin install steward-delegation@engen-tech --scope user
 ```
 
 If you use several `CLAUDE_CONFIG_DIR` profiles, install once per profile.
@@ -42,8 +44,8 @@ If you use several `CLAUDE_CONFIG_DIR` profiles, install once per profile.
 GitHub Copilot:
 
 ```
-copilot plugin marketplace add tejgandham/steward
-copilot plugin install steward-delegation@steward
+copilot plugin marketplace add Engen-Tech/plugin-marketplace
+copilot plugin install steward-delegation@engen-tech
 ```
 
 Close running Copilot sessions before you install, remove or replace the plugin. A running session keeps the hooks of a deleted plugin folder, and Copilot then denies every edit and shell command in it.
@@ -51,22 +53,22 @@ Close running Copilot sessions before you install, remove or replace the plugin.
 Codex:
 
 ```
-codex plugin marketplace add tejgandham/steward
-codex plugin add steward-delegation@steward-codex
+codex plugin marketplace add Engen-Tech/plugin-marketplace
+codex plugin add steward-delegation@engen-tech
 ```
 
-A local checkout path works in place of `tejgandham/steward`. Checked on codex-cli 0.164.0. In an interactive session, review and trust the session-start hook once with `/hooks`. In `codex exec`, hooks of an untrusted plugin are skipped silently: no edict, no warning. For automation, run `codex exec --dangerously-bypass-hook-trust`. The Codex docs name that flag for vetted automation. To add the seven profiles as standalone Codex agents (`steward-<role>`), run `python3 codex/install_agents.py` from this plugin's folder; it refuses to overwrite an agent file that differs.
+In an interactive session, review and trust the session-start hook once with `/hooks`. In `codex exec`, hooks of an untrusted plugin are skipped silently: no edict, no warning. For automation, run `codex exec --dangerously-bypass-hook-trust`. The Codex docs name that flag for vetted automation. To add the seven profiles as standalone Codex agents (`steward-<role>`), run `python3 codex/install_agents.py` from this plugin's folder; it refuses to overwrite an agent file that differs.
 
 pi:
 
 ```
 pi install npm:pi-subagents
-pi install git:github.com/tejgandham/steward
+pi install git:github.com/Engen-Tech/plugin-marketplace
 ```
 
-The repository's root package holds this plugin's pi extension and the prose gate's. The root README of the repository shows how to load only one of them.
+The marketplace's root package holds the pi parts of every plugin in it. The [steward README](https://github.com/TejGandham/steward#pi) shows how to load only some of them.
 
-For local development, run Claude Code against this folder:
+For local development from a steward checkout, run Claude Code against this folder. This is not a way to install the plugin.
 
 ```
 claude --plugin-dir /path/to/steward/plugins/steward-delegation
@@ -82,7 +84,7 @@ Claude Code and Copilot put the plugin name in front of each skill and agent:
 
 If you bound Copilot profiles in `~/.copilot/settings.json` under `subagents.agents`, the keys use these names too; rename keys saved under the 0.14.2 plugin's prefix.
 
-The plugin ids are `steward-delegation@steward` (Claude Code, Copilot) and `steward-delegation@steward-codex` (Codex). Names on pi (`steward.<role>`, `steward-delegating`, `/steward-models`) and Codex agent names (`steward-<role>`) did not change.
+The plugin id is `steward-delegation@engen-tech` on Claude Code, Copilot and Codex. Names on pi (`steward.<role>`, `steward-delegating`, `/steward-models`) and Codex agent names (`steward-<role>`) did not change.
 
 ## The subagent profiles
 
