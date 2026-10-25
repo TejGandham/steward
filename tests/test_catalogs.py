@@ -21,7 +21,9 @@ def steward_entry(rel_path):
 class CatalogPinTests(unittest.TestCase):
     def test_claude_catalog_pins_steward_to_tag(self):
         entry = steward_entry(".claude-plugin/marketplace.json")
-        self.assertEqual(entry["source"], {"source": "github", "repo": "tejgandham/steward", "ref": TAG})
+        self.assertEqual(entry["source"], {
+            "source": "url", "url": "https://github.com/TejGandham/steward.git", "ref": TAG,
+        })
 
     def test_codex_catalog_pins_steward_to_tag(self):
         entry = steward_entry(".agents/plugins/marketplace.json")
