@@ -1,6 +1,6 @@
 # Future: split orchestration out of steward
 
-Status: deferred. Recorded 2026-10-03. Nothing here is built yet.
+Status: Superseded by plugin-split.md. Recorded 2026-10-03 as deferred; orchestration is now its own plugin, steward-orchestration, as [plugin-split.md](plugin-split.md) describes. The text below is kept as history.
 
 ## Summary
 

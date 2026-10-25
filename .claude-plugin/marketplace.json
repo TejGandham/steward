@@ -15,6 +15,11 @@
       }
     },
     {
+      "name": "steward-delegation",
+      "description": "Delegation edict: pinned subagent profiles and a delegation gate.",
+      "source": "./plugins/steward-delegation"
+    },
+    {
       "name": "steward-prose-gate",
       "description": "Blocks replies and PR bodies that read like AI-generated text.",
       "source": "./plugins/steward-prose-gate"

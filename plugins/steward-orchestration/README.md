@@ -37,3 +37,12 @@ The registry sits under `~/.claude`, not under `$CLAUDE_CONFIG_DIR`, so sessions
 You can give secondaries a standing instruction of your own. Write it to `edict.md` in the registry directory (`~/.claude/orchestration/edict.md`, or under `$STEWARD_ORCHESTRATION_DIR`). When the file exists, the primary pastes its text verbatim into the onboarding message, and each secondary follows it. When the file is absent, the onboarding message has no edict.
 
 You own this file; the plugin never writes it, and no code reads it. Only the primary session reads it, when it onboards a secondary.
+
+## If you already have these rules in CLAUDE.md
+
+If your `CLAUDE.md` already spells out the orchestration rules, installing this plugin loads them twice. Shrink your `CLAUDE.md` section to a pointer instead, and move any standing instruction for secondaries into `edict.md`:
+
+```
+# Orchestration: the steward-orchestration plugin
+Primary and secondary roles come from the `steward-orchestration` plugin (`steward-orchestration:orchestrating`).
+```
