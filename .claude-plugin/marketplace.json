@@ -9,8 +9,8 @@
       "name": "steward",
       "description": "Delegation edict: pinned subagent profiles, plain-language prose, enforcing hooks.",
       "source": {
-        "source": "github",
-        "repo": "tejgandham/steward",
+        "source": "url",
+        "url": "https://github.com/TejGandham/steward.git",
         "ref": "v0.14.2"
       }
     }
