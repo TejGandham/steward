@@ -21,13 +21,13 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-HOOKS = REPO_ROOT / "hooks"
-HOOK = HOOKS / "steward_hook.py"
+PLAN_HOOKS = REPO_ROOT / "plugins" / "steward-delegation" / "hooks"
+HOOK = REPO_ROOT / "hooks" / "steward_hook.py"
 HELPER = Path(__file__).resolve().parent / "pi" / "profile_check.mjs"
-if str(HOOKS) not in sys.path:
-    sys.path.insert(0, str(HOOKS))
+if str(PLAN_HOOKS) not in sys.path:
+    sys.path.insert(0, str(PLAN_HOOKS))
 
-_spec = importlib.util.spec_from_file_location("model_plan_apply", str(HOOKS / "model_plan_apply.py"))
+_spec = importlib.util.spec_from_file_location("model_plan_apply", str(PLAN_HOOKS / "model_plan_apply.py"))
 mpa = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mpa)
 

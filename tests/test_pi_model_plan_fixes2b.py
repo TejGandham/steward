@@ -12,7 +12,7 @@ from unittest import mock
 
 import test_pi_model_plan_render as render_tests
 from test_pi_model_plan import CATALOG, FIREWORKS, OLLAMA, OPUS, SOL, SONNET, model, mp
-from test_pi_model_plan_render import (HOOKS, PHASE0_SETTINGS, FactsCase, RenderCase, render,
+from test_pi_model_plan_render import (HOOK, PHASE0_SETTINGS, FactsCase, RenderCase, render,
                                        table_rows)
 from test_pi_model_plan_review2 import doc_operator_plan
 
@@ -246,7 +246,7 @@ class FactsNits(FactsCase):
     def test_relative_cwd_rejected(self):
         for payload in ({"model_facts": dict(self.facts(), cwd="work/repo")},
                         {"model_facts": {k: v for k, v in self.facts().items() if k != "cwd"}, "cwd": "repo"}):
-            out = subprocess.run([sys.executable, str(HOOKS / "steward_hook.py"), "model-plan"],
+            out = subprocess.run([sys.executable, str(HOOK), "model-plan"],
                                  input=json.dumps(payload), capture_output=True, text=True, env=self.pi_env())
             self.assertEqual(out.returncode, 2, out.stderr)
             self.assertIn("absolute", out.stderr)

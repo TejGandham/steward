@@ -9,8 +9,9 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HOOKS = os.path.join(os.path.dirname(HERE), "hooks")
-sys.path.insert(0, HOOKS)
+PLAN_HOOKS = os.path.join(os.path.dirname(HERE), "plugins", "steward-delegation", "hooks")
+HOOK = os.path.join(os.path.dirname(HERE), "hooks", "steward_hook.py")
+sys.path.insert(0, PLAN_HOOKS)
 sys.path.insert(0, HERE)
 
 import delegation_stats as ds  # noqa: E402
@@ -124,7 +125,7 @@ class SubcommandTests(unittest.TestCase):
     def run_hook(self, payload, env_extra=None):
         env = dict(os.environ, STEWARD_HARNESS="pi")
         env.update(env_extra or {})
-        proc = subprocess.run([sys.executable, os.path.join(HOOKS, "steward_hook.py"), "delegation-stats"],
+        proc = subprocess.run([sys.executable, HOOK, "delegation-stats"],
                               input=json.dumps(payload), capture_output=True, text=True, env=env)
         return proc.returncode, json.loads(proc.stdout)
 
@@ -158,7 +159,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-from test_pi_model_plan_render import FactsCase, HOOKS as RENDER_HOOKS  # noqa: E402
+from test_pi_model_plan_render import FactsCase  # noqa: E402
 
 
 class SessionLaunchesTests(FactsCase):
@@ -166,7 +167,7 @@ class SessionLaunchesTests(FactsCase):
     data, so the outcome log can classify a launch's `kind` without parsing the block."""
 
     def test_launches_are_structured(self):
-        proc = subprocess.run([sys.executable, str(RENDER_HOOKS / "steward_hook.py"), "session-start"],
+        proc = subprocess.run([sys.executable, HOOK, "session-start"],
                               input=json.dumps({"session_id": "s1", "model_facts": self.facts()}),
                               capture_output=True, text=True, env=self.pi_env())
         out = json.loads(proc.stdout)["hookSpecificOutput"]
@@ -182,7 +183,7 @@ class SessionLaunchesTests(FactsCase):
         self.assertTrue(any(e["relaunch"] for e in launches.values()))
 
     def test_no_facts_no_launches(self):
-        proc = subprocess.run([sys.executable, str(RENDER_HOOKS / "steward_hook.py"), "session-start"],
+        proc = subprocess.run([sys.executable, HOOK, "session-start"],
                               input=json.dumps({"session_id": "s1"}), capture_output=True, text=True,
                               env=self.pi_env())
         self.assertNotIn("stewardLaunches", json.loads(proc.stdout)["hookSpecificOutput"])
