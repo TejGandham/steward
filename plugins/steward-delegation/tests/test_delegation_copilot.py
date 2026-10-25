@@ -22,6 +22,8 @@ hook = load_hook_module()
 COPILOT_DIR = PLUGIN_ROOT / "copilot"
 COPILOT_AGENTS = COPILOT_DIR / "agents"
 COPILOT_SKILLS = COPILOT_DIR / "skills"
+# The 0.14.2 key prefix, which the bound-profile note no longer reads.
+OLD_CODER_KEY = "steward:" + "coder"
 CLAUDE_AGENTS = PLUGIN_ROOT / "agents"
 
 # Claude Code profile name -> Copilot role-only profile name.
@@ -195,17 +197,17 @@ class CopilotSessionStartTests(CopilotHarnessCase):
 
     def test_old_steward_key_not_listed(self):
         self.write_settings(json.dumps({"subagents": {"agents": {
-            "steward:coder": {"model": "m-old", "effortLevel": "medium"},
+            OLD_CODER_KEY: {"model": "m-old", "effortLevel": "medium"},
             "steward-delegation:mechanic": {"model": "m-new", "effortLevel": "low"},
         }}}))
         text = self.context(self.co_env())
         self.assertIn("steward-delegation:mechanic (model m-new, effort low)", text)
-        self.assertNotIn("steward:coder", text)
+        self.assertNotIn(OLD_CODER_KEY, text)
         self.assertNotIn("m-old", text)
 
     def test_no_bound_line_with_only_old_steward_keys(self):
         self.write_settings(json.dumps({"subagents": {"agents": {
-            "steward:coder": {"model": "m-old", "effortLevel": "medium"},
+            OLD_CODER_KEY: {"model": "m-old", "effortLevel": "medium"},
         }}}))
         self.assertNotIn("Profiles bound", self.context(self.co_env()))
 
@@ -533,7 +535,7 @@ class CopilotSkillTests(unittest.TestCase):
     def test_skill_names_every_profile(self):
         text = (COPILOT_SKILLS / "delegating" / "SKILL.md").read_text(encoding="utf-8")
         for role in COPILOT_NAMES.values():
-            self.assertIn("steward:" + role, text)
+            self.assertIn("steward-delegation:" + role, text)
         self.assertNotIn("orchestrat", text.lower())
 
     def test_skills_ship_delegating_without_orchestrating(self):
@@ -551,7 +553,7 @@ class CopilotSkillTests(unittest.TestCase):
             ("mechanic", "Claude Haiku 5.5", "medium"),
             ("top-reviewer", "Claude Opus 5.5", "xhigh"),
         ):
-            self.assertIn("| steward:{} | {} | `{}` |".format(role, model, effort), text)
+            self.assertIn("| steward-delegation:{} | {} | `{}` |".format(role, model, effort), text)
         self.assertNotIn("family in the profile's name", text)
 
 

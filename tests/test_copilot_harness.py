@@ -753,28 +753,5 @@ class CopilotAgentProfileTests(unittest.TestCase):
                 self.assertNotIn(old, text, "{} in {}".format(old, path))
 
 
-class CopilotSkillTests(unittest.TestCase):
-    def test_skill_names_every_profile_and_has_no_em_dash(self):
-        text = (COPILOT_SKILLS / "delegating" / "SKILL.md").read_text(encoding="utf-8")
-        for role in COPILOT_NAMES.values():
-            self.assertIn("steward:" + role, text)
-        self.assertNotIn(EM_DASH, text)
-        self.assertNotIn("orchestrat", text.lower())
-
-    def test_skill_maps_each_role_to_model_and_effort(self):
-        text = (COPILOT_SKILLS / "delegating" / "SKILL.md").read_text(encoding="utf-8")
-        for role, model, effort in (
-            ("coder", "Claude Opus 5.5", "medium"),
-            ("deep-reasoner", "Claude Opus 5.5", "xhigh"),
-            ("reviewer", "Claude Sonnet 5.5", "high"),
-            ("researcher", "Claude Sonnet 5.5", "low"),
-            ("writer", "Claude Sonnet 5.5", "medium"),
-            ("mechanic", "Claude Haiku 5.5", "medium"),
-            ("top-reviewer", "Claude Opus 5.5", "xhigh"),
-        ):
-            self.assertIn("| steward:{} | {} | `{}` |".format(role, model, effort), text)
-        self.assertNotIn("family in the profile's name", text)
-
-
 if __name__ == "__main__":
     unittest.main()

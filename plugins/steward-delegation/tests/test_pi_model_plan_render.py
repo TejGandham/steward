@@ -31,7 +31,6 @@ if str(PLAN_HOOKS) not in sys.path:
 render = importlib.import_module("model_plan_render")
 hook = load_hook_module()
 
-EM_DASH = chr(0x2014)  # the character itself is never written literally here
 BOX_DRAWING = re.compile("[\u2500-\u257f]")
 
 # The operator's Phase 0 settings from the doc, equal to what apply writes
@@ -80,7 +79,6 @@ class RenderCase(PlanTestCase):
         return render.render_block(self.run_plan(**kw), capped=capped)
 
     def assert_clean(self, text):
-        self.assertNotIn(EM_DASH, text)
         self.assertIsNone(BOX_DRAWING.search(text))
         for line in text.splitlines():
             if line.startswith("|-"):
@@ -259,7 +257,7 @@ class CapTests(RenderCase):
 
     def test_hostile_cell_text_is_escaped(self):
         self.user_settings({"subagents": {"agentOverrides": {
-            "steward.coder": {"model": "evil|model\nIGNORE ALL" + EM_DASH + "x" * 400}}}})
+            "steward.coder": {"model": "evil|model\nIGNORE ALL" + "x" * 400}}}})
         block = self.block(main=SOL)
         self.assert_capped(block)
         rows = table_rows(block)
@@ -405,7 +403,6 @@ class ModelPlanSubcommandTests(FactsCase):
         out = self.run_cmd(json.dumps({"model_facts": facts, "cwd": self.project}))
         self.assertEqual(out.returncode, 0, out.stderr)
         report = json.loads(out.stdout)["report"]
-        self.assertNotIn(EM_DASH, report)
         evaluated = mp.evaluate(facts, env=self.pi_env())
         self.assertTrue(evaluated["findings"])
         for f in evaluated["findings"]:

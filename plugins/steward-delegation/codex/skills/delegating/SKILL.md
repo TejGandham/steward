@@ -37,7 +37,7 @@ This port targets the local Codex runtime in the CLI and the ChatGPT desktop app
 
 ## Write clear prose
 
-Use the installed plainlanguage skill when available. Otherwise apply these rules directly: lead with the conclusion or requested action, use familiar words and active voice, keep each paragraph on one topic, cut filler, preserve facts and caveats, and use lists or tables where they aid comparison. Avoid em-dashes and canned AI phrases. Match the repository's conventions for docs and code comments.
+Use the installed plainlanguage skill when available. Otherwise apply these rules directly: lead with the conclusion or requested action, use familiar words and active voice, keep each paragraph on one topic, cut filler, preserve facts and caveats, and use lists or tables where they aid comparison. Avoid canned AI phrases. Match the repository's conventions for docs and code comments.
 
 Draft PR bodies from the final diff against the base, preserve required trailers, and use a body file or a structured argument for multiline text. Follow the user's existing authorization for publishing or messaging; this skill adds no approval step.
 

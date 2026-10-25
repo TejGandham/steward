@@ -87,9 +87,9 @@ class NoOpusMaxTests(unittest.TestCase):
     def test_copilot_agents_against_edict_models(self):
         # Copilot profiles pin no model; the edict's table names it per role.
         edict = EDICTS[2].read_text(encoding="utf-8")
-        rows = dict(re.findall(r"^\| steward:([a-z-]+) \| ([^|]+?) \|", edict, re.M))
+        rows = dict(re.findall(r"^\| steward-delegation:([a-z-]+) \| ([^|]+?) \|", edict, re.M))
         self.assertIn("top-reviewer", rows)
-        efforts = dict(re.findall(r"^\| steward:([a-z-]+) \| [^|]+ \| `([a-z]+)` \|", edict, re.M))
+        efforts = dict(re.findall(r"^\| steward-delegation:([a-z-]+) \| [^|]+ \| `([a-z]+)` \|", edict, re.M))
         for path in sorted((PLUGIN_ROOT / "copilot" / "agents").glob("*.agent.md")):
             role = frontmatter(path)["name"]
             if "opus" in rows.get(role, "").lower():
@@ -117,12 +117,12 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(opus_max_pairs(["fireworks/x/deepseek-v4p1-flash:max"]), [])
 
     def test_detects_table_rows_and_bullets(self):
-        self.assertEqual(len(table_opus_max_rows("| `steward:reviewer-opus-max` | Opus | max | x |")), 1)
+        self.assertEqual(len(table_opus_max_rows("| `steward-delegation:reviewer-opus-max` | Opus | max | x |")), 1)
         self.assertEqual(len(table_opus_max_rows("| `steward.top-reviewer` | `anthropic/claude-opus-5-5` | max |")), 1)
-        self.assertEqual(table_opus_max_rows("| `steward:reviewer-opus-max` | Opus | xhigh | x |"), [])
-        self.assertEqual(table_opus_max_rows("| steward:x | Sonnet | max |"), [])
-        self.assertEqual(len(PROFILE_PAIR.findall("**steward:reviewer-opus-max** (opus, max): top")), 1)
-        self.assertEqual(PROFILE_PAIR.findall("**steward:reviewer-opus-max** (opus, xhigh): top"), [])
+        self.assertEqual(table_opus_max_rows("| `steward-delegation:reviewer-opus-max` | Opus | xhigh | x |"), [])
+        self.assertEqual(table_opus_max_rows("| steward-delegation:x | Sonnet | max |"), [])
+        self.assertEqual(len(PROFILE_PAIR.findall("**steward-delegation:reviewer-opus-max** (opus, max): top")), 1)
+        self.assertEqual(PROFILE_PAIR.findall("**steward-delegation:reviewer-opus-max** (opus, xhigh): top"), [])
         self.assertEqual(PROFILE_PAIR.findall("Why max, not xhigh"), [])
 
 

@@ -188,7 +188,6 @@ test("subagent registered but not active: the delegation gate only reminds", asy
 	assert.match(note, /"toolActivation": "eager"/);
 	assert.match(note, /\/reload/);
 	assert.doesNotMatch(note, /STEWARD WARNING: the pi-subagents extension is not loaded/);
-	assert.ok(!note.includes("\u2014"));
 });
 
 test("subagent registered but not active: no missing-extension warning in the edict", async () => {
