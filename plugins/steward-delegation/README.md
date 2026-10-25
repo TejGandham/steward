@@ -48,7 +48,14 @@ copilot plugin install steward-delegation@steward
 
 Close running Copilot sessions before you install, remove or replace the plugin. A running session keeps the hooks of a deleted plugin folder, and Copilot then denies every edit and shell command in it.
 
-Codex: add this repository as a marketplace, then install `steward-delegation@steward-codex`. Codex asks you to review and trust the session-start hook with `/hooks` before it runs. To add the seven profiles as standalone Codex agents (`steward-<role>`), run `python3 codex/install_agents.py` from this plugin's folder; it refuses to overwrite an agent file that differs.
+Codex:
+
+```
+codex plugin marketplace add tejgandham/steward
+codex plugin add steward-delegation@steward-codex
+```
+
+A local checkout path works in place of `tejgandham/steward`. Checked on codex-cli 0.164.0. In an interactive session, review and trust the session-start hook once with `/hooks`. In `codex exec`, hooks of an untrusted plugin are skipped silently: no edict, no warning. For automation, run `codex exec --dangerously-bypass-hook-trust`. The Codex docs name that flag for vetted automation. To add the seven profiles as standalone Codex agents (`steward-<role>`), run `python3 codex/install_agents.py` from this plugin's folder; it refuses to overwrite an agent file that differs.
 
 pi:
 
@@ -141,7 +148,7 @@ On [pi](https://pi.dev) you get the same edict, the same seven profiles and the 
 
 - pi 1.0 or newer (`pi --version`).
 - `python3` on your PATH. The extension runs the same hook script as the other harnesses, `hooks/delegation_hook.py`. To use another interpreter, set `STEWARD_DELEGATION_PYTHON`. If the interpreter cannot be found, the extension shows a warning, and the edict and the gate are off for that session.
-- pi-subagents. Install it with `pi install npm:pi-subagents` before steward, and `pi update` keeps it current. Steward was last tested with pi 1.2.0 and pi-subagents 0.78.0. pi-subagents ships new versions every few days, so if an update breaks delegation, hold it at a known version with `pi install npm:pi-subagents@0.78.0`.
+- pi-subagents. Install it with `pi install npm:pi-subagents` before steward, and `pi update` keeps it current. Steward was tested live on 2026-10-25 with pi 1.4.0 and pi-subagents 0.82.1. Steward's pi-subagents mirror tests still pin 0.78.0, so two version tests fail against 0.82.1 (follow-up). pi-subagents ships new versions every few days, so if an update breaks delegation, hold it at a known version with `pi install npm:pi-subagents@0.78.0`.
 - The `plainlanguage` skill, in `~/.agents/skills/plainlanguage/` or `~/.pi/agent/skills/plainlanguage/` (recommended).
 - Optional: an `update-pr-summary` prompt template at `~/.pi/agent/prompts/update-pr-summary.md`. If it is there, the edict uses it to draft PR bodies.
 

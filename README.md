@@ -61,7 +61,15 @@ Close running Copilot sessions before you install, remove or replace a plugin. A
 
 ### Codex
 
-Add this repository as a marketplace, then install `steward-prose-gate@steward-codex` and `steward-delegation@steward-codex`. Codex asks you to review and trust each plugin's hooks with `/hooks` before they run.
+```
+codex plugin marketplace add tejgandham/steward
+codex plugin add steward-prose-gate@steward-codex
+codex plugin add steward-delegation@steward-codex
+```
+
+A local checkout path works in place of `tejgandham/steward`. Checked on codex-cli 0.164.0.
+
+Codex does not run the hooks of a plugin you have not trusted. In an interactive session, review and trust each plugin's hooks once with `/hooks`. In `codex exec`, hooks of an untrusted plugin are skipped silently: no edict, no gate, no warning. For automation, run `codex exec --dangerously-bypass-hook-trust`. The Codex docs name that flag for vetted automation.
 
 ### pi
 
@@ -101,6 +109,8 @@ Only delegation:
   "extensions": ["plugins/steward-delegation/pi/extensions/steward-delegation/index.ts"]
 }
 ```
+
+If you installed from a local path, the `source` value in these snippets must match the string pi wrote into `settings.json` at install time. pi stores a local install as a relative path, so copy that string. Otherwise the filter does not apply.
 
 pi's filters do not cover pi-subagents' own `subagents.agents` key, so the seven `steward.*` agents may still be listed when you filter out delegation. That does no harm.
 

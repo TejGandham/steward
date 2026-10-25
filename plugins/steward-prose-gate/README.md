@@ -33,7 +33,14 @@ copilot plugin install steward-prose-gate@steward
 
 Close running Copilot sessions before you install, remove or replace the plugin. A running session keeps the hooks of a deleted plugin folder, and Copilot then denies every shell command in it.
 
-Codex: add this repository as a marketplace, then install `steward-prose-gate@steward-codex`. Codex asks you to review and trust the two hooks with `/hooks` before they run.
+Codex:
+
+```
+codex plugin marketplace add tejgandham/steward
+codex plugin add steward-prose-gate@steward-codex
+```
+
+A local checkout path works in place of `tejgandham/steward`. Checked on codex-cli 0.164.0. In an interactive session, review and trust the two hooks once with `/hooks`. In `codex exec`, hooks of an untrusted plugin are skipped silently: no gate, no warning. For automation, run `codex exec --dangerously-bypass-hook-trust`. The Codex docs name that flag for vetted automation.
 
 pi: the repository's root package holds the pi extension, so `pi install git:github.com/tejgandham/steward` installs it. The root README of the repository shows how to install only the prose gate.
 
