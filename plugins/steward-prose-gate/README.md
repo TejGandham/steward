@@ -9,7 +9,7 @@ The block messages say to revise with the plainlanguage skill. The plugin does n
 
 Text in code blocks and inline code is never checked, so a banned word in backticks passes.
 
-The gates work on Claude Code, GitHub Copilot, Codex and pi. Each one fails open: if the hook errors or `python3` is missing, the reply or command goes through.
+The gates work on Claude Code, GitHub Copilot, Codex and pi. Each one fails open: if the hook errors or `python3` is missing, the reply or command goes through. The hooks call `python3`; on Windows you need a `python3` launcher on PATH.
 
 ## Install
 
@@ -35,15 +35,7 @@ Close running Copilot sessions before you install, remove or replace the plugin.
 
 Codex: add this repository as a marketplace, then install `steward-prose-gate@steward-codex`. Codex asks you to review and trust the two hooks with `/hooks` before they run.
 
-pi: the repository's root package holds the pi extension, so `pi install git:github.com/tejgandham/steward` installs it. To install only the prose gate, use the object form in `~/.pi/agent/settings.json`:
-
-```json
-{
-  "source": "git:github.com/tejgandham/steward",
-  "extensions": ["plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts"],
-  "skills": []
-}
-```
+pi: the repository's root package holds the pi extension, so `pi install git:github.com/tejgandham/steward` installs it. The root README of the repository shows how to install only the prose gate.
 
 For local development, run Claude Code against this folder:
 

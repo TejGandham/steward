@@ -1,5 +1,7 @@
 # Steward for Codex CLI and the ChatGPT desktop app
 
+> Steward is now split into separate plugins; see [plugin-split.md](plugin-split.md) for the current layout. The text below records the port as it was built and is kept as history.
+
 This port runs in the local Codex runtime in Codex CLI and the desktop app now branded ChatGPT. It adds a separate Codex manifest, skill, and hook adapter. Claude Code, pi, and Copilot keep their existing manifests, profiles, and hook behavior. Hosted ChatGPT Work is outside this port's scope.
 
 ## Install from a checkout

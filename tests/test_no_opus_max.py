@@ -4,7 +4,7 @@ GitHub Copilot (plugins/steward-delegation/skills/delegating/routing.md,
 section "Top reviewer on Opus 5.5 xhigh; Opus never at max (operator
 decision 2026-10-12)").
 
-This half checks the README, the onboarding template, the repo's
+This half checks the root and plugin READMEs, the onboarding template, the repo's
 .pi/settings.json and the example plans. The agent profiles, edicts and
 routing.md are checked in plugins/steward-delegation/tests/test_no_opus_max.py."""
 
@@ -14,10 +14,12 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-README = REPO_ROOT / "README.md"
+READMES = (REPO_ROOT / "README.md",) + tuple(
+    REPO_ROOT / "plugins" / name / "README.md"
+    for name in ("steward-delegation", "steward-prose-gate", "steward-orchestration"))
 PLAN_DOC = REPO_ROOT / "docs" / "roadmap" / "pi-model-plan.md"
 ONBOARDING = REPO_ROOT / "plugins" / "steward-orchestration" / "skills" / "orchestrating" / "onboarding-template.md"
-PROFILE_DOCS = (README, ONBOARDING)
+PROFILE_DOCS = READMES + (ONBOARDING,)
 RULE = "Claude Opus never runs at max"
 
 
@@ -74,7 +76,7 @@ class NoOpusMaxTests(unittest.TestCase):
         self.assertEqual(plan["roles"]["top-reviewer"]["thinking"], "xhigh")
 
     def test_plan_doc_and_readme_json_examples(self):
-        for path in (PLAN_DOC, README):
+        for path in (PLAN_DOC,) + READMES:
             for block in json_blocks(path.read_text(encoding="utf-8")):
                 self.assertEqual(opus_max_pairs(block), [], path.name)
 
