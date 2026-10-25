@@ -10,6 +10,14 @@ skill, gate counts direct edits on the main thread and denies (or warns
 about) the second one in a row, and delegated resets that count when a
 subagent runs.
 
+Harness `copilot` has the same three modes. session-start also records
+the main session, and gate and delegated act only for a recorded main
+session, since Copilot sends no agent_id for a subagent's calls.
+
+Harness `codex` has session-start only. Codex children share the
+parent's session_id, so a per-session edit counter would charge a
+worker's edits to the parent: Codex gets no gate and no delegated mode.
+
 This script must never raise to whoever called it. Any error, bad
 input, missing file, unknown harness or unknown mode means: exit 0, no
 output. Fail open, always.
@@ -34,12 +42,24 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-def get_config_dir(env):
-    """Where Claude Code keeps its config: $CLAUDE_CONFIG_DIR or ~/.claude."""
+def get_config_dir(env, harness="claude"):
+    """Where the harness keeps its config. Claude Code: $CLAUDE_CONFIG_DIR
+    or ~/.claude. Copilot: $COPILOT_HOME or ~/.copilot. Codex: $CODEX_HOME
+    or ~/.codex."""
+    home = env.get("HOME") or os.path.expanduser("~")
+    if harness == "copilot":
+        value = env.get("COPILOT_HOME")
+        if value:
+            return _expand_user(value, env)
+        return os.path.join(home, ".copilot")
+    if harness == "codex":
+        value = env.get("CODEX_HOME")
+        if value:
+            return _expand_user(value, env)
+        return os.path.join(home, ".codex")
     value = env.get("CLAUDE_CONFIG_DIR")
     if value:
         return value
-    home = env.get("HOME") or os.path.expanduser("~")
     return os.path.join(home, ".claude")
 
 
@@ -95,23 +115,120 @@ def strip_frontmatter(text):
     return text
 
 
+def _skill_path(env, *parts):
+    return os.path.join(get_plugin_root(env), *parts, "skills", "delegating", "SKILL.md")
+
+
+def _read_skill_body(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return strip_frontmatter(f.read()).strip("\n")
+
+
+_EDICT_HEADER = (
+    "<STEWARD>\n"
+    "You run under the steward delegation edict. The full text of the "
+    "steward-delegation:delegating skill follows; read it as standing "
+    "instructions.\n\n"
+)
+
+
 def cmd_session_start(payload, env):
-    skill_path = os.path.join(get_plugin_root(env), "skills", "delegating", "SKILL.md")
-    with open(skill_path, "r", encoding="utf-8") as f:
-        raw = f.read()
-    skill_body = strip_frontmatter(raw).strip("\n")
-    text = (
-        "<STEWARD>\n"
-        "You run under the steward delegation edict. The full text of the "
-        "steward-delegation:delegating skill follows; read it as standing "
-        "instructions.\n\n"
-        + skill_body
-        + "\n</STEWARD>"
-    )
+    skill_body = _read_skill_body(_skill_path(env))
     return json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": text,
+            "additionalContext": _EDICT_HEADER + skill_body + "\n</STEWARD>",
+        }
+    })
+
+
+def _copilot_bound_profiles_note(config_dir):
+    """One line naming the steward-delegation profiles the operator bound
+    in Copilot's settings.json, or None. Any read or parse problem means
+    no line."""
+    try:
+        with open(os.path.join(config_dir, "settings.json"), "r", encoding="utf-8") as f:
+            settings = json.load(f)
+        agents = settings["subagents"]["agents"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(agents, dict):
+        return None
+    entries = []
+    for key, value in agents.items():
+        if not (isinstance(key, str) and key.startswith("steward-delegation:")):
+            continue
+        if not isinstance(value, dict):
+            value = {}
+        entries.append("{k} (model {m}, effort {e})".format(
+            k=key, m=value.get("model"), e=value.get("effortLevel")))
+    if not entries:
+        return None
+    return (
+        "Profiles bound in settings.json (omit model and reasoning_effort "
+        "when you dispatch these): " + ", ".join(entries)
+    )
+
+
+def _copilot_main_dir(env):
+    return os.path.join(get_state_dir(env), "copilot-main")
+
+
+def _record_copilot_main_session(env, session_id):
+    if not _non_empty_str(session_id):
+        return
+    directory = _copilot_main_dir(env)
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, _sanitize_session_id(session_id))
+    with open(path, "a", encoding="utf-8"):
+        pass
+
+
+def _is_copilot_main_session(env, session_id):
+    if not _non_empty_str(session_id):
+        return False
+    path = os.path.join(_copilot_main_dir(env), _sanitize_session_id(session_id))
+    return os.path.isfile(path)
+
+
+_COPILOT_FALLBACK_EDICT = (
+    "Every non-trivial task runs in a steward subagent. Dispatch it with "
+    "the task tool, agent_type steward-delegation:<profile>, and pass model "
+    "and reasoning_effort. Write for the operator in plain language.\n"
+    "STEWARD WARNING: the steward delegating skill file was missing at "
+    "{path}; this short fallback stands in for it."
+)
+
+
+def cmd_copilot_session_start(payload, env):
+    # Best-effort and first: an unwritable state dir or a missing skill
+    # file must not cost the marker or the injection.
+    try:
+        _record_copilot_main_session(env, payload.get("session_id"))
+    except OSError:
+        pass
+    skill_path = _skill_path(env, "copilot")
+    try:
+        skill_body = _read_skill_body(skill_path)
+    except OSError:
+        skill_body = _COPILOT_FALLBACK_EDICT.format(path=skill_path)
+    parts = [_EDICT_HEADER]
+    note = _copilot_bound_profiles_note(get_config_dir(env, "copilot"))
+    if note:
+        parts.append(note + "\n")
+    parts.append(skill_body)
+    parts.append("\n</STEWARD>")
+    # Copilot drops the wrapped hookSpecificOutput form at session start.
+    return json.dumps({"additionalContext": "".join(parts)})
+
+
+def cmd_codex_session_start(payload, env):
+    # A missing skill file raises, and main() turns that into no output.
+    skill_body = _read_skill_body(_skill_path(env, "codex")).strip()
+    return json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": skill_body,
         }
     })
 
@@ -325,11 +442,35 @@ def classify_bash_command(command):
 # gate: allowlist
 # ---------------------------------------------------------------------------
 
-def default_allowlist_globs(env):
-    config_dir = get_config_dir(env)
+def default_allowlist_globs(env, harness="claude"):
+    config_dir = get_config_dir(env, harness)
     home = env.get("HOME") or os.path.expanduser("~")
-    return [
-        os.path.join(config_dir, "**"),
+    harness_globs = []
+    config_globs = [os.path.join(config_dir, "**")]
+    if harness == "copilot":
+        harness_globs = [
+            "**/AGENTS.md",
+            "**/.github/copilot-instructions.md",
+            "**/.github/instructions/**",
+            "**/.github/agents/**",
+            "**/.github/skills/**",
+            "**/.github/copilot/**",
+        ]
+        # Copilot chat sessions run with cwd under <config_dir>/chats/, so
+        # the whole config dir would exempt every edit made in a chat.
+        config_globs = [
+            os.path.join(config_dir, rel) for rel in (
+                "steward-*/**",
+                "settings.json",
+                "settings.local.json",
+                "copilot-instructions.md",
+                "agents/**",
+                "skills/**",
+                "hooks/**",
+                "session-state/**",
+            )
+        ]
+    return harness_globs + config_globs + [
         os.path.join(home, ".claude", "**"),
         os.path.join(home, ".claude-profiles", "**"),
         "**/memory/**",
@@ -350,14 +491,14 @@ def extra_allowlist_globs(config_dir):
         return []
 
 
-def is_allowlisted(path, env, cwd=None):
+def is_allowlisted(path, env, cwd=None, harness="claude"):
     """A relative path is resolved against cwd (falling back to this
     process's own cwd) before matching, so "CLAUDE.md" or "memory/x.md"
     match the same globs an absolute path would."""
     if not path:
         return False
-    config_dir = get_config_dir(env)
-    globs = default_allowlist_globs(env) + extra_allowlist_globs(config_dir)
+    config_dir = get_config_dir(env, harness)
+    globs = default_allowlist_globs(env, harness) + extra_allowlist_globs(config_dir)
     candidate = _expand_user(path, env)
     if not os.path.isabs(candidate):
         base = cwd or os.getcwd()
@@ -389,14 +530,14 @@ def _path_like_tokens(command):
     return tokens
 
 
-def bash_command_allowlisted(command, env, cwd=None):
+def bash_command_allowlisted(command, env, cwd=None, harness="claude"):
     """A Bash command is exempt only if every path-looking token in it is
     allowlisted, and there is at least one such token. A command that
     touches one allowlisted path and one real path still counts."""
     tokens = _path_like_tokens(command)
     if not tokens:
         return False
-    return all(is_allowlisted(t, env, cwd) for t in tokens)
+    return all(is_allowlisted(t, env, cwd, harness) for t in tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -432,22 +573,52 @@ def direct_edit_file_path(tool_name, tool_input):
     return None
 
 
-def classify_tool_call(tool_name, tool_input, env, cwd=None):
+_PATCH_PATH_RE = re.compile(
+    r"^\*\*\* (?:Add File|Update File|Delete File|Move to):[ \t]*(.+?)[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def apply_patch_paths(patch):
+    """Every target path named in a Copilot apply_patch string."""
+    return [p for p in _PATCH_PATH_RE.findall(patch) if p]
+
+
+def _classify_copilot_edit(tool_input, env, cwd):
+    """Copilot's Edit and Write: an apply_patch call passes the patch as a
+    bare string; the create and edit tools pass a dict with the target in
+    "path"."""
+    if isinstance(tool_input, str):
+        paths = apply_patch_paths(tool_input)
+        if not paths:
+            return True, False
+        return True, all(is_allowlisted(p, env, cwd, "copilot") for p in paths)
+    if not isinstance(tool_input, dict):
+        return True, False
+    path = tool_input.get("path") or tool_input.get("file_path")
+    if not path:
+        return True, False
+    return True, is_allowlisted(path, env, cwd, "copilot")
+
+
+def classify_tool_call(tool_name, tool_input, env, cwd=None, harness="claude"):
     """Returns (is_direct_edit, is_allowlisted)."""
+    if harness == "copilot" and tool_name in ("Edit", "Write"):
+        return _classify_copilot_edit(tool_input, env, cwd)
     if not isinstance(tool_input, dict):
         tool_input = {}
     if tool_name in _DIRECT_EDIT_TOOLS:
         path = direct_edit_file_path(tool_name, tool_input)
         if not path:
             return True, False
-        return True, is_allowlisted(path, env, cwd)
+        return True, is_allowlisted(path, env, cwd, harness)
     if tool_name in _BASH_TOOLS:
         command = tool_input.get("command")
         if not isinstance(command, str):
             command = ""
         if not classify_bash_command(command):
             return False, False
-        return True, bash_command_allowlisted(command, env, cwd)
+        return True, bash_command_allowlisted(command, env, cwd, harness)
     return False, False
 
 
@@ -566,8 +737,8 @@ def _read_gate_mode_file(config_dir):
     return None
 
 
-def get_gate_mode(env):
-    config_dir = get_config_dir(env)
+def get_gate_mode(env, harness="claude"):
+    config_dir = get_config_dir(env, harness)
     file_mode = _read_gate_mode_file(config_dir)
     if file_mode:
         return file_mode
@@ -577,8 +748,19 @@ def get_gate_mode(env):
     return "hard"
 
 
-def gate_message(count, config_dir):
+def gate_message(count, config_dir, harness="claude"):
     # The pi extension matches the "steward delegation gate" prefix.
+    if harness == "copilot":
+        return (
+            "steward delegation gate: this is direct edit #{n} on the main "
+            "thread with no subagent call in between. The edict says every "
+            "non-trivial task runs in a subagent. Delegate it with the task "
+            "tool (agent_type steward-delegation:coder for code, "
+            "steward-delegation:mechanic for rote edits), or ask the "
+            "operator to set the gate to soft or off by writing that word "
+            "to {gate_path} (takes effect immediately; "
+            "STEWARD_DELEGATION_GATE only applies at next start)."
+        ).format(n=count, gate_path=_gate_mode_path(config_dir))
     return (
         "steward delegation gate: this is direct edit #{n} on the main "
         "thread with no subagent call in between. The edict says every "
@@ -595,23 +777,25 @@ def gate_message(count, config_dir):
 # gate mode
 # ---------------------------------------------------------------------------
 
-def cmd_gate(payload, env):
+def cmd_gate(payload, env, harness="claude"):
     if _non_empty_str(payload.get("agent_id")):
         return None
 
-    mode = get_gate_mode(env)
+    mode = get_gate_mode(env, harness)
     if mode == "off":
         return None
 
     tool_name = payload.get("tool_name")
     tool_input = payload.get("tool_input")
-    if not isinstance(tool_input, dict):
+    # A Copilot apply_patch call passes the patch as a bare string.
+    if not isinstance(tool_input, dict) and not (
+            harness == "copilot" and isinstance(tool_input, str)):
         tool_input = {}
     cwd = payload.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = None
 
-    is_edit, allowlisted = classify_tool_call(tool_name, tool_input, env, cwd)
+    is_edit, allowlisted = classify_tool_call(tool_name, tool_input, env, cwd, harness)
     if not is_edit or allowlisted:
         return None
 
@@ -622,7 +806,7 @@ def cmd_gate(payload, env):
     if count <= 1:
         return None
 
-    msg = gate_message(count, get_config_dir(env))
+    msg = gate_message(count, get_config_dir(env, harness), harness)
     if mode == "hard":
         return json.dumps({
             "hookSpecificOutput": {
@@ -657,14 +841,43 @@ def cmd_delegated(payload, env):
 
 
 # ---------------------------------------------------------------------------
+# Copilot gate and delegated
+#
+# Copilot sends no agent_id; a subagent's calls carry its own session_id,
+# which session-start never recorded. Act only for a recorded main session.
+# ---------------------------------------------------------------------------
+
+def cmd_copilot_gate(payload, env):
+    if not _is_copilot_main_session(env, payload.get("session_id")):
+        return None
+    return cmd_gate(payload, env, "copilot")
+
+
+def cmd_copilot_delegated(payload, env):
+    if not _is_copilot_main_session(env, payload.get("session_id")):
+        return None
+    return cmd_delegated(payload, env)
+
+
+# ---------------------------------------------------------------------------
 # dispatch
 # ---------------------------------------------------------------------------
 
+# Codex has session-start only: no gate and no delegated mode (see the
+# module docstring), so `codex gate` falls through to "no output".
 _MODES = {
     "claude": {
         "session-start": cmd_session_start,
         "gate": cmd_gate,
         "delegated": cmd_delegated,
+    },
+    "copilot": {
+        "session-start": cmd_copilot_session_start,
+        "gate": cmd_copilot_gate,
+        "delegated": cmd_copilot_delegated,
+    },
+    "codex": {
+        "session-start": cmd_codex_session_start,
     },
 }
 

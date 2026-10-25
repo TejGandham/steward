@@ -20,6 +20,12 @@ from pathlib import Path
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = PLUGIN_ROOT / "hooks" / "delegation_hook.py"
 
+
+def load_hooks_json(harness):
+    """The parsed `<harness>/hooks.json` shipped in this plugin."""
+    with open(PLUGIN_ROOT / harness / "hooks.json", encoding="utf-8") as f:
+        return json.load(f)["hooks"]
+
 # Env names the hook reads, or that would point it at the operator's real
 # files. Each test clears them and sets its own.
 _CLEARED_ENV = (
@@ -82,6 +88,22 @@ class StewardTestCase(unittest.TestCase):
         with open(os.path.join(skill_dir, "SKILL.md"), "w", encoding="utf-8") as f:
             f.write(skill_body)
         return root
+
+    def write_plugin_file(self, relative_path, content):
+        """Write a fixture file under the temp plugin root."""
+        path = os.path.join(self.plugin_root, *relative_path.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+
+    def write_dep(self, relative_path, content="stub\n"):
+        """Write a file under the temp harness config dir."""
+        path = os.path.join(self.config, *relative_path.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
 
     def make_env(self, **extra):
         env = os.environ.copy()
