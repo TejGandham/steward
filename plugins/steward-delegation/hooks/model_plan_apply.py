@@ -1,6 +1,6 @@
 """`/steward-models apply` for pi (Phase 3 of docs/roadmap/pi-model-plan.md).
 
-Compiles the USER model plan (``<agent-dir>/steward/model-plan.json``) into
+Compiles the USER model plan (``<agent-dir>/steward-delegation/model-plan.json``) into
 pi-subagents user settings (``<agent-dir>/settings.json``) and writes the
 pi-subagents profile file ``<agent-dir>/profiles/pi-subagents/steward.json``.
 It never reads cwd, a project plan, project settings or allow/deny lists:
@@ -151,7 +151,7 @@ def _clean_models(facts):
 
 
 def _read_user_plan(agent_dir):
-    path = os.path.join(agent_dir, "steward", "model-plan.json")
+    path = os.path.join(agent_dir, "steward-delegation", "model-plan.json")
     data = _read_bytes(path)
     if data is None:
         raise Refused("no user plan at %s; write one first (README \"Model plan on pi\")" % path)

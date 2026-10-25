@@ -8,9 +8,9 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createSteward } from "../../pi/extensions/steward/index.ts";
+import { createSteward } from "../../pi/extensions/steward-delegation/index.ts";
 
-const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_HOOK_LOG"];
+const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_DELEGATION_GATE", "STEWARD_DELEGATION_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_DELEGATION_HOOK_LOG"];
 const ALL_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const SONNET = "anthropic/claude-sonnet-5-5";
 
@@ -25,7 +25,7 @@ beforeEach(() => {
 	process.env.HOME = join(tmp, "home");
 	process.env.XDG_STATE_HOME = join(tmp, "state");
 	process.env.PI_CODING_AGENT_DIR = join(tmp, "config");
-	for (const k of ["STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_HOOK_LOG"]) delete process.env[k];
+	for (const k of ["STEWARD_DELEGATION_GATE", "STEWARD_DELEGATION_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_DELEGATION_HOOK_LOG"]) delete process.env[k];
 });
 
 afterEach(() => {
@@ -55,8 +55,8 @@ const settingsPath = () => config("settings.json");
 const SETTINGS_TEXT = JSON.stringify({ theme: "dark", subagents: { agentOverrides: { worker: { model: "x/y" } } } }, null, 2);
 
 function writePlan(plan = { version: 1, roles: { coder: { model: SONNET, thinking: "high" } } }) {
-	mkdirSync(config("steward"), { recursive: true });
-	writeFileSync(config("steward", "model-plan.json"), JSON.stringify(plan));
+	mkdirSync(config("steward-delegation"), { recursive: true });
+	writeFileSync(config("steward-delegation", "model-plan.json"), JSON.stringify(plan));
 	writeFileSync(settingsPath(), SETTINGS_TEXT);
 }
 
@@ -210,7 +210,7 @@ test("a failing subcommand writes nothing and shows an error", async () => {
 		const fake = join(tmp, `fake-python-${++counter}`);
 		writeFileSync(fake, script);
 		chmodSync(fake, 0o755);
-		process.env.STEWARD_PYTHON = fake;
+		process.env.STEWARD_DELEGATION_PYTHON = fake;
 		const env = load({ hasUI: true });
 		await env.run("apply --yes");
 		assert.match(env.shown().at(-1), pattern);
@@ -218,7 +218,7 @@ test("a failing subcommand writes nothing and shows an error", async () => {
 		assert.equal(env.reloads, 0);
 		assert.equal(readFileSync(settingsPath(), "utf8"), SETTINGS_TEXT);
 	}
-	process.env.STEWARD_PYTHON = join(tmp, "no-such-python");
+	process.env.STEWARD_DELEGATION_PYTHON = join(tmp, "no-such-python");
 	const env = load();
 	await env.run("apply --yes");
 	assert.match(env.shown().at(-1), /python3 was not found/);
@@ -255,7 +255,7 @@ test("the preview works but the writing call fails: nothing written, error shown
 	const fake = join(tmp, "half-python");
 	writeFileSync(fake, `#!/bin/sh\ninput=$(cat)\ncase "$input" in *'"dryRun":false'*) echo '{"error": "model-plan-apply: disk full", "refused": true}'; exit 3 ;; esac\nprintf '%s' "$input" | exec python3 "$@"\n`);
 	chmodSync(fake, 0o755);
-	process.env.STEWARD_PYTHON = fake;
+	process.env.STEWARD_DELEGATION_PYTHON = fake;
 	const env = load({ hasUI: true, confirm: true });
 	await env.run("apply");
 	assert.equal(env.asked.length, 1, "the preview ran and was confirmed");

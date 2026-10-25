@@ -1,8 +1,8 @@
 """Summarizer for the pi per-launch outcome log (docs/roadmap/pi-model-plan.md, Phase 4).
 
 The pi extension appends one JSON line per finished steward.* child launch to
-``$XDG_STATE_HOME/steward/pi-delegations.jsonl`` (default
-``~/.local/state/steward/pi-delegations.jsonl``)::
+``$XDG_STATE_HOME/steward-delegation/pi-delegations.jsonl`` (default
+``~/.local/state/steward-delegation/pi-delegations.jsonl``)::
 
     {"v": 2, "ts": ISO-8601, "sessionId", "cwd", "sessionCwd", "agent", "runId",
      "modelParam": str|None, "model": str|None, "thinking": str|None,
@@ -35,7 +35,7 @@ DEFAULT_DAYS = 7
 
 def log_path(env):
     state = env.get("XDG_STATE_HOME") or os.path.join(env.get("HOME") or os.path.expanduser("~"), ".local", "state")
-    return os.path.join(state, "steward", LOG_NAME)
+    return os.path.join(state, "steward-delegation", LOG_NAME)
 
 
 def percentile(values, p):

@@ -114,7 +114,7 @@ class PlanTestCase(unittest.TestCase):
         return str(path)
 
     def user_plan(self, data):
-        return self.write_json(self.agent_dir / "steward" / "model-plan.json", data)
+        return self.write_json(self.agent_dir / "steward-delegation" / "model-plan.json", data)
 
     def project_plan(self, data):
         return self.write_json(self.project / ".pi" / "steward-model-plan.json", data)
@@ -245,7 +245,7 @@ class SchemaTests(PlanTestCase):
     def test_bad_version_and_json(self):
         self.user_plan({"version": 2, "roles": {}})
         self.assertIn("plan-bad-version", self.codes(self.run_plan()))
-        (self.agent_dir / "steward" / "model-plan.json").write_text("{not json", encoding="utf-8")
+        (self.agent_dir / "steward-delegation" / "model-plan.json").write_text("{not json", encoding="utf-8")
         result = self.run_plan()
         self.assertIn("plan-unreadable", self.codes(result))
         self.assertFalse(result["hasPlan"])

@@ -142,9 +142,9 @@ class SubcommandTests(unittest.TestCase):
     def test_default_path_and_missing_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(ds.log_path({"XDG_STATE_HOME": tmp}),
-                             os.path.join(tmp, "steward", "pi-delegations.jsonl"))
+                             os.path.join(tmp, "steward-delegation", "pi-delegations.jsonl"))
             self.assertEqual(ds.log_path({"HOME": tmp}),
-                             os.path.join(tmp, ".local", "state", "steward", "pi-delegations.jsonl"))
+                             os.path.join(tmp, ".local", "state", "steward-delegation", "pi-delegations.jsonl"))
             code, out = self.run_hook({"days": 7}, {"XDG_STATE_HOME": tmp})
             self.assertEqual(code, 0)
             self.assertIn("No steward launches", out["report"])

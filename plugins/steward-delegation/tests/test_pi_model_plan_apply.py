@@ -129,7 +129,7 @@ class ApplyTestCase(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def user_plan(self, data):
-        path = self.agent_dir / "steward" / "model-plan.json"
+        path = self.agent_dir / "steward-delegation" / "model-plan.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data), encoding="utf-8")
         return path
@@ -435,10 +435,10 @@ class SafetyTests(ApplyTestCase):
             with self.assertRaises(mpa.Refused, msg=json.dumps(plan)):
                 self.apply()
             self.assertEqual(self.settings_path.read_bytes(), before)
-        (self.agent_dir / "steward" / "model-plan.json").write_text("{oops", encoding="utf-8")
+        (self.agent_dir / "steward-delegation" / "model-plan.json").write_text("{oops", encoding="utf-8")
         with self.assertRaises(mpa.Refused):
             self.apply()
-        (self.agent_dir / "steward" / "model-plan.json").unlink()
+        (self.agent_dir / "steward-delegation" / "model-plan.json").unlink()
         with self.assertRaises(mpa.Refused) as caught:
             self.apply()
         self.assertIn("no user plan", str(caught.exception))

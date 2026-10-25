@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { writeAllSync } from "../../pi/extensions/steward/index.ts";
+import { writeAllSync } from "../../pi/extensions/steward-delegation/index.ts";
 
 function eagain() {
 	return Object.assign(new Error("EAGAIN: resource temporarily unavailable"), { code: "EAGAIN" });
