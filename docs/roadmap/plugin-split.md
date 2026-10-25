@@ -528,6 +528,8 @@ pi:
 
 Guidance for the implementation plan, not the plan. Each step is one commit, about one sitting, on a branch off main (merge with `--no-ff`, never rebase). "Suite" means `npm test` from the repo root; at step 1 it equals today's `python3 -m unittest discover -s tests && node --test 'tests/pi/*.test.mjs'`, and any step that adds a test folder extends `scripts.test` in the same commit. Every done-check includes: suite passes with no failure beyond the known baseline, and the printed test totals drop only by tests the step names as retired. Merge steps 0 and 1 to main on their own, before anything moves, so the pin and the pi notice are live first.
 
+Step 15 result: skills: [plainlanguage] (skills: [plainlanguage:plainlanguage] also works); unknown names are ignored; checked 2026-10-25 with Claude Code 2.1.310. Evidence: a scratch session with plainlanguage loaded as a plugin preloaded the full skill body for both forms, an unknown name ran normally with no error, and a control without the plugin preloaded nothing.
+
 **Status (2026-10-24).** Steps 0 and 1 are done.
 - Step 0: no work. The tag `v0.14.2` already existed locally and on origin, pointing at f13555b.
 - Step 1: branch `pin-0142` (commit 6d82672) merged to main with `--no-ff` as 5d33028 and pushed to origin. Both catalogs pin `steward` to `v0.14.2` in the shapes under [Repo layout after the reorg](#repo-layout-after-the-reorg); `README.md` opens with a "Staying on 0.14.2" notice that carries the pi pin; `tests/test_catalogs.py` checks both pins. Suite with `PI_SUBAGENTS_DIR=/nonexistent` (skips the two pi-subagents version tests): 610 Python tests OK (13 skipped), 102 node tests pass.
