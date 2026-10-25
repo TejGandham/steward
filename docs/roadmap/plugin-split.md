@@ -197,7 +197,7 @@ Deleted from the root: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`
 Catalog entries on main **(orchestrator's call: one catalog per harness keeps the frozen monolith and the new plugins; marketplace names `steward` and `steward-codex` are unchanged)**:
 
 ```json
-{"name": "steward", "source": {"source": "github", "repo": "tejgandham/steward", "ref": "v0.14.2"}}
+{"name": "steward", "source": {"source": "url", "url": "https://github.com/TejGandham/steward.git", "ref": "v0.14.2"}}
 {"name": "steward-delegation", "source": "./plugins/steward-delegation"}
 ```
 
@@ -535,7 +535,8 @@ Guidance for the implementation plan, not the plan. Each step is one commit, abo
 - After check, with the pin on main: `claude plugin marketplace update` and `copilot plugin marketplace update` both fetched the pinned catalog. Each install stayed at 0.14.2 in the same cache path; `installed_plugins.json` and Copilot `config.json` did not change; cache file mtimes did not change, apart from Claude Code's `.in_use` marker. The edict and gate-deny checks passed again. Nothing reinstalled. An explicit `copilot plugin update steward@steward` then said "already at latest" (v0.14.2) but did fetch again (its `source_sha` changed); it stayed at 0.14.2 in the same path, and the edict and gate-deny checks passed again.
 - Fresh install: a new scratch `CLAUDE_CONFIG_DIR` that added this checkout as a marketplace installed `steward@steward` 0.14.2 from commit f13555b, with `hooks/steward_hook.py` in its cache.
 - Live session, after the pin: `claude -p --model haiku` in the old scratch Claude Code config quoted the edict's first line ("You run under the steward delegation edict..."). Asked to make two files with the Write tool in `/var/tmp` (the gate exempts `/tmp/**`), the first write succeeded and the second was denied: "steward delegation gate: this is direct edit #2 on the main thread with no subagent call in between".
-- Found: `claude plugin update steward@steward` fails on this machine for a `github` source. It clones over SSH (`git@github.com: Permission denied (publickey)`), while `claude plugin install` falls back to HTTPS when SSH is not set up. The installed 0.14.2 stays in place and keeps working, so no machinery was added. A user without a GitHub SSH key who runs an explicit update sees this error.
+- Source shape change (operator decided): the first pin used the `github` shape, and `claude plugin update steward@steward` failed with it on this machine, because update cloned over SSH (`git@github.com: Permission denied (publickey)`) while install fell back to HTTPS. Branch `pin-0142-url` (commit 155723b, merged to main as e9d2562 and pushed) switched the Claude Code entry to the `url` shape with an HTTPS URL. After `claude plugin marketplace update`, `claude plugin update steward@steward` in the old scratch config said "already at the latest version (0.14.2)"; `installed_plugins.json` and the plugin files did not change, and the hook checks passed. `copilot plugin update steward@steward` read the new entry, stayed at 0.14.2 in the same path with the tag's tree (f13555b), and its hook checks passed.
+- Codex, with codex-cli 0.164.0 in a scratch `CODEX_HOME`: `codex plugin marketplace add TejGandham/steward` added `steward-codex`, and `codex plugin add steward@steward-codex` installed 0.14.2 at `plugins/cache/steward-codex/steward/0.14.2` from the tag's tree. `codex plugin list` shows the source as the HTTPS URL with ref `v0.14.2`, so Codex accepts `ref` on a `url` source. The cache holds `codex/hooks.json` and `hooks/steward_hook.py`, and the cached `codex/steward.py session-start` printed the Codex edict. No live Codex session was run.
 
 | # | Step | Files | Done-check |
 |-|-|-|-|
@@ -595,7 +596,7 @@ Left to the builder: function bodies and exact wording of messages; how tests ar
 
 - Checks for step 21 that need no operator input, each with its fallback:
   - Old installs keep 0.14.2 after the catalog change (checked earlier, at step 1): a harness that re-resolves and breaks one falls back to the README "Staying on 0.14.2" pin or reinstall from the tag.
-  - Codex accepts `ref` on a `url` source (else `git-subdir` with `path: "./"`).
+  - Codex accepts `ref` on a `url` source (else `git-subdir` with `path: "./"`). Answered at step 1: it does.
   - Copilot finds `.github/plugin/plugin.json` in a subfolder (FINDINGS.md lists it as unconfirmed).
   - Codex loads a hooks-only `.codex-plugin/plugin.json` (prose gate has no `skills`; every documented example has one). A load failure here is a manifest question, not a hook bug.
   - pi filter paths match without the `./` the manifest uses. A wrong form loads everything silently, so check that the excluded extension is really absent.
