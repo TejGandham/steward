@@ -23,7 +23,7 @@ Inputs
    ``models`` is not in the catalog.
 
 2. Files, read only:
-   - user plan ``<agent-dir>/steward/model-plan.json``;
+   - user plan ``<agent-dir>/steward-delegation/model-plan.json``;
    - project plan ``<project>/.pi/steward-model-plan.json`` (trusted only);
      every ``.pi/steward-model-plan.json`` from cwd up to home adds its
      ``allowProviders`` and ``denyProviders``, in an untrusted project too,
@@ -1903,7 +1903,7 @@ def _evaluate(facts, env, agent_dir, agents_dir):
     project_root = find_project_root(cwd, env) if trusted else None
 
     # ---- plans
-    user_plan_path = os.path.join(agent_dir, "steward", "model-plan.json")
+    user_plan_path = os.path.join(agent_dir, "steward-delegation", "model-plan.json")
     user_plan = _read_plan(user_plan_path, False, findings)
     root_plan_path, project_plan, list_plans = read_project_plans(cwd, env, trusted, project_root, findings)
     has_plan = user_plan is not None or project_plan is not None or bool(list_plans)

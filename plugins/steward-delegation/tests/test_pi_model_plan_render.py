@@ -291,7 +291,7 @@ class FactsCase(StewardTestCase):
                                "---\nname: delegating\ndescription: fixture\n---\nCodex body.\n")
         self.project = os.path.join(self.tmp, "work", "repo")
         os.makedirs(os.path.join(self.project, ".pi"), exist_ok=True)
-        plan_dir = os.path.join(self.config, "steward")
+        plan_dir = os.path.join(self.config, "steward-delegation")
         os.makedirs(plan_dir, exist_ok=True)
         with open(os.path.join(plan_dir, "model-plan.json"), "w", encoding="utf-8") as f:
             json.dump(operator_plan(), f)
@@ -417,7 +417,7 @@ class ModelPlanSubcommandTests(FactsCase):
             src = row["effective"]["modelSource"]["file"]
             if src:
                 self.assertIn(src, report)
-        self.assertIn(os.path.join(self.config, "steward", "model-plan.json"), report)
+        self.assertIn(os.path.join(self.config, "steward-delegation", "model-plan.json"), report)
         self.assertIn("## Model plan on this machine", report)
         self.assertNotIn("more: run /steward-models check", report)
 

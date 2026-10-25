@@ -1,5 +1,5 @@
 // Phase 4 of docs/roadmap/pi-model-plan.md: one JSON line per finished steward.* launch in
-// $XDG_STATE_HOME/steward/pi-delegations.jsonl, and /steward-models stats. The fake
+// $XDG_STATE_HOME/steward-delegation/pi-delegations.jsonl, and /steward-models stats. The fake
 // pi-subagents results and events below copy the shapes pi-subagents 0.77.0 produced in a
 // live probe on 2026-10-13 (see the plan doc): a sync result carries results[] with model,
 // thinking and progressSummary.durationMs; an async launch result has asyncId and
@@ -11,9 +11,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { classifyKind, createSteward, errorClass } from "../../pi/extensions/steward/index.ts";
+import { classifyKind, createSteward, errorClass } from "../../pi/extensions/steward-delegation/index.ts";
 
-const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_HOOK_LOG"];
+const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_DELEGATION_GATE", "STEWARD_DELEGATION_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_DELEGATION_HOOK_LOG"];
 const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const SECRET = "SECRET-TASK-TEXT";
 const OUTPUT = "SECRET-CHILD-OUTPUT";
@@ -29,8 +29,8 @@ beforeEach(() => {
 	process.env.HOME = join(tmp, "home");
 	process.env.XDG_STATE_HOME = join(tmp, "state");
 	process.env.PI_CODING_AGENT_DIR = join(tmp, "config");
-	process.env.STEWARD_HOOK_LOG = join(tmp, "hook.jsonl");
-	for (const k of ["STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD"]) delete process.env[k];
+	process.env.STEWARD_DELEGATION_HOOK_LOG = join(tmp, "hook.jsonl");
+	for (const k of ["STEWARD_DELEGATION_GATE", "STEWARD_DELEGATION_PYTHON", "PI_SUBAGENT_CHILD"]) delete process.env[k];
 });
 
 afterEach(() => {
@@ -41,7 +41,7 @@ afterEach(() => {
 	rmSync(tmp, { recursive: true, force: true });
 });
 
-const logPath = () => join(tmp, "state", "steward", "pi-delegations.jsonl");
+const logPath = () => join(tmp, "state", "steward-delegation", "pi-delegations.jsonl");
 const logLines = () => (existsSync(logPath()) ? readFileSync(logPath(), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 
 function m(full) {
@@ -126,7 +126,7 @@ function syncRow(over = {}) {
 }
 
 function writePlan() {
-	const dir = join(tmp, "config", "steward");
+	const dir = join(tmp, "config", "steward-delegation");
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "model-plan.json"), JSON.stringify({
 		version: 1,
@@ -135,7 +135,7 @@ function writePlan() {
 }
 
 function launchStrings() {
-	for (const line of readFileSync(process.env.STEWARD_HOOK_LOG, "utf8").trim().split("\n")) {
+	for (const line of readFileSync(process.env.STEWARD_DELEGATION_HOOK_LOG, "utf8").trim().split("\n")) {
 		const row = JSON.parse(line);
 		if (row.subcommand !== "session-start" || !row.stdout) continue;
 		const out = JSON.parse(row.stdout).hookSpecificOutput;
@@ -292,7 +292,7 @@ test("the log rotates to a stamped name above the cap", async () => {
 	const { fire } = load({ delegationLogMaxBytes: 200 });
 	await fire("session_start", { type: "session_start", reason: "startup" });
 	for (let i = 0; i < 3; i++) await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: `r${i}`, results: [syncRow()] }));
-	assert.ok(readdirSync(join(tmp, "state", "steward")).some((n) => /^pi-delegations\.jsonl\.\d{8}T\d{9}Z-\d+$/.test(n)));
+	assert.ok(readdirSync(join(tmp, "state", "steward-delegation")).some((n) => /^pi-delegations\.jsonl\.\d{8}T\d{9}Z-\d+$/.test(n)));
 	assert.ok(logLines().length >= 1 && logLines().length < 3);
 });
 
@@ -369,7 +369,7 @@ test("async kind is decided at launch, not at completion", async () => {
 	const strings = launchStrings();
 	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET, async: true, model: strings.escalation }, { mode: "single", runId: "K1", asyncId: "K1", results: [] }));
 	// the plan changes before the run finishes
-	writeFileSync(join(tmp, "config", "steward", "model-plan.json"), JSON.stringify({ version: 1, roles: { mechanic: { model: "anthropic/claude-haiku-5-5", thinking: "low" } } }));
+	writeFileSync(join(tmp, "config", "steward-delegation", "model-plan.json"), JSON.stringify({ version: 1, roles: { mechanic: { model: "anthropic/claude-haiku-5-5", thinking: "low" } } }));
 	await fire("session_start", { type: "session_start", reason: "reload" });
 	emit("subagent:async-complete", { id: "K1", runId: "K1", agent: "steward.mechanic", mode: "single", success: true, results: [{ agent: "steward.mechanic", success: true }] });
 	assert.equal(logLines()[0].kind, "escalation");
@@ -386,7 +386,7 @@ test("top-level tasks and chain launches are logged", async () => {
 });
 
 test("the log directory is 0700 and the file 0600, tightened when looser", async () => {
-	const dir = join(tmp, "state", "steward");
+	const dir = join(tmp, "state", "steward-delegation");
 	const { fire } = load();
 	await fire("session_start", { type: "session_start", reason: "startup" });
 	await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: "m1", results: [syncRow()] }));
@@ -413,7 +413,7 @@ test("rotation never overwrites an earlier rotated file", async () => {
 	const { fire } = load({ delegationLogMaxBytes: 200 });
 	await fire("session_start", { type: "session_start", reason: "startup" });
 	for (let i = 0; i < 6; i++) await fire("tool_result", result({ agent: "steward.mechanic", task: SECRET }, { mode: "single", runId: `q${i}`, results: [syncRow()] }));
-	const dir = join(tmp, "state", "steward");
+	const dir = join(tmp, "state", "steward-delegation");
 	const rotated = readdirSync(dir).filter((n) => n.startsWith("pi-delegations.jsonl."));
 	assert.ok(rotated.length >= 1 && rotated.length <= 2, rotated.join(","));
 	for (const n of rotated) assert.equal(statSync(join(dir, n)).mode & 0o777, 0o600);

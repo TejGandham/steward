@@ -1,8 +1,8 @@
 // Phase 2c of docs/roadmap/pi-model-plan.md: the extension gathers registry
 // facts for the session-start payload, rebuilds the edict on model_select,
 // and adds /steward-models. Handlers run against the real
-// hooks/steward_hook.py; HOME and pi's config dir point at a throwaway
-// directory. STEWARD_HOOK_LOG captures the real hook stdin and stdout.
+// hooks/delegation_hook.py; HOME and pi's config dir point at a throwaway
+// directory. STEWARD_DELEGATION_HOOK_LOG captures the real hook stdin and stdout.
 
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -10,9 +10,9 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 
-import steward, { createSteward, FACTS_TIMEOUT_MS, gatherModelFacts, HOOK_TIMEOUT_MS, runHook } from "../../pi/extensions/steward/index.ts";
+import steward, { createSteward, FACTS_TIMEOUT_MS, gatherModelFacts, HOOK_TIMEOUT_MS, runHook } from "../../pi/extensions/steward-delegation/index.ts";
 
-const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_HOOK_LOG"];
+const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_DELEGATION_GATE", "STEWARD_DELEGATION_PYTHON", "PI_SUBAGENT_CHILD", "STEWARD_DELEGATION_HOOK_LOG"];
 const ALL_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const BLOCK_HEADING = "## Model plan on this machine";
 
@@ -27,8 +27,8 @@ beforeEach(() => {
 	process.env.HOME = join(tmp, "home");
 	process.env.XDG_STATE_HOME = join(tmp, "state");
 	process.env.PI_CODING_AGENT_DIR = join(tmp, "config");
-	for (const k of ["STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD"]) delete process.env[k];
-	process.env.STEWARD_HOOK_LOG = join(tmp, "hook.jsonl");
+	for (const k of ["STEWARD_DELEGATION_GATE", "STEWARD_DELEGATION_PYTHON", "PI_SUBAGENT_CHILD"]) delete process.env[k];
+	process.env.STEWARD_DELEGATION_HOOK_LOG = join(tmp, "hook.jsonl");
 });
 
 afterEach(() => {
@@ -138,7 +138,7 @@ async function sectionAfterStart(env) {
 }
 
 function hookLog() {
-	const path = process.env.STEWARD_HOOK_LOG;
+	const path = process.env.STEWARD_DELEGATION_HOOK_LOG;
 	if (!existsSync(path)) return [];
 	return readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
@@ -306,14 +306,14 @@ test("/steward-models check: a failing hook gives a short error, never a crash",
 	const fake = join(tmp, "fake-python");
 	writeFileSync(fake, "#!/bin/sh\necho 'not json'\nexit 1\n");
 	chmodSync(fake, 0o755);
-	process.env.STEWARD_PYTHON = fake;
+	process.env.STEWARD_DELEGATION_PYTHON = fake;
 	const env = load();
 	await env.commands["steward-models"].handler("check", env.ctx);
 	assert.equal(env.shown().length, 1);
 	assert.match(env.shown()[0], /^steward: \/steward-models check failed/);
 	assert.ok(env.shown()[0].length < 300);
 
-	process.env.STEWARD_PYTHON = join(tmp, "no-such-python");
+	process.env.STEWARD_DELEGATION_PYTHON = join(tmp, "no-such-python");
 	env.entries.length = 0;
 	await env.commands["steward-models"].handler("check", env.ctx);
 	assert.match(env.shown()[0], /python3 was not found/);
@@ -323,7 +323,7 @@ test("/steward-models check: the hook's error message is shown", async () => {
 	const fake = join(tmp, "fake-python");
 	writeFileSync(fake, `#!/bin/sh\necho '{"error": "model-plan: cwd must be an absolute path, got a relative one"}'\nexit 2\n`);
 	chmodSync(fake, 0o755);
-	process.env.STEWARD_PYTHON = fake;
+	process.env.STEWARD_DELEGATION_PYTHON = fake;
 	const env = load();
 	await env.commands["steward-models"].handler("check", env.ctx);
 	assert.match(env.shown()[0], /failed: model-plan: cwd must be an absolute path/);
@@ -368,7 +368,7 @@ async function sectionNow(env, at) {
 test("two overlapping model switches resolving out of order end on the newest block", async () => {
 	const env = load();
 	await sectionAfterStart(env);
-	process.env.STEWARD_PYTHON = wrapPython(`case "$input" in *'"main":{"provider":"openai-codex"'*) sleep 1 ;; esac`);
+	process.env.STEWARD_DELEGATION_PYTHON = wrapPython(`case "$input" in *'"main":{"provider":"openai-codex"'*) sleep 1 ;; esac`);
 	const first = { ...env.ctx, model: SOL, thinkingLevel: "high" };
 	const second = { ...env.ctx, model: SONNET_ANTHROPIC, thinkingLevel: "medium" };
 	const slow = env.fire("model_select", { type: "model_select", model: SOL, previousModel: env.ctx.model, source: "set" }, first);
@@ -384,7 +384,7 @@ test("two overlapping model switches resolving out of order end on the newest bl
 test("a thinking change then a model switch, out of order, end on the newest block", async () => {
 	const env = load();
 	await sectionAfterStart(env);
-	process.env.STEWARD_PYTHON = wrapPython(`case "$input" in *'"thinkingLevel":"low"'*) sleep 1 ;; esac`);
+	process.env.STEWARD_DELEGATION_PYTHON = wrapPython(`case "$input" in *'"thinkingLevel":"low"'*) sleep 1 ;; esac`);
 	const first = { ...env.ctx, thinkingLevel: "low" };
 	const second = { ...env.ctx, model: SOL, thinkingLevel: "high" };
 	const slow = env.fire("thinking_level_select", { type: "thinking_level_select", level: "low", previousLevel: "xhigh" }, first);
@@ -401,7 +401,7 @@ test("before_agent_start during a failing rebuild keeps the previous edict and s
 	const env = load();
 	const before = await sectionAfterStart(env);
 	const calls = sessionStartPayloads().length;
-	process.env.STEWARD_PYTHON = wrapPython("sleep 0.3; exit 1");
+	process.env.STEWARD_DELEGATION_PYTHON = wrapPython("sleep 0.3; exit 1");
 	const at = { ...env.ctx, model: SOL, thinkingLevel: "high" };
 	const switching = env.fire("model_select", { type: "model_select", model: SOL, previousModel: env.ctx.model, source: "set" }, at);
 	const during = await sectionNow(env, at);
@@ -419,7 +419,7 @@ test("before_agent_start during a slow rebuild shares the in-flight load and get
 	const env = load();
 	await sectionAfterStart(env);
 	const calls = sessionStartPayloads().length;
-	process.env.STEWARD_PYTHON = wrapPython("sleep 0.3");
+	process.env.STEWARD_DELEGATION_PYTHON = wrapPython("sleep 0.3");
 	const at = { ...env.ctx, model: SOL, thinkingLevel: "high" };
 	const switching = env.fire("model_select", { type: "model_select", model: SOL, previousModel: env.ctx.model, source: "set" }, at);
 	const during = await sectionNow(env, at);
@@ -435,7 +435,7 @@ for (const [name, prelude, factsTimeoutMs] of [
 ]) {
 	test(`a facts-bearing session-start that ${name} falls back to the plain edict, once per switch`, async () => {
 		const reallyPlain = await plainEdict();
-		process.env.STEWARD_PYTHON = wrapPython(`case "$input" in *'"model_facts"'*) ${prelude} ;; esac`);
+		process.env.STEWARD_DELEGATION_PYTHON = wrapPython(`case "$input" in *'"model_facts"'*) ${prelude} ;; esac`);
 		const env = load({ factsTimeoutMs });
 		const text = await sectionAfterStart(env);
 		assert.equal(text, reallyPlain);
@@ -465,20 +465,20 @@ test("thinking_level_select rebuilds the main-thread line", async () => {
 });
 
 test("a hook that cannot start is logged", async () => {
-	process.env.STEWARD_PYTHON = join(tmp, "no-such-python");
+	process.env.STEWARD_DELEGATION_PYTHON = join(tmp, "no-such-python");
 	const { missingPython } = await runHook("session-start", { session_id: "pi-x" });
 	assert.equal(missingPython, true);
 	assert.ok(hookLog().some((e) => e.kind === "hook" && e.subcommand === "session-start" && e.error === "ENOENT"));
 });
 
-test("STEWARD_HOOK_LOG records session-start and model-plan calls only, never gate inputs or replies", async () => {
+test("STEWARD_DELEGATION_HOOK_LOG records session-start and model-plan calls only, never gate inputs or replies", async () => {
 	await runHook("gate", { session_id: "pi-x", tool_name: "Bash", tool_input: { command: "echo secret-gate-input" } });
 	await runHook("prose-gate", { session_id: "pi-x", last_assistant_message: "secret-reply-text" });
 	await runHook("delegated", { session_id: "pi-x" });
 	await runHook("session-start", { session_id: "pi-x" });
 	const subcommands = hookLog().filter((e) => e.kind === "hook").map((e) => e.subcommand);
 	assert.deepEqual(subcommands, ["session-start"]);
-	const raw = existsSync(process.env.STEWARD_HOOK_LOG) ? readFileSync(process.env.STEWARD_HOOK_LOG, "utf8") : "";
+	const raw = existsSync(process.env.STEWARD_DELEGATION_HOOK_LOG) ? readFileSync(process.env.STEWARD_DELEGATION_HOOK_LOG, "utf8") : "";
 	assert.ok(!raw.includes("secret-gate-input") && !raw.includes("secret-reply-text"));
 });
 
@@ -561,7 +561,7 @@ test("model_select and thinking_level_select return without waiting for a slow h
 	// would hold up the model switch for as long as the hook runs.
 	const env = load();
 	await sectionAfterStart(env);
-	process.env.STEWARD_PYTHON = wrapPython("sleep 1");
+	process.env.STEWARD_DELEGATION_PYTHON = wrapPython("sleep 1");
 	const at = { ...env.ctx, model: SOL, thinkingLevel: "high" };
 	for (const [name, event] of [
 		["model_select", { type: "model_select", model: SOL, previousModel: env.ctx.model, source: "set" }],
@@ -594,7 +594,7 @@ test("after a switch whose load hangs, later prompts start no load and do not wa
 	const before = await sectionAfterStart(env);
 	assert.ok(before);
 	// Every call from here hangs until killed (exec, so the kill reaches the sleep).
-	process.env.STEWARD_PYTHON = wrapPython("exec sleep 30");
+	process.env.STEWARD_DELEGATION_PYTHON = wrapPython("exec sleep 30");
 	const at = { ...env.ctx, model: SOL, thinkingLevel: "high" };
 	await env.fire("model_select", { type: "model_select", model: SOL, previousModel: env.ctx.model, source: "set" }, at);
 	// The first prompt shares the switch's load, which fails within the budget.
@@ -616,7 +616,7 @@ test("after a switch whose load hangs, later prompts start no load and do not wa
 
 test("session start with a hanging facts call: the facts call is killed at the facts timeout and the plain retry lands within the budget", async () => {
 	const reallyPlain = await plainEdict();
-	process.env.STEWARD_PYTHON = wrapPython(`case "$input" in *'"model_facts"'*) exec sleep 30 ;; esac`);
+	process.env.STEWARD_DELEGATION_PYTHON = wrapPython(`case "$input" in *'"model_facts"'*) exec sleep 30 ;; esac`);
 	const env = load({ hookTimeoutMs: 1500, factsTimeoutMs: 300 });
 	const started = Date.now();
 	await env.fire("session_start", { type: "session_start", reason: "startup" });
@@ -631,14 +631,14 @@ test("session start with a hanging facts call: the facts call is killed at the f
 
 test("session start where both calls hang stays within the budget, then behaves as 0.10.0: no edict, the next prompt retries the plain call", async () => {
 	const reallyPlain = await plainEdict();
-	process.env.STEWARD_PYTHON = wrapPython("exec sleep 30");
+	process.env.STEWARD_DELEGATION_PYTHON = wrapPython("exec sleep 30");
 	const env = load({ hookTimeoutMs: 1000, factsTimeoutMs: 200 });
 	const started = Date.now();
 	await env.fire("session_start", { type: "session_start", reason: "startup" });
 	const total = Date.now() - started;
 	assert.ok(total < 1300, `session start took ${total} ms`);
 	assert.equal(await sectionNow(env), undefined);
-	delete process.env.STEWARD_PYTHON;
+	delete process.env.STEWARD_DELEGATION_PYTHON;
 	const calls = sessionStartPayloads().length;
 	assert.equal(await sectionNow(env), reallyPlain);
 	assert.deepEqual(sessionStartPayloads().slice(calls).map((p) => "model_facts" in p), [false]);

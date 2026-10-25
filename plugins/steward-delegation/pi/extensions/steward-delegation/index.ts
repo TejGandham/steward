@@ -2,9 +2,9 @@
  * steward for pi: injects the delegation edict and runs the delegation gate. The prose gate and
  * the PR-body gate run in the steward-prose-gate extension.
  *
- * Every decision is made by hooks/steward_hook.py, the same engine the Claude Code plugin runs.
- * This file only translates pi events into that script's JSON payloads (with STEWARD_HARNESS=pi)
- * and maps its answers back onto pi's event results. Like the Claude Code hooks, it fails open:
+ * Every decision is made by hooks/delegation_hook.py, the same engine the Claude Code plugin runs.
+ * This file only translates pi events into that script's JSON payloads (run as
+ * `delegation_hook.py pi <subcommand>`) and maps its answers back onto pi's event results. Like the Claude Code hooks, it fails open:
  * if python3 is missing or the script errors, the tool call or reply goes through.
  *
  * For the model plan (docs/roadmap/pi-model-plan.md) it also reads pi's model registry and sends
@@ -15,11 +15,11 @@
  * runs it again to write, then calls ctx.reload(); the reloaded instance shows a fresh check.
  *
  * Outcome log (Phase 4): one JSON line per finished steward.* launch to
- * $XDG_STATE_HOME/steward/pi-delegations.jsonl, from tool results and pi-subagents'
+ * $XDG_STATE_HOME/steward-delegation/pi-delegations.jsonl, from tool results and pi-subagents'
  * `subagent:async-complete` events; `/steward-models stats` runs the hook's `delegation-stats`
  * summarizer. No task text or output is logged, and every step fails open.
  *
- * Debugging: with STEWARD_HOOK_LOG=<file>, every session-start, model-plan and model-plan-apply
+ * Debugging: with STEWARD_DELEGATION_HOOK_LOG=<file>, every session-start, model-plan and model-plan-apply
  * hook call appends
  * one JSON line to that file ({kind: "hook", subcommand, payload, stdout, ms}, plus
  * `timedOut: true` or `error: <code>` when the call never finished), and each facts gathering one
@@ -39,7 +39,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-const HOOK_SCRIPT = resolve(PLUGIN_ROOT, "hooks", "steward_hook.py");
+const HOOK_SCRIPT = resolve(PLUGIN_ROOT, "hooks", "delegation_hook.py");
 /** Kill time for one hook call, and the budget for one edict load (the facts call plus its retry). */
 export const HOOK_TIMEOUT_MS = 15_000;
 /** Kill time for the session-start call that carries model_facts; the plain retry gets the rest. */
@@ -70,7 +70,7 @@ const APPLY_WRITE_TIMEOUT_MS = 60_000;
 const PENDING_CHECK_KEY = Symbol.for("steward.pi.pendingModelsCheck");
 const PENDING_CHECK_MAX_AGE_MS = 120_000;
 
-/** Hook calls STEWARD_HOOK_LOG records; gate payloads carry commands, file contents and replies. */
+/** Hook calls STEWARD_DELEGATION_HOOK_LOG records; gate payloads carry commands, file contents and replies. */
 const LOGGED_SUBCOMMANDS = new Set(["session-start", MODELS_PLAN_SUBCOMMAND, MODELS_APPLY_SUBCOMMAND]);
 
 type HookOutput = Record<string, any> | undefined;
@@ -81,9 +81,9 @@ interface HookResult {
 	missingPython?: boolean;
 }
 
-/** Appends one JSON line to $STEWARD_HOOK_LOG when it is set. Never throws. */
+/** Appends one JSON line to $STEWARD_DELEGATION_HOOK_LOG when it is set. Never throws. */
 function debugLog(entry: Record<string, unknown>): void {
-	const path = process.env.STEWARD_HOOK_LOG;
+	const path = process.env.STEWARD_DELEGATION_HOOK_LOG;
 	if (!path) return;
 	try {
 		appendFileSync(path, `${JSON.stringify({ time: new Date().toISOString(), pid: process.pid, ...entry })}\n`);
@@ -112,8 +112,7 @@ export function runHook(
 		};
 		let child;
 		try {
-			child = spawn(process.env.STEWARD_PYTHON || "python3", [HOOK_SCRIPT, subcommand], {
-				env: { ...process.env, STEWARD_HARNESS: "pi", STEWARD_PLUGIN_ROOT: PLUGIN_ROOT },
+			child = spawn(process.env.STEWARD_DELEGATION_PYTHON || "python3", [HOOK_SCRIPT, "pi", subcommand], {
 				stdio: ["pipe", "pipe", "ignore"],
 			});
 		} catch (err) {
@@ -265,7 +264,7 @@ export type LaunchStrings = Record<string, { relaunch?: string | null; escalatio
 
 export function delegationLogPath(env: NodeJS.ProcessEnv = process.env): string {
 	const state = env.XDG_STATE_HOME || resolve(env.HOME || homedir(), ".local", "state");
-	return resolve(state, "steward", DELEGATION_LOG_NAME);
+	return resolve(state, "steward-delegation", DELEGATION_LOG_NAME);
 }
 
 /**
@@ -548,7 +547,7 @@ function register(
 		try {
 			const started = Date.now();
 			const facts = gatherModelFacts(ctx, await piAiModule());
-			if (facts && process.env.STEWARD_HOOK_LOG) {
+			if (facts && process.env.STEWARD_DELEGATION_HOOK_LOG) {
 				debugLog({
 					kind: "facts",
 					ms: Date.now() - started,

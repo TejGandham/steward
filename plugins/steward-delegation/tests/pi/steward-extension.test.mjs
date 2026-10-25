@@ -1,6 +1,6 @@
 // Tests for the steward pi extension. A stand-in `pi` object records the
 // handlers the extension registers; the handlers then run against the real
-// hooks/steward_hook.py, with HOME, the state dir and pi's config dir pointed
+// hooks/delegation_hook.py, with HOME, the state dir and pi's config dir pointed
 // at a throwaway directory. The real pi runtime is exercised by the smoke run
 // described in README.md, not here.
 
@@ -10,9 +10,9 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import steward, { launchesWork } from "../../pi/extensions/steward/index.ts";
+import steward, { launchesWork } from "../../pi/extensions/steward-delegation/index.ts";
 
-const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD"];
+const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_DELEGATION_GATE", "STEWARD_DELEGATION_PYTHON", "PI_SUBAGENT_CHILD"];
 
 let tmp;
 let savedEnv;
@@ -25,7 +25,7 @@ beforeEach(() => {
 	process.env.HOME = join(tmp, "home");
 	process.env.XDG_STATE_HOME = join(tmp, "state");
 	process.env.PI_CODING_AGENT_DIR = join(tmp, "config");
-	for (const k of ["STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD"]) delete process.env[k];
+	for (const k of ["STEWARD_DELEGATION_GATE", "STEWARD_DELEGATION_PYTHON", "PI_SUBAGENT_CHILD"]) delete process.env[k];
 });
 
 afterEach(() => {
@@ -233,8 +233,8 @@ test("getActiveTools throwing makes the delegation gate remind, not block", asyn
 });
 
 test("soft mode adds the not-available note when no delegation tool is active", async () => {
-	mkdirSync(join(tmp, "config", "steward"));
-	writeFileSync(join(tmp, "config", "steward", "gate"), "soft\n");
+	mkdirSync(join(tmp, "config", "steward-delegation"));
+	writeFileSync(join(tmp, "config", "steward-delegation", "gate"), "soft\n");
 	const { fire } = load({ active: ["read", "bash", "edit", "write"] });
 	const note = await secondWriteNote(fire);
 	assert.match(note, /direct edit #2/);
@@ -312,8 +312,8 @@ test("read-only bash and allowlisted paths pass", async () => {
 });
 
 test("soft mode lets the edit run and appends the reminder to its result", async () => {
-	mkdirSync(join(tmp, "config", "steward"));
-	writeFileSync(join(tmp, "config", "steward", "gate"), "soft\n");
+	mkdirSync(join(tmp, "config", "steward-delegation"));
+	writeFileSync(join(tmp, "config", "steward-delegation", "gate"), "soft\n");
 	const { fire } = load();
 	await fire("tool_call", write());
 	const second = write();
@@ -331,7 +331,7 @@ test("soft mode lets the edit run and appends the reminder to its result", async
 });
 
 test("fails open when python cannot start", async () => {
-	process.env.STEWARD_PYTHON = join(tmp, "no-such-python");
+	process.env.STEWARD_DELEGATION_PYTHON = join(tmp, "no-such-python");
 	const { fire, notices } = load();
 	await fire("session_start", { type: "session_start", reason: "startup" });
 	assert.match(notices[0].msg, /python3 was not found/);
