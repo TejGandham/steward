@@ -14,8 +14,8 @@ only; reads and writes nothing.
   facts are malformed or the check failed, so session start fails open.
 
 Every piece of text taken from the result goes through ``_text``: control,
-format and line-separator characters become ``?``, em-dashes become ``-``,
-box-drawing characters become ``?``, and ``|`` in a table cell becomes ``/``
+format and line-separator characters become ``?``, box-drawing characters
+become ``?``, and ``|`` in a table cell becomes ``/``
 (no escaping, so a cell never grows past its limit). ``clamp_block`` is the
 last step of the capped block: whatever the input, it holds at most
 MAX_BLOCK_LINES lines and MAX_BLOCK_CHARS characters.
@@ -43,13 +43,11 @@ BLOCK_CODES = ("provider-denied", "provider-not-allowed", "effective-model-unver
                "thinking-above-max", "outside-model-scope")
 MAIN_WARNING_CODES = ("main-provider-denied", "main-provider-not-allowed", "main-not-in-plan",
                       "main-below-judgment-floor", "main-thinking-drift", "main-startup-thinking-drift")
-EM_DASH = chr(0x2014)
 MORE_TEXT = "%d more: run /steward-models check"
 
 
 def _text(value, limit):
     text = mp._sanitize("" if value is None else str(value), limit)
-    text = text.replace(EM_DASH, "-")
     return "".join("?" if 0x2500 <= ord(ch) <= 0x257F else ch for ch in text)
 
 

@@ -13,7 +13,7 @@ COPIES = {
     "skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward-delegation:mechanic-haiku-medium"),
     "skills/delegating/routing.md": ("## Rubric (task to profile)", "steward-delegation:mechanic-haiku-medium"),
     "pi/skills/steward-delegating/SKILL.md": ("## Routing table (task to profile)", "steward.mechanic"),
-    "copilot/skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward:mechanic"),
+    "copilot/skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward-delegation:mechanic"),
 }
 
 BROWSER_TASK = ("Ad-hoc browser chores (open a page, read, click, fill, count, screenshot "
