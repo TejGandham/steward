@@ -1,5 +1,6 @@
 """The pi model plan as the repo's docs show it: the operator's plan in
-docs/roadmap/pi-model-plan.md and the README's example plan and wording.
+docs/roadmap/pi-model-plan.md and the example plan and wording in the
+steward-delegation README.
 
 The model plan code and its tests live in plugins/steward-delegation; this
 file loads them by path, since plugin tests read only files inside their
@@ -14,7 +15,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOC = REPO_ROOT / "docs" / "roadmap" / "pi-model-plan.md"
-README = REPO_ROOT / "README.md"
+README = REPO_ROOT / "plugins" / "steward-delegation" / "README.md"
 PLAN_TESTS = REPO_ROOT / "plugins" / "steward-delegation" / "tests" / "test_pi_model_plan.py"
 
 
@@ -91,7 +92,7 @@ class ReadmeWordingTests(unittest.TestCase):
         self.assertIn("guardrails** the edict states", self.section)
 
     def test_hook_log_contents_described(self):
-        self.assertIn("STEWARD_HOOK_LOG", self.section)
+        self.assertIn("STEWARD_DELEGATION_HOOK_LOG", self.section)
         self.assertIn("session-start", self.section)
         self.assertNotIn("every hook call then appends", self.section)
 

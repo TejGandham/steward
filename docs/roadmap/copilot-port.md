@@ -1,5 +1,7 @@
 # Proposal: steward delegation on GitHub Copilot
 
+> Steward is now split into separate plugins; see [plugin-split.md](plugin-split.md) for the current layout. The text below records the port as it was built and is kept as history.
+
 Status: built in steward 0.7.0, live-verified 2026-10-09 in the Copilot app (runtime 1.0.94). Scope is the delegation half of steward only (profiles, edict, delegation gate, prose gate, PR gate). The primary/secondary roles stay out, as on pi; see [orchestration-split.md](orchestration-split.md). The sections after "Built in 0.7.0" are the proposal as recorded before the build. Where the build differs, this section wins.
 
 ## Open items
