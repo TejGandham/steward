@@ -17,7 +17,7 @@
   },
   "type": "module",
   "scripts": {
-    "test": "python3 -m unittest discover -s tests && python3 -m unittest discover -s plugins/steward-prose-gate/tests && node --test 'tests/pi/*.test.mjs'"
+    "test": "python3 -m unittest discover -s tests && python3 -m unittest discover -s plugins/steward-prose-gate/tests && node --test 'tests/pi/*.test.mjs' 'plugins/*/tests/pi/*.test.mjs'"
   },
   "pi": {
     "extensions": [
