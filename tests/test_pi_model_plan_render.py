@@ -285,14 +285,25 @@ class FactsCase(StewardTestCase):
 
     def setUp(self):
         super().setUp()
-        skill_dir = os.path.join(self.plugin_root, "pi", "skills", "steward-delegating")
-        os.makedirs(skill_dir, exist_ok=True)
-        with open(os.path.join(skill_dir, "SKILL.md"), "w", encoding="utf-8") as f:
-            f.write("---\nname: steward-delegating\ndescription: fixture\n---\nPi body of the edict.\n")
-        copilot_dir = os.path.join(self.plugin_root, "copilot", "skills", "delegating")
-        os.makedirs(copilot_dir, exist_ok=True)
-        with open(os.path.join(copilot_dir, "SKILL.md"), "w", encoding="utf-8") as f:
-            f.write("---\nname: delegating\ndescription: fixture\n---\nCopilot body.\n")
+        claude_skill = os.path.join(
+            self.plugin_root, "plugins", "steward-delegation", "skills", "delegating", "SKILL.md")
+        with open(claude_skill, encoding="utf-8") as f:
+            claude_body = f.read()
+        fixtures = (
+            (("pi", "skills", "steward-delegating"),
+             "---\nname: steward-delegating\ndescription: fixture\n---\nPi body of the edict.\n"),
+            (("copilot", "skills", "delegating"),
+             "---\nname: delegating\ndescription: fixture\n---\nCopilot body.\n"),
+            (("skills", "delegating"), claude_body),
+        )
+        # The hook reads each skill under plugins/steward-delegation/; the
+        # BASE_COMMIT hook that base_script() runs reads it at the root.
+        for rel, body in fixtures:
+            for prefix in (("plugins", "steward-delegation"), ()):
+                skill_dir = os.path.join(self.plugin_root, *prefix, *rel)
+                os.makedirs(skill_dir, exist_ok=True)
+                with open(os.path.join(skill_dir, "SKILL.md"), "w", encoding="utf-8") as f:
+                    f.write(body)
         self.project = os.path.join(self.tmp, "work", "repo")
         os.makedirs(os.path.join(self.project, ".pi"), exist_ok=True)
         plan_dir = os.path.join(self.config, "steward")

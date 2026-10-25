@@ -20,9 +20,11 @@ from test_steward_hook import EM_DASH, REPO_ROOT, StewardTestCase, hook, run_hoo
 
 
 COPILOT_DIR = REPO_ROOT / "copilot"
-COPILOT_AGENTS = COPILOT_DIR / "agents"
-COPILOT_SKILLS = COPILOT_DIR / "skills"
-CLAUDE_AGENTS = REPO_ROOT / "agents"
+DELEGATION_DIR = REPO_ROOT / "plugins" / "steward-delegation"
+DELEGATION_COPILOT_DIR = DELEGATION_DIR / "copilot"
+COPILOT_AGENTS = DELEGATION_COPILOT_DIR / "agents"
+COPILOT_SKILLS = DELEGATION_COPILOT_DIR / "skills"
+CLAUDE_AGENTS = DELEGATION_DIR / "agents"
 COPILOT_MANIFEST = REPO_ROOT / ".github" / "plugin" / "plugin.json"
 
 # Claude Code profile name -> Copilot role-only profile name.
@@ -49,7 +51,8 @@ class CopilotHarnessCase(StewardTestCase):
 
     def setUp(self):
         super().setUp()
-        skill_dir = os.path.join(self.plugin_root, "copilot", "skills", "delegating")
+        skill_dir = os.path.join(
+            self.plugin_root, "plugins", "steward-delegation", "copilot", "skills", "delegating")
         os.makedirs(skill_dir, exist_ok=True)
         with open(os.path.join(skill_dir, "SKILL.md"), "w", encoding="utf-8") as f:
             f.write(
@@ -146,7 +149,9 @@ class CopilotSessionStartTests(CopilotHarnessCase):
         self.assertNotIn("hookSpecificOutput", out)
         text = out["additionalContext"]
         self.assertIn("STEWARD WARNING:", text)
-        self.assertIn(os.path.join(empty_root, "copilot", "skills", "delegating", "SKILL.md"), text)
+        self.assertIn(os.path.join(
+            empty_root, "plugins", "steward-delegation", "copilot", "skills", "delegating", "SKILL.md"),
+            text)
         self.assertIn("steward:", text)
         self.assertIn("task tool", text)
         self.assertNotIn(EM_DASH, text)
@@ -740,7 +745,8 @@ class CopilotAgentProfileTests(unittest.TestCase):
                 self.assertEqual(co_body, _to_copilot_names(c_body))
 
     def test_no_old_profile_names_in_copilot_files(self):
-        paths = [p for p in COPILOT_DIR.rglob("*") if p.is_file()] + [COPILOT_MANIFEST]
+        paths = [p for d in (COPILOT_DIR, DELEGATION_COPILOT_DIR) for p in d.rglob("*") if p.is_file()]
+        paths.append(COPILOT_MANIFEST)
         for path in paths:
             text = path.read_text(encoding="utf-8")
             for old in COPILOT_NAMES:

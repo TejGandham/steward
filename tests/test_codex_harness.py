@@ -18,8 +18,8 @@ _spec.loader.exec_module(hook)
 SUPPORTED_EFFORTS = {"gpt-6.1-sol": {"low", "medium", "high", "xhigh", "max"},
                      "gpt-6-astra": {"low", "medium", "high", "xhigh", "max"},
                      "gpt-6-luna": {"none", "low", "medium", "high", "xhigh", "max"}}
-PROFILES_PATH = REPO_ROOT / "codex/skills/delegating/profiles.json"
-SKILL_PATH = REPO_ROOT / "codex/skills/delegating/SKILL.md"
+PROFILES_PATH = REPO_ROOT / "plugins/steward-delegation/codex/skills/delegating/profiles.json"
+SKILL_PATH = REPO_ROOT / "plugins/steward-delegation/codex/skills/delegating/SKILL.md"
 ASTRA_ROLES = {"deep-reasoner", "top-reviewer"}
 
 
@@ -38,7 +38,7 @@ def run_hook(command, payload, env):
 class CodexHarnessTests(StewardTestCase):
     def setUp(self):
         super().setUp()
-        skill = Path(self.plugin_root) / "codex/skills/delegating/SKILL.md"
+        skill = Path(self.plugin_root) / "plugins/steward-delegation/codex/skills/delegating/SKILL.md"
         skill.parent.mkdir(parents=True)
         skill.write_text("---\nname: delegating\ndescription: fixture\n---\nCodex delegation edict.\n")
 
@@ -107,7 +107,7 @@ class CodexHarnessTests(StewardTestCase):
 class CodexAgentInstallTests(StewardTestCase):
     def setUp(self):
         super().setUp()
-        self.installer = load_installer(REPO_ROOT / "codex/install_agents.py")
+        self.installer = load_installer(REPO_ROOT / "plugins/steward-delegation/codex/install_agents.py")
 
     def test_all_seven_agents_pin_supported_model_and_effort(self):
         destination = Path(self.tmp) / "agents"
@@ -126,7 +126,7 @@ class CodexAgentInstallTests(StewardTestCase):
         stripped = {role: {k: v for k, v in p.items() if k != "fallback"} for role, p in profiles.items()}
         copy_root = Path(self.tmp) / "codex"
         (copy_root / "skills/delegating").mkdir(parents=True)
-        (copy_root / "install_agents.py").write_text((REPO_ROOT / "codex/install_agents.py").read_text())
+        (copy_root / "install_agents.py").write_text((REPO_ROOT / "plugins/steward-delegation/codex/install_agents.py").read_text())
         (copy_root / "skills/delegating/profiles.json").write_text(json.dumps(stripped))
         baseline = load_installer(copy_root / "install_agents.py").render_agents()
         rendered = self.installer.render_agents()

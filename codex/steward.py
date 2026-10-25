@@ -26,7 +26,7 @@ def dispatch(command, payload, env):
         return None
     if command == "session-start":
         root = Path(env.get("STEWARD_PLUGIN_ROOT") or str(ROOT))
-        text = checks.strip_frontmatter((root / "codex/skills/delegating/SKILL.md").read_text()).strip()
+        text = checks.strip_frontmatter((root / "plugins/steward-delegation/codex/skills/delegating/SKILL.md").read_text()).strip()
         return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}
 
     if command == "gate":

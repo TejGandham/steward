@@ -13,9 +13,9 @@
     "plain-language",
     "hooks"
   ],
-  "agents": "copilot/agents/",
+  "agents": "plugins/steward-delegation/copilot/agents/",
   "skills": [
-    "copilot/skills/"
+    "plugins/steward-delegation/copilot/skills/"
   ],
   "hooks": "copilot/hooks.json"
 }

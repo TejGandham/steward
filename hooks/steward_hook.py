@@ -247,7 +247,8 @@ def _copilot_session_start(payload, env):
     except OSError:
         pass
     plugin_root = get_plugin_root(env)
-    skill_path = os.path.join(plugin_root, "copilot", "skills", "delegating", "SKILL.md")
+    skill_path = os.path.join(
+        plugin_root, "plugins", "steward-delegation", "copilot", "skills", "delegating", "SKILL.md")
     try:
         with open(skill_path, "r", encoding="utf-8") as f:
             skill_body = strip_frontmatter(f.read()).strip("\n")
@@ -404,9 +405,11 @@ def cmd_session_start(payload, env):
     plugin_root = get_plugin_root(env)
     if harness == "pi":
         skill_path = os.path.join(
-            plugin_root, "pi", "skills", "steward-delegating", "SKILL.md")
+            plugin_root, "plugins", "steward-delegation", "pi", "skills",
+            "steward-delegating", "SKILL.md")
     else:
-        skill_path = os.path.join(plugin_root, "skills", "delegating", "SKILL.md")
+        skill_path = os.path.join(
+            plugin_root, "plugins", "steward-delegation", "skills", "delegating", "SKILL.md")
     with open(skill_path, "r", encoding="utf-8") as f:
         raw = f.read()
     skill_body = strip_frontmatter(raw).strip("\n")

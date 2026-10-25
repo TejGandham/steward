@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PI_SKILL = REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md"
+PI_SKILL = REPO_ROOT / "plugins" / "steward-delegation" / "pi" / "skills" / "steward-delegating" / "SKILL.md"
 EM_DASH = chr(0x2014)
 
 

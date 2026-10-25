@@ -10,10 +10,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # file -> (heading that opens its table, mechanic profile name)
 COPIES = {
-    "skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward:mechanic-haiku-medium"),
-    "skills/delegating/routing.md": ("## Rubric (task to profile)", "steward:mechanic-haiku-medium"),
-    "pi/skills/steward-delegating/SKILL.md": ("## Routing table (task to profile)", "steward.mechanic"),
-    "copilot/skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward:mechanic"),
+    "plugins/steward-delegation/skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward:mechanic-haiku-medium"),
+    "plugins/steward-delegation/skills/delegating/routing.md": ("## Rubric (task to profile)", "steward:mechanic-haiku-medium"),
+    "plugins/steward-delegation/pi/skills/steward-delegating/SKILL.md": ("## Routing table (task to profile)", "steward.mechanic"),
+    "plugins/steward-delegation/copilot/skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward:mechanic"),
 }
 
 BROWSER_TASK = ("Ad-hoc browser chores (open a page, read, click, fill, count, screenshot "
@@ -39,7 +39,7 @@ def routing_rows(rel_path, heading):
 class RoutingTableTests(unittest.TestCase):
     def test_every_copy_has_the_same_tasks(self):
         tasks = {path: list(routing_rows(path, h)) for path, (h, _) in COPIES.items()}
-        reference = tasks["skills/delegating/SKILL.md"]
+        reference = tasks["plugins/steward-delegation/skills/delegating/SKILL.md"]
         for path, rows in tasks.items():
             self.assertEqual(rows, reference, path)
 
@@ -52,7 +52,7 @@ class RoutingTableTests(unittest.TestCase):
             self.assertRegex(profile, r"turn cap", path)
 
     def test_routing_md_carries_the_browser_rule_and_sources(self):
-        text = (REPO_ROOT / "skills/delegating/routing.md").read_text()
+        text = (REPO_ROOT / "plugins/steward-delegation/skills/delegating/routing.md").read_text()
         for needle in ("never full snapshots", "2FA", "fails twice",
                        "https://www.anthropic.com/claude-haiku-5-5",
                        "https://code.claude.com/docs/en/sub-agents",

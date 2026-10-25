@@ -67,7 +67,7 @@ class StewardTestCase(unittest.TestCase):
 
     def _make_plugin_root(self, skill_body=None):
         root = os.path.join(self.tmp, "plugin")
-        skill_dir = os.path.join(root, "skills", "delegating")
+        skill_dir = os.path.join(root, "plugins", "steward-delegation", "skills", "delegating")
         os.makedirs(skill_dir, exist_ok=True)
         if skill_body is None:
             skill_body = (

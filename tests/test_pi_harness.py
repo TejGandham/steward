@@ -15,9 +15,10 @@ import unittest
 from test_steward_hook import EM_DASH, REPO_ROOT, StewardTestCase, hook, run_hook
 
 
-PI_SKILL = REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md"
-PI_AGENTS = REPO_ROOT / "pi" / "agents"
-CLAUDE_AGENTS = REPO_ROOT / "agents"
+DELEGATION_DIR = REPO_ROOT / "plugins" / "steward-delegation"
+PI_SKILL = DELEGATION_DIR / "pi" / "skills" / "steward-delegating" / "SKILL.md"
+PI_AGENTS = DELEGATION_DIR / "pi" / "agents"
+CLAUDE_AGENTS = DELEGATION_DIR / "agents"
 HOOK_SCRIPT = REPO_ROOT / "hooks" / "steward_hook.py"
 
 # Claude Code profile name -> pi role-only profile name.
@@ -44,7 +45,8 @@ class PiHarnessCase(StewardTestCase):
 
     def setUp(self):
         super().setUp()
-        skill_dir = os.path.join(self.plugin_root, "pi", "skills", "steward-delegating")
+        skill_dir = os.path.join(
+            self.plugin_root, "plugins", "steward-delegation", "pi", "skills", "steward-delegating")
         os.makedirs(skill_dir, exist_ok=True)
         with open(os.path.join(skill_dir, "SKILL.md"), "w", encoding="utf-8") as f:
             f.write(
