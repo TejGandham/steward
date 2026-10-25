@@ -13,6 +13,11 @@
         "url": "https://github.com/TejGandham/steward.git",
         "ref": "v0.14.2"
       }
+    },
+    {
+      "name": "steward-prose-gate",
+      "description": "Blocks replies and PR bodies that read like AI-generated text.",
+      "source": "./plugins/steward-prose-gate"
     }
   ]
 }
