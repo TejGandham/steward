@@ -821,5 +821,29 @@ class UnknownHarnessAndModeTests(StewardTestCase):
         self._assert_silent(result)
 
 
+# ---------------------------------------------------------------------------
+# shipped edict and writer profile
+# ---------------------------------------------------------------------------
+
+class ShippedEdictAndProfileTests(unittest.TestCase):
+    def test_writer_preloads_plainlanguage_in_the_step_15_form(self):
+        # docs/roadmap/plugin-split.md "Step 15 result:" records
+        # `skills: [plainlanguage]` as the form that preloads a
+        # plugin-installed skill.
+        text = (PLUGIN_ROOT / "agents" / "writer-sonnet-medium.md").read_text(encoding="utf-8")
+        frontmatter = text.split("---", 2)[1].splitlines()
+        self.assertEqual([line for line in frontmatter if line.startswith("skills")],
+                         ["skills: [plainlanguage]"])
+
+    def test_edict_has_no_role_check_and_no_old_namespace(self):
+        for rel in ("skills/delegating/SKILL.md", "skills/delegating/routing.md"):
+            text = (PLUGIN_ROOT / rel).read_text(encoding="utf-8")
+            self.assertNotRegex(text, r"steward:[a-z]", rel)
+        edict = (PLUGIN_ROOT / "skills" / "delegating" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertNotIn("Role check", edict)
+        self.assertNotIn("initiatives.md", edict)
+        self.assertIn("steward-delegation:mechanic-haiku-medium", edict)
+
+
 if __name__ == "__main__":
     unittest.main()

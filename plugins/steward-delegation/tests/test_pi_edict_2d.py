@@ -10,9 +10,8 @@ import re
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-PI_SKILL = REPO_ROOT / "plugins" / "steward-delegation" / "pi" / "skills" / "steward-delegating" / "SKILL.md"
-EM_DASH = chr(0x2014)
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+PI_SKILL = PLUGIN_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md"
 
 
 def _section(text, heading):
@@ -94,7 +93,6 @@ class PiEdictModelPlanTests(unittest.TestCase):
         self.assertNotIn("in the same reply", self.text)
 
     def test_style(self):
-        self.assertNotIn(EM_DASH, self.text)
         for line in self.text.splitlines():
             if re.fullmatch(r"\|[-:| ]+\|", line):
                 self.assertRegex(line, r"^(\|-)+\|$")

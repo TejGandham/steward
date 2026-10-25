@@ -1,7 +1,12 @@
 """Operator decision 2026-10-12: Claude Opus never runs at max effort or
 thinking. The top reviewer runs Opus 5.5 at xhigh on Claude Code, pi and
-GitHub Copilot (skills/delegating/routing.md, section "Top reviewer on Opus
-5.5 xhigh; Opus never at max (operator decision 2026-10-12)")."""
+GitHub Copilot (plugins/steward-delegation/skills/delegating/routing.md,
+section "Top reviewer on Opus 5.5 xhigh; Opus never at max (operator
+decision 2026-10-12)").
+
+This half checks the README, the onboarding template, the repo's
+.pi/settings.json and the example plans. The agent profiles, edicts and
+routing.md are checked in plugins/steward-delegation/tests/test_no_opus_max.py."""
 
 import json
 import re
@@ -11,27 +16,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 README = REPO_ROOT / "README.md"
 PLAN_DOC = REPO_ROOT / "docs" / "roadmap" / "pi-model-plan.md"
-DELEGATION_DIR = REPO_ROOT / "plugins" / "steward-delegation"
-ROUTING = DELEGATION_DIR / "skills" / "delegating" / "routing.md"
-EDICTS = (
-    DELEGATION_DIR / "skills" / "delegating" / "SKILL.md",
-    DELEGATION_DIR / "pi" / "skills" / "steward-delegating" / "SKILL.md",
-    DELEGATION_DIR / "copilot" / "skills" / "delegating" / "SKILL.md",
-    REPO_ROOT / "plugins" / "steward-orchestration" / "skills" / "orchestrating" / "onboarding-template.md",
-)
-PROFILE_DOCS = (README, ROUTING) + EDICTS
+ONBOARDING = REPO_ROOT / "plugins" / "steward-orchestration" / "skills" / "orchestrating" / "onboarding-template.md"
+PROFILE_DOCS = (README, ONBOARDING)
 RULE = "Claude Opus never runs at max"
-
-
-def frontmatter(path):
-    text = path.read_text(encoding="utf-8")
-    block = text.split("---", 2)[1]
-    fields = {}
-    for line in block.splitlines():
-        if ":" in line:
-            key, value = line.split(":", 1)
-            fields[key.strip()] = value.strip()
-    return fields
 
 
 def is_opus(model):
@@ -76,30 +63,6 @@ def json_blocks(text):
 
 
 class NoOpusMaxTests(unittest.TestCase):
-    def test_claude_code_agents(self):
-        for path in sorted((DELEGATION_DIR / "agents").glob("*.md")):
-            fm = frontmatter(path)
-            if is_opus(fm.get("model")):
-                self.assertNotEqual(fm.get("effort"), "max", path.name)
-
-    def test_pi_agents(self):
-        for path in sorted((DELEGATION_DIR / "pi" / "agents").glob("*.md")):
-            fm = frontmatter(path)
-            if is_opus(fm.get("model")):
-                self.assertNotEqual(fm.get("thinking"), "max", path.name)
-
-    def test_copilot_agents_against_edict_models(self):
-        # Copilot profiles pin no model; the edict's table names it per role.
-        edict = EDICTS[2].read_text(encoding="utf-8")
-        rows = dict(re.findall(r"^\| steward:([a-z-]+) \| ([^|]+?) \|", edict, re.M))
-        self.assertIn("top-reviewer", rows)
-        efforts = dict(re.findall(r"^\| steward:([a-z-]+) \| [^|]+ \| `([a-z]+)` \|", edict, re.M))
-        for path in sorted((DELEGATION_DIR / "copilot" / "agents").glob("*.agent.md")):
-            role = frontmatter(path)["name"]
-            if "opus" in rows.get(role, "").lower():
-                self.assertNotEqual(frontmatter(path).get("reasoning-effort"), "max", path.name)
-                self.assertNotEqual(efforts.get(role), "max", role)
-
     def test_repo_pi_settings(self):
         data = json.loads((REPO_ROOT / ".pi" / "settings.json").read_text(encoding="utf-8"))
         self.assertEqual(opus_max_pairs(data), [])
@@ -124,25 +87,7 @@ class NoOpusMaxTests(unittest.TestCase):
             self.assertEqual(PROFILE_PAIR.findall(path.read_text(encoding="utf-8")), [], path.name)
 
     def test_edicts_carry_the_rule(self):
-        for path in EDICTS:
-            self.assertIn(RULE, path.read_text(encoding="utf-8"), path)
-
-
-class HelperTests(unittest.TestCase):
-    def test_detects_pairs(self):
-        self.assertEqual(len(opus_max_pairs({"a": {"model": "amorphic/claude-opus-5-5", "thinking": "max"}})), 1)
-        self.assertEqual(len(opus_max_pairs(["anthropic/claude-opus-5-5:max"])), 1)
-        self.assertEqual(opus_max_pairs({"model": "anthropic/claude-fable-5-1", "thinking": "max"}), [])
-        self.assertEqual(opus_max_pairs(["fireworks/x/deepseek-v4p1-flash:max"]), [])
-
-    def test_detects_table_rows_and_bullets(self):
-        self.assertEqual(len(table_opus_max_rows("| `steward:reviewer-opus-max` | Opus | max | x |")), 1)
-        self.assertEqual(len(table_opus_max_rows("| `steward.top-reviewer` | `anthropic/claude-opus-5-5` | max |")), 1)
-        self.assertEqual(table_opus_max_rows("| `steward:reviewer-opus-max` | Opus | xhigh | x |"), [])
-        self.assertEqual(table_opus_max_rows("| steward:x | Sonnet | max |"), [])
-        self.assertEqual(len(PROFILE_PAIR.findall("**steward:reviewer-opus-max** (opus, max): top")), 1)
-        self.assertEqual(PROFILE_PAIR.findall("**steward:reviewer-opus-max** (opus, xhigh): top"), [])
-        self.assertEqual(PROFILE_PAIR.findall("Why max, not xhigh"), [])
+        self.assertIn(RULE, ONBOARDING.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

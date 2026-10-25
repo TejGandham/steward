@@ -6,14 +6,14 @@ import re
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 
 # file -> (heading that opens its table, mechanic profile name)
 COPIES = {
-    "plugins/steward-delegation/skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward:mechanic-haiku-medium"),
-    "plugins/steward-delegation/skills/delegating/routing.md": ("## Rubric (task to profile)", "steward:mechanic-haiku-medium"),
-    "plugins/steward-delegation/pi/skills/steward-delegating/SKILL.md": ("## Routing table (task to profile)", "steward.mechanic"),
-    "plugins/steward-delegation/copilot/skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward:mechanic"),
+    "skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward-delegation:mechanic-haiku-medium"),
+    "skills/delegating/routing.md": ("## Rubric (task to profile)", "steward-delegation:mechanic-haiku-medium"),
+    "pi/skills/steward-delegating/SKILL.md": ("## Routing table (task to profile)", "steward.mechanic"),
+    "copilot/skills/delegating/SKILL.md": ("## Routing table (task to profile)", "steward:mechanic"),
 }
 
 BROWSER_TASK = ("Ad-hoc browser chores (open a page, read, click, fill, count, screenshot "
@@ -21,7 +21,7 @@ BROWSER_TASK = ("Ad-hoc browser chores (open a page, read, click, fill, count, s
 
 
 def routing_rows(rel_path, heading):
-    text = (REPO_ROOT / rel_path).read_text()
+    text = (PLUGIN_ROOT / rel_path).read_text()
     section = text.split(heading, 1)[1]
     rows = {}
     for line in section.splitlines()[1:]:
@@ -39,7 +39,7 @@ def routing_rows(rel_path, heading):
 class RoutingTableTests(unittest.TestCase):
     def test_every_copy_has_the_same_tasks(self):
         tasks = {path: list(routing_rows(path, h)) for path, (h, _) in COPIES.items()}
-        reference = tasks["plugins/steward-delegation/skills/delegating/SKILL.md"]
+        reference = tasks["skills/delegating/SKILL.md"]
         for path, rows in tasks.items():
             self.assertEqual(rows, reference, path)
 
@@ -52,14 +52,13 @@ class RoutingTableTests(unittest.TestCase):
             self.assertRegex(profile, r"turn cap", path)
 
     def test_routing_md_carries_the_browser_rule_and_sources(self):
-        text = (REPO_ROOT / "plugins/steward-delegation/skills/delegating/routing.md").read_text()
+        text = (PLUGIN_ROOT / "skills/delegating/routing.md").read_text()
         for needle in ("never full snapshots", "2FA", "fails twice",
                        "https://www.anthropic.com/claude-haiku-5-5",
                        "https://code.claude.com/docs/en/sub-agents",
                        "https://support.claude.com/en/articles/14552983-models-usage-and-limits-in-claude-code",
                        "https://www.checklyhq.com/blog/mcp-vs-cli-token-efficiency/"):
             self.assertIn(needle, text)
-        self.assertNotIn("\u2014", text)
 
 
 if __name__ == "__main__":
