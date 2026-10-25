@@ -1,0 +1,214 @@
+{
+  "slug": "steward-orchestration",
+  "title": "Orchestration as its own plugin",
+  "summary": "Stage 2 of the plugin split, after the prose gate: builds the steward-orchestration plugin, whose session-start hook creates the session registry and tells the model to check its role, and moves the orchestrating skill into it. The old steward plugin keeps running unchanged beside it.",
+  "motivation": "Steward 0.14.2 is one 1,638-line hook script doing four jobs for four harnesses, so a user cannot take one part, one switch turns off two gates, and personal text ships to everyone (docs/roadmap/plugin-split.md, Why).",
+  "after": [
+    "steward-prose-gate"
+  ],
+  "scope": {
+    "included": [
+      "Shape: a set of three binders, because the operator asked for small separate binders (test 1): steward-prose-gate, then this one (after: steward-prose-gate), then steward-delegation (after: steward-orchestration). Each validates and leaves the suite green on its own.",
+      "Design steps 7 and 8 of docs/roadmap/plugin-split.md 'Build sequence', which is the source of truth for every file, contract and done-check: the orchestration hook (7) and the orchestration content and packaging (8). One item per step.",
+      "Branch: hatch builds from plugin-split (local git config hatch.defaultBranch=plugin-split). The operator merges the steward-prose-gate integration branch into plugin-split before this binder's delivery starts, so everything its contracts create exists at this binder's base: plugins/steward-prose-gate/**, its scripts.test segment, its entries in both root catalogs, and its pi extension. The operator merges this binder's integration branch into plugin-split before steward-delegation starts.",
+      "New plugin folder plugins/steward-orchestration/. Outside it this binder edits only package.json (scripts.test gains the plugin's unittest run), .claude-plugin/marketplace.json (one entry; orchestration is Claude Code only, so the Codex catalog gets none), tests/test_catalogs.py (every non-pinned entry resolves to its plugin manifest) and tests/test_no_opus_max.py (the template path), and git-moves skills/orchestrating/ into the plugin.",
+      "The monolith keeps working as it is: hooks/steward_hook.py still creates the registry, skills/delegating/SKILL.md keeps its Role check, and tests/test_steward_hook.py keeps its registry tests until steward-delegation retires them. Two hooks creating the registry is harmless: each writes only when the file is missing.",
+      "Item check for every item: `PI_SUBAGENTS_DIR=/nonexistent npm test` from the repo root, expect 'fail 0'. npm test runs package.json scripts.test; at this binder's base it is `python3 -m unittest discover -s tests && python3 -m unittest discover -s plugins/steward-prose-gate/tests && node --test 'tests/pi/*.test.mjs' 'plugins/*/tests/pi/*.test.mjs'`. node stays the last segment joined by &&, so its 'fail 0' line prints only when every unittest run before it passed.",
+      "Reference totals measured at 2e351f8 on this machine, 2026-10-24, with PI_SUBAGENTS_DIR=/nonexistent: root Python 'Ran 610 tests', 'OK (skipped=13)'; node 'tests 102', 'pass 102', 'fail 0'. steward-prose-gate adds its own unittest run and node cases before this binder starts, so the first item measures the real base totals.",
+      "Totals rule: every item's commit message body lists the suite totals at its base and after it (each unittest 'Ran N tests' line and the node 'tests N' line). Totals change only by tests the item adds, moves or names as retired.",
+      "Known machine mismatch, not caused by the split: PI_SUBAGENTS_DIR=/nonexistent skips the 13 tests that need an installed pi-subagents. Two of them fail at c5fd21b on this machine when not skipped, because pi-subagents 0.82.0 is installed and 0.78.0 is mirrored: tests/test_pi_model_plan_apply.py:575 (test_version_is_pinned) and tests/test_pi_model_plan_resolver.py:27 (the mirrored constant; the failing assertion, test_installed_version_is_the_mirrored_one, is at :260).",
+      "File-level done-checks from the design are oracle assertions. Scratch-session checks (`claude --plugin-dir ...`) are not; they belong to manual step 21.",
+      "Repo rules for every item: one commit per item; never rebase; no agent attribution in commit messages; no em-dashes in shipped texts; Markdown tables use the |-|-| separator.",
+      "Runtime: Node 22.18 or newer runs the TypeScript pi extensions without a build step (README.md, 'Pi' section); hook scripts are stdlib Python 3.9 or newer (hooks/steward_hook.py:5). No file pins either.",
+      "Env: the repo has no environment to start; tests run directly. env_contract.command only reports the two runtimes."
+    ],
+    "excluded": [
+      "Manual steps already done (design 'Build sequence', Status note): step 0, the tag v0.14.2 exists at f13555b; step 1, both root catalogs pin steward to v0.14.2, with the README notice and tests/test_catalogs.py.",
+      "Later binder steward-delegation: design steps 9-12, 14 and 16-20, including the Role check leaving the delegation edict (16), the monolith and its registry code being deleted (18), and the root README rewrite that drops the sauron quote at README.md:447 (20).",
+      "After the binders, manual step 21: live checks on Claude Code, Copilot, Codex and pi; the full suite without PI_SUBAGENTS_DIR, including the 13 pi-subagents tests; and the scratch-session checks of steps 6, 14 and 17, plus a `claude --plugin-dir plugins/steward-orchestration` session that shows the registry and the role-check block.",
+      "Manual step 22: merge plugin-split to main with --no-ff and create the per-plugin tags (steward-orchestration--v0.15.0 and the others); the operator authorizes the push.",
+      "Manual step 23: the operator's machine checklist, including writing ~/.claude/orchestration/edict.md from `git show v0.14.2:skills/orchestrating/SKILL.md` line 21.",
+      "Manual step 24: plainlanguage manifests in the common-skills repo.",
+      "Building the Engen-Tech/plugins marketplace.",
+      "Edits to the operator's personal files (~/AGENTS.md, ~/.claude/orchestration/edict.md, prose-patterns files).",
+      "Orchestration on pi, Copilot or Codex (operator decided: Claude Code only), and the follow-ups carried from orchestration-split.md (the memory rule, session identity by name, stale registry rows).",
+      "Design non-goals relevant here: harness dependency fields; migration code that reads old config paths; cross-plugin imports."
+    ]
+  },
+  "design_facts": {
+    "source": null,
+    "stack": "Agent-harness plugins for Claude Code, Copilot CLI, Codex CLI and pi: stdlib Python 3.9+ hook scripts, TypeScript pi extensions run by Node 22.18+ type stripping, JSON manifests and Markdown skills; tests are Python unittest and node:test; no third-party dependencies."
+  },
+  "sme": [
+    "minimalism"
+  ],
+  "shared_terms": [
+    {
+      "id": "orchestrating-skill-name",
+      "canonical": "steward-orchestration:orchestrating",
+      "items": [
+        "orchestration-hook",
+        "orchestration-content"
+      ]
+    },
+    {
+      "id": "delegating-skill-name",
+      "canonical": "steward-delegation:delegating",
+      "items": [
+        "orchestration-hook",
+        "orchestration-content"
+      ]
+    },
+    {
+      "id": "orchestration-dir-env",
+      "canonical": "STEWARD_ORCHESTRATION_DIR",
+      "items": [
+        "orchestration-hook",
+        "orchestration-content"
+      ]
+    }
+  ],
+  "env_contract": {
+    "command": "python3 --version && node --version",
+    "supports_isolation": false,
+    "isolation_params": []
+  },
+  "runtime_contract": {
+    "runtimes": [
+      {
+        "name": "node",
+        "version": ">=22.18"
+      },
+      {
+        "name": "python",
+        "version": ">=3.9"
+      }
+    ],
+    "on_unavailable": "halt"
+  },
+  "work_items": [
+    {
+      "id": "orchestration-hook",
+      "title": "Orchestration hook that sets up the registry",
+      "summary": "Add the orchestration plugin's session-start hook, which creates the session registry once and tells the model to check its role, with its tests.",
+      "estimate": "M",
+      "depends_on": [],
+      "contract": {
+        "design": "docs/roadmap/plugin-split.md: Build sequence step 7; steward-orchestration (its SessionStart hook does two things); Hook split (Hook entries, orchestration row; Map of hooks/steward_hook.py, O rows 73-79, 91-104, 111-124, 140-147); Config, state and env vars (registry row); Tests (SessionStartTests row).",
+        "does": [
+          "Create plugins/steward-orchestration/hooks/orchestration_hook.py: stdlib Python 3.9+, called as `orchestration_hook.py <harness> <mode>`. Only `claude session-start` does anything. An unknown harness or mode exits 0 with no output, and any exception exits 0 (fail open).",
+          "Copy from hooks/steward_hook.py per the map's O rows: get_orchestration_dir (73-79: env STEWARD_ORCHESTRATION_DIR, else ~/.claude/orchestration under HOME, deliberately not $CLAUDE_CONFIG_DIR, so config profiles share one registry), _non_empty_str (103-104) only if used, REGISTRY_SKELETON (111-124) with the skill named `steward-orchestration:orchestrating` (today `steward:orchestrating` at :117) and its separator row written |-|-|-|-|-|, _ensure_registry (140-147), and its own _dispatch and main.",
+          "claude session-start, step 1: create <orchestration dir>/initiatives.md from the skeleton when it is missing and never overwrite it. Best effort: an OSError is swallowed and step 2 still runs, as hooks/steward_hook.py:449-454 does today.",
+          "Step 2: print {\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": <block>}}. The block holds the Role check paragraph moved from skills/delegating/SKILL.md:41-42, with the skill named `steward-orchestration:orchestrating`, and this sentence verbatim: 'This plugin relies on steward-delegation. If the `steward-delegation:delegating` skill is not in your skill list, tell the operator once.'",
+          "Create plugins/steward-orchestration/hooks/hooks.json for Claude Code: one SessionStart entry, matcher startup|resume|clear|compact|fork, timeout 10, command `python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/orchestration_hook.py\" claude session-start`.",
+          "No import of, and no path into, another plugin folder or hooks/steward_hook.py. No file under plugins/steward-orchestration names steward_hook, carries a `steward:` namespace, or carries em-dash text.",
+          "package.json scripts.test gains ` && python3 -m unittest discover -s plugins/steward-orchestration/tests` before the node segment; node stays the last segment, joined by &&."
+        ],
+        "tests": [
+          "plugins/steward-orchestration/tests/test_orchestration_hook.py, with its own small temp-dir base case (no shared helpers module), ports test_registry_created_once, test_registry_not_overwritten and test_unwritable_orchestration_dir_still_emits_context (tests/test_steward_hook.py:166-210) to `orchestration_hook.py claude session-start`, and adds: the block carries the Role check and the relies-on sentence; the created registry names steward-orchestration:orchestrating and uses the |-|-| separator; an unknown harness and an unknown mode exit 0 with no output; a hooks.json case (one SessionStart entry, matcher, timeout 10, command naming orchestration_hook.py with the claude argument).",
+          "The originals stay in tests/test_steward_hook.py; this binder does not touch them."
+        ],
+        "red_when": "The registry is missing after a first run or overwritten on a second; an unwritable orchestration dir loses the block; the block lacks the relies-on sentence or names steward:orchestrating; the discover segment is missing from scripts.test (the run then prints no plugins/steward-orchestration unittest line, which the totals assertion catches).",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "package.json"
+      ],
+      "touches": [
+        "plugins/steward-orchestration/hooks/orchestration_hook.py",
+        "plugins/steward-orchestration/hooks/hooks.json",
+        "plugins/steward-orchestration/tests/test_orchestration_hook.py",
+        "package.json"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:new-surface: orchestration_hook.py <harness> <mode> CLI and a Claude Code SessionStart hook in a new plugin",
+          "contract:existing-surface: the registry ~/.claude/orchestration/initiatives.md and env STEWARD_ORCHESTRATION_DIR keep their names; the skeleton written for a new registry names steward-orchestration:orchestrating (an existing registry is never rewritten)",
+          "blast-radius: package.json scripts.test is also edited by items in the other two binders of the set",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The run prints one more unittest result than at the item's base (plugins/steward-orchestration/tests); the root and plugins/steward-prose-gate totals are unchanged.",
+          "test_orchestration_hook.py holds the three ported registry cases, a block-content case (Role check plus the relies-on sentence), unknown harness and unknown mode cases, and a hooks.json case with timeout 10.",
+          "`grep -rn steward_hook plugins/steward-orchestration` prints nothing (positive control: the same grep on hooks/hooks.json prints its five command lines).",
+          "`grep -rnE 'steward:[a-z]' plugins/steward-orchestration` prints nothing (positive control: the same grep on hooks/steward_hook.py hits line 117, the old REGISTRY_SKELETON)."
+        ]
+      }
+    },
+    {
+      "id": "orchestration-content",
+      "title": "Move the orchestrating skill into its plugin and package it",
+      "summary": "Move the orchestrating skill and onboarding template into the orchestration plugin, take the operator's personal edict and the em-dash rule out of them, and give the plugin its manifest, README and catalog entry.",
+      "estimate": "M",
+      "depends_on": [
+        "orchestration-hook"
+      ],
+      "contract": {
+        "design": "Build sequence step 8; steward-orchestration; Names (orchestrating rows); Personal content ('sauron' edict; Em-dash rule, onboarding-template.md:13); Versions and tags; Repo layout after the reorg (catalog entries); Dependencies: manual on every harness (steward-orchestration row); Release and migration (orchestration README); Tests (new root test_catalogs.py).",
+        "does": [
+          "`git mv skills/orchestrating plugins/steward-orchestration/skills/orchestrating` (SKILL.md and onboarding-template.md), so history is kept as renames.",
+          "Names in both files: `steward:delegating` becomes `steward-delegation:delegating`, `steward:orchestrating` becomes `steward-orchestration:orchestrating`, and the seven `steward:<profile>` names in template item 3 (onboarding-template.md:11) become `steward-delegation:<profile>`.",
+          "Personal content out: remove the operator's quoted 'sauron' edict (SKILL.md:21, onboarding-template.md:15). In its place the skill says: if `<registry dir>/edict.md` exists (~/.claude/orchestration/edict.md, or the same name under $STEWARD_ORCHESTRATION_DIR), the primary sends its text verbatim in the onboarding message and secondaries follow it. The template gets the matching instruction. No code reads edict.md.",
+          "Em-dash text out: drop 'no em-dashes in prose for the operator' from template item 5 (onboarding-template.md:13). Keep the sentence 'Claude Opus never runs at max' in the template; tests/test_no_opus_max.py checks it.",
+          "Create plugins/steward-orchestration/.claude-plugin/plugin.json: name steward-orchestration, \"version\": \"0.15.0\", description, author, repository, license; no dependencies field; skills and hooks at their default paths (skills/, hooks/hooks.json). No Codex or Copilot manifest (Claude Code only).",
+          "Create plugins/steward-orchestration/README.md: what the plugin does (primary and secondary roles, Claude Code only); that it relies on steward-delegation, installed by hand (no dependency field); install with `claude plugin install steward-orchestration@steward`; the registry path and STEWARD_ORCHESTRATION_DIR; the optional operator-owned edict.md; that Copilot lists it from the shared catalog but it is Claude Code only. No sauron text.",
+          ".claude-plugin/marketplace.json gains {name: steward-orchestration, description, source: ./plugins/steward-orchestration}. .agents/plugins/marketplace.json is not changed. The pinned steward entries stay untouched.",
+          "tests/test_catalogs.py gains one case per catalog: every entry other than the pinned steward resolves to an existing plugin folder whose manifest carries the entry's name (Claude catalog: <folder>/.claude-plugin/plugin.json; Codex catalog: <folder>/.codex-plugin/plugin.json, local source path). This also covers the steward-prose-gate entries already present.",
+          "tests/test_no_opus_max.py: the template path in EDICTS (:19) points at plugins/steward-orchestration/skills/orchestrating/onboarding-template.md."
+        ],
+        "tests": [
+          "plugins/steward-orchestration/tests/test_orchestration_content.py: manifest name steward-orchestration, version 0.15.0, no dependencies field; skill frontmatter name orchestrating; no 'sauron' and no `steward:` names in the skill or the template; both name edict.md; the template keeps 'Claude Opus never runs at max'."
+        ],
+        "notes": "The root README still quotes the sauron edict (README.md:447) until steward-delegation's docs item rewrites it. After the move the in-tree root plugin no longer ships the orchestrating skill; nobody installs the root, since both catalogs pin v0.14.2.",
+        "red_when": "A non-pinned catalog entry does not resolve to its manifest (test_catalogs fails); the template loses the no-Opus-max rule; sauron text, an em-dash rule or a steward: name survives in the plugin; skills/orchestrating still exists at the root.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "root-catalogs"
+      ],
+      "touches": [
+        "skills/orchestrating/SKILL.md",
+        "skills/orchestrating/onboarding-template.md",
+        "plugins/steward-orchestration/skills/orchestrating/SKILL.md",
+        "plugins/steward-orchestration/skills/orchestrating/onboarding-template.md",
+        "plugins/steward-orchestration/.claude-plugin/plugin.json",
+        "plugins/steward-orchestration/README.md",
+        "plugins/steward-orchestration/tests/test_orchestration_content.py",
+        ".claude-plugin/marketplace.json",
+        "tests/test_catalogs.py",
+        "tests/test_no_opus_max.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: the skill name steward:orchestrating becomes steward-orchestration:orchestrating; the Claude catalog gains an entry (additive)",
+          "destructive: the operator's quoted edict leaves shipped text; it moves to an operator-owned edict.md that this binder does not write (manual step 23)",
+          "blast-radius: tests/test_no_opus_max.py and tests/test_catalogs.py are also edited by steward-delegation items",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "plugins/steward-orchestration/skills/orchestrating/ holds SKILL.md and onboarding-template.md, and `git ls-files skills/orchestrating` prints nothing. (No rename-detection check: the edits to the short template can drop git's similarity score below its rename threshold.)",
+          "`grep -rn sauron plugins/` prints nothing (positive control: `git show HEAD~1:skills/orchestrating/SKILL.md | grep -c sauron` prints 1).",
+          "`grep -rnE 'steward:[a-z]' plugins/steward-orchestration` prints nothing (positive control: `git show HEAD~1:skills/orchestrating/onboarding-template.md | grep -cE 'steward:[a-z]'` prints 3).",
+          "`grep -rniE 'em.?dash|EM_DASH|u2014' plugins/steward-orchestration` prints nothing (positive control: the same pattern on `git show HEAD~1:skills/orchestrating/onboarding-template.md` hits line 13).",
+          "`grep -c 'Claude Opus never runs at max' plugins/steward-orchestration/skills/orchestrating/onboarding-template.md` prints 1 or more, and tests/test_no_opus_max.py reads the template from that path.",
+          "plugins/steward-orchestration/.claude-plugin/plugin.json has name steward-orchestration, \"version\": \"0.15.0\" and no dependencies field; .claude-plugin/marketplace.json has a steward-orchestration entry with source ./plugins/steward-orchestration; .agents/plugins/marketplace.json has no steward-orchestration entry.",
+          "tests/test_catalogs.py passes with its new per-catalog resolve cases, and the steward entries still pin v0.14.2."
+        ]
+      }
+    }
+  ]
+}

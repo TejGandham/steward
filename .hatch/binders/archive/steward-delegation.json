@@ -1,0 +1,968 @@
+{
+  "slug": "steward-delegation",
+  "title": "Delegation as its own plugin and the monolith retired",
+  "summary": "Stage 3 of the plugin split, after orchestration: moves the delegation edict, profiles, gate, pi extension and model plan into the steward-delegation plugin, then deletes the old single plugin and turns the root README into an index of the plugins.",
+  "motivation": "Steward 0.14.2 is one 1,638-line hook script doing four jobs for four harnesses, so a user cannot take one part, one switch turns off two gates, and personal text ships to everyone (docs/roadmap/plugin-split.md, Why).",
+  "after": [
+    "steward-orchestration"
+  ],
+  "scope": {
+    "included": [
+      "Shape: a set of three binders, because the operator asked for small separate binders (test 1): steward-prose-gate, then steward-orchestration (after: steward-prose-gate), then this one (after: steward-orchestration). Each validates and leaves the suite green on its own.",
+      "Design steps 9-12, 14 and 16-20 of docs/roadmap/plugin-split.md 'Build sequence', which is the source of truth for every file, contract and done-check. Steps 12, 14, 16 and 18 are each split in two so every commit stays green: 12 into model-plan-move and model-plan-pi-branch; 14 into pi-extension-prose-cut and then pi-extension-move (in the stated order the moved extension would send prose-gate calls to delegation_hook.py, which has no prose-gate mode, and the prose cases would go red); 16 into edicts-claude-pi (which changes all four profile-body copies, because the parity tests compare them) and edicts-copilot-codex; 18 into retire-old-tests and then retire-monolith.",
+      "Branch: hatch builds from plugin-split (local git config hatch.defaultBranch=plugin-split). Before this binder's delivery starts, the operator has merged the steward-prose-gate and steward-orchestration integration branches into plugin-split, so plugins/steward-prose-gate/**, plugins/steward-orchestration/**, their scripts.test segments, their catalog entries, the extended tests/test_catalogs.py and the moved onboarding template exist at the base.",
+      "New plugin folder plugins/steward-delegation/; content moves use git mv so history is kept. Outside plugins/ this binder edits package.json, the two root catalogs, root tests that point at moved files, the monolith files it repoints and later deletes, README.md and three history docs under docs/roadmap/.",
+      "Adaptations to the design's step list, each needed to keep a commit green: model-plan-move moves only the four modules and repoints the root tests; the 13 model-plan and stats test files move with the pi branch in model-plan-pi-branch. The doc- and README-reading model-plan cases stay in a root file, tests/test_model_plan_docs.py, because plugin tests read only their own folder. Hook-level pi tests from tests/test_pi_harness.py are ported in model-plan-pi-branch, where the pi branch lands; profile and skill tests in pi-extension-move, with the package-manifest tests going to a root tests/test_pi_package.py. pi-extension-prose-cut also adds the prose-gate extension to the root package's pi extensions. edicts-copilot-codex deletes the two root CopilotSkillTests cases that read `steward:<role>` rows. retire-monolith rewords README.md:109 and :133, so the design's step 18 grep passes with no README exclusion.",
+      "Accepted transitional state: the root .claude-plugin/plugin.json is not repointed after delegation-content-move, so until retire-monolith a `claude --plugin-dir .` session of this tree loads the old hooks without the seven agents. Nobody installs the root: both catalogs pin v0.14.2.",
+      "Item check for every item: `PI_SUBAGENTS_DIR=/nonexistent npm test` from the repo root, expect 'fail 0'. npm test runs package.json scripts.test; at this binder's base it is `python3 -m unittest discover -s tests && python3 -m unittest discover -s plugins/steward-prose-gate/tests && python3 -m unittest discover -s plugins/steward-orchestration/tests && node --test 'tests/pi/*.test.mjs' 'plugins/*/tests/pi/*.test.mjs'`, and after pi-extension-move it is the design's final form: `python3 -m unittest discover -s tests && python3 -m unittest discover -s plugins/steward-delegation/tests && python3 -m unittest discover -s plugins/steward-prose-gate/tests && python3 -m unittest discover -s plugins/steward-orchestration/tests && node --test 'plugins/*/tests/pi/*.test.mjs'`. node stays the last segment joined by &&, so its 'fail 0' line prints only when every unittest run before it passed.",
+      "Reference counts measured at 2e351f8 on this machine, 2026-10-24, with PI_SUBAGENTS_DIR=/nonexistent: root Python 'Ran 610 tests', 'OK (skipped=13)'; node 'tests 102', 'pass 102', 'fail 0'. Per file: test_steward_hook.py 144, test_copilot_harness.py 63, test_codex_harness.py 13, test_pi_harness.py 35, test_no_opus_max.py 11, test_routing_tables.py 3, test_pi_edict_2d.py 13; the 13 model-plan and stats files 326, 13 of them skipped. The earlier binders do not change these files, but each item re-counts at its own base.",
+      "Totals rule: every item's commit message body lists the suite totals at its base and after it (each unittest 'Ran N tests' line and the node 'tests N' line). Totals change only by tests the item adds, moves or names as retired.",
+      "Known machine mismatch, not caused by the split: PI_SUBAGENTS_DIR=/nonexistent skips the 13 tests that need an installed pi-subagents. Two of them fail on this machine when not skipped, because pi-subagents 0.82.0 is installed and 0.78.0 is mirrored: tests/test_pi_model_plan_apply.py:575 (test_version_is_pinned) and tests/test_pi_model_plan_resolver.py:27 (the mirrored constant; the failing assertion, test_installed_version_is_the_mirrored_one, is at :260). Both files move to plugins/steward-delegation/tests/ in model-plan-pi-branch; the mismatch moves with them.",
+      "Manual step 15 gate: edicts-claude-pi writes the writer profile's `skills:` form recorded by manual step 15 on a line starting 'Step 15 result:' in docs/roadmap/plugin-split.md. Because the integration branch is cut from plugin-split, that line should be on plugin-split before this delivery starts; if it is absent when edicts-claude-pi runs, the item halts with a call to action.",
+      "File-level done-checks from the design are oracle assertions. Scratch-session checks (`claude --plugin-dir ...`, `pi install <checkout>`) are not; they belong to manual step 21.",
+      "Repo rules for every item: one commit per item; never rebase; no agent attribution in commit messages; no em-dashes in shipped texts; Markdown tables use the |-|-| separator.",
+      "Runtime: Node 22.18 or newer runs the TypeScript pi extensions without a build step (README.md, 'Pi' section); hook scripts are stdlib Python 3.9 or newer (hooks/steward_hook.py:5). No file pins either.",
+      "Env: the repo has no environment to start; tests run directly. env_contract.command only reports the two runtimes."
+    ],
+    "excluded": [
+      "Manual steps already done (design 'Build sequence', Status note): step 0, the tag v0.14.2 exists at f13555b; step 1, both root catalogs pin steward to v0.14.2, with the README notice and tests/test_catalogs.py.",
+      "Design step 13 (pi handler order check): dropped. The answer is already recorded in Appendix B: every extension's tool_call handler runs in load order until one returns block: true, and a block stops the rest (runner.ts:1249-1266).",
+      "Before edicts-claude-pi, manual step 15: the plainlanguage preload check in a scratch Claude Code session, which records its result on a 'Step 15 result:' line in docs/roadmap/plugin-split.md.",
+      "After this binder, manual step 21: live checks on Claude Code, Copilot, Codex and pi; the full suite without PI_SUBAGENTS_DIR, including the 13 pi-subagents tests; the scratch-session checks of step 6 (prose gate), step 14 (`pi install <checkout>` in a scratch PI_CODING_AGENT_DIR with pi-subagents lists seven steward.* agents) and step 17 (`claude --plugin-dir plugins/steward-delegation` injects the edict and denies a second direct edit); Copilot finding .github/plugin/plugin.json inside plugins/<name>/; and running every install command the READMEs give.",
+      "Manual step 22: merge plugin-split to main with --no-ff and create the tags steward-delegation--v0.15.0, steward-prose-gate--v0.15.0 and steward-orchestration--v0.15.0; the operator authorizes the push.",
+      "Manual step 23: the operator's machine checklist (uninstall steward@steward, install the new plugins, move gate, allowlist, prose-patterns, model-plan.json and the launch log to the new dirs, rename steward:<role> keys in ~/.copilot/settings.json, re-trust Codex hooks).",
+      "Manual step 24: plainlanguage manifests in the common-skills repo.",
+      "Building the Engen-Tech/plugins marketplace.",
+      "Edits to the operator's personal files (~/AGENTS.md, ~/.claude/orchestration/edict.md, prose-patterns files, harness settings).",
+      "Design non-goals relevant here: harness dependency fields; migration code that reads old config paths; a generator for the four profile copies or edict forks; cross-plugin imports; renaming the names that stay (pi steward.<role>, steward-delegating, /steward-models, .pi/steward-model-plan.json, profiles/pi-subagents/steward.json; Codex agents steward-<role>); the orchestration follow-ups (memory rule, session identity, stale registry rows)."
+    ]
+  },
+  "design_facts": {
+    "source": null,
+    "stack": "Agent-harness plugins for Claude Code, Copilot CLI, Codex CLI and pi: stdlib Python 3.9+ hook scripts, TypeScript pi extensions run by Node 22.18+ type stripping, JSON manifests and Markdown skills; tests are Python unittest and node:test; no third-party dependencies."
+  },
+  "sme": [
+    "minimalism"
+  ],
+  "shared_terms": [
+    {
+      "id": "delegation-gate-prefix",
+      "canonical": "steward delegation gate",
+      "items": [
+        "delegation-hook-claude",
+        "pi-extension-move"
+      ]
+    },
+    {
+      "id": "delegation-gate-env",
+      "canonical": "STEWARD_DELEGATION_GATE",
+      "items": [
+        "delegation-hook-claude",
+        "edicts-claude-pi",
+        "delegation-packaging"
+      ]
+    },
+    {
+      "id": "claude-coder-profile",
+      "canonical": "steward-delegation:coder-opus-medium",
+      "items": [
+        "delegation-hook-claude",
+        "edicts-claude-pi"
+      ]
+    },
+    {
+      "id": "delegation-python-env",
+      "canonical": "STEWARD_DELEGATION_PYTHON",
+      "items": [
+        "pi-extension-move",
+        "delegation-packaging"
+      ]
+    },
+    {
+      "id": "delegation-hook-log-env",
+      "canonical": "STEWARD_DELEGATION_HOOK_LOG",
+      "items": [
+        "pi-extension-move",
+        "delegation-packaging"
+      ]
+    }
+  ],
+  "env_contract": {
+    "command": "python3 --version && node --version",
+    "supports_isolation": false,
+    "isolation_params": []
+  },
+  "runtime_contract": {
+    "runtimes": [
+      {
+        "name": "node",
+        "version": ">=22.18"
+      },
+      {
+        "name": "python",
+        "version": ">=3.9"
+      }
+    ],
+    "on_unavailable": "halt"
+  },
+  "work_items": [
+    {
+      "id": "delegation-content-move",
+      "title": "Move the delegation content into its plugin folder",
+      "summary": "Move the profiles, edicts, routing table and Codex installer into the delegation plugin folder, and point the old plugin and the tests at their new place.",
+      "estimate": "M",
+      "depends_on": [],
+      "contract": {
+        "design": "docs/roadmap/plugin-split.md: Build sequence step 9; steward-delegation (Contents: same relative paths as today, moved under the plugin folder); Profiles and edict copies.",
+        "does": [
+          "`git mv` to the same relative paths under plugins/steward-delegation/, as renames with no content change: agents/ (7 files), skills/delegating/ (SKILL.md, routing.md), copilot/agents/ (7), copilot/skills/ (delegating/SKILL.md), codex/skills/ (delegating/SKILL.md, profiles.json), codex/install_agents.py, pi/agents/ (7), pi/skills/ (steward-delegating/SKILL.md): 28 files.",
+          "Repoint the monolith's reads to plugins/steward-delegation/ under its plugin root: hooks/steward_hook.py:250 (Copilot skill), :407 (pi skill), :409 (Claude skill); codex/steward.py:29 (Codex skill); hooks/model_plan.py:171 DEFAULT_AGENTS_DIR (two directories up from hooks/ plus pi/agents, so now plugins/steward-delegation/pi/agents; model-plan-move turns it back once the module moves).",
+          "Repoint the root manifests and the pi field: .github/plugin/plugin.json agents and skills to plugins/steward-delegation/copilot/agents/ and plugins/steward-delegation/copilot/skills/; .codex-plugin/plugin.json skills to ./plugins/steward-delegation/codex/skills/; package.json pi.skills to ./plugins/steward-delegation/pi/skills and pi.subagents.agents to ./plugins/steward-delegation/pi/agents. pi.extensions is unchanged.",
+          "Repoint test constants and fixtures. The fixtures build a fake plugin root that mirrors the monolith's read paths, so each must now write under plugins/steward-delegation/: tests/test_steward_hook.py _make_plugin_root (:60-78); tests/test_copilot_harness.py COPILOT_AGENTS, COPILOT_SKILLS, CLAUDE_AGENTS (:22-25) and the CopilotHarnessCase setUp skill fixture; tests/test_codex_harness.py PROFILES_PATH and SKILL_PATH (:21-22), the installer paths (:110, :129) and the setUp fixture (:41); tests/test_pi_harness.py PI_SKILL, PI_AGENTS, CLAUDE_AGENTS (:18-20) and the PiHarnessCase setUp fixture; tests/test_no_opus_max.py ROUTING, EDICTS and the agent dirs (:14-18, :79, :85, :96); tests/test_routing_tables.py COPIES (:12-17) and :55; tests/test_pi_edict_2d.py PI_SKILL (:14); tests/test_pi_release_review.py PI_SKILL (:16); tests/test_pi_model_plan_render.py FactsCase skill fixtures (:288-295); and any other constant a run shows still pointing at a moved path.",
+          "tests/test_copilot_harness.py test_no_old_profile_names_in_copilot_files keeps scanning every moved Copilot file plus the root copilot/hooks.json and manifest."
+        ],
+        "tests": [
+          "No new tests; every existing test keeps passing against the moved files."
+        ],
+        "red_when": "A fixture or constant still points at a moved path (that test fails or errors); the monolith's session-start reads a missing skill (its output goes empty and SessionStartTests fail); DEFAULT_AGENTS_DIR names a missing dir (model-plan tests fail).",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "package.json"
+      ],
+      "touches": [
+        "agents/",
+        "skills/delegating/",
+        "copilot/agents/",
+        "copilot/skills/",
+        "codex/skills/",
+        "codex/install_agents.py",
+        "pi/agents/",
+        "pi/skills/",
+        "plugins/steward-delegation/agents/",
+        "plugins/steward-delegation/skills/delegating/",
+        "plugins/steward-delegation/copilot/agents/",
+        "plugins/steward-delegation/copilot/skills/",
+        "plugins/steward-delegation/codex/skills/",
+        "plugins/steward-delegation/codex/install_agents.py",
+        "plugins/steward-delegation/pi/agents/",
+        "plugins/steward-delegation/pi/skills/",
+        "hooks/steward_hook.py",
+        "codex/steward.py",
+        "hooks/model_plan.py",
+        ".github/plugin/plugin.json",
+        ".codex-plugin/plugin.json",
+        "package.json",
+        "tests/test_steward_hook.py",
+        "tests/test_copilot_harness.py",
+        "tests/test_codex_harness.py",
+        "tests/test_pi_harness.py",
+        "tests/test_no_opus_max.py",
+        "tests/test_routing_tables.py",
+        "tests/test_pi_edict_2d.py",
+        "tests/test_pi_release_review.py",
+        "tests/test_pi_model_plan_render.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: the root .github/plugin/plugin.json, .codex-plugin/plugin.json and package.json pi field change paths (the in-tree monolith; installs resolve the v0.14.2 tag)",
+          "blast-radius: 28 renames plus about 15 edited files; package.json and several root tests are edited again by later items",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The printed totals equal the item's base totals exactly.",
+          "`git show -M --name-status HEAD | grep -c '^R100'` prints 28, and `git ls-files agents skills/delegating copilot/agents copilot/skills codex/skills codex/install_agents.py pi/agents pi/skills` prints nothing.",
+          "package.json pi.skills is [\"./plugins/steward-delegation/pi/skills\"], pi.subagents.agents is [\"./plugins/steward-delegation/pi/agents\"], and pi.extensions still lists ./pi/extensions/steward/index.ts.",
+          "`grep -rn steward_hook plugins/steward-delegation` prints nothing (positive control: the same grep on hooks/hooks.json prints its five command lines)."
+        ]
+      }
+    },
+    {
+      "id": "delegation-hook-claude",
+      "title": "Delegation hook for Claude Code",
+      "summary": "Build the delegation plugin's own hook script for Claude Code: the session-start edict, the delegation gate and the counter reset, without the PR gate or the registry.",
+      "estimate": "L",
+      "depends_on": [
+        "delegation-content-move"
+      ],
+      "contract": {
+        "design": "Build sequence step 10; steward-delegation (Changes the split forces); Hook split (Hook entries, delegation Claude rows; Map of hooks/steward_hook.py, D rows); Config, state and env vars; Names; Behavior changes the split causes; Tests (SessionStartTests and gate-class rows).",
+        "does": [
+          "Create plugins/steward-delegation/hooks/delegation_hook.py: stdlib Python 3.9+, called as `delegation_hook.py <harness> <mode>`. This item implements harness claude with modes session-start, gate and delegated. An unknown harness or mode exits 0 with no output (fail open).",
+          "Copy from hooks/steward_hook.py per the map's D rows: get_config_dir (42-61; claude: $CLAUDE_CONFIG_DIR or ~/.claude), get_state_dir (64-70; dir steward-delegation), get_plugin_root (82-88; env override STEWARD_DELEGATION_ROOT, tests only; else two directories up), _expand_user and _non_empty_str (91-104), strip_frontmatter (127-137), cmd_session_start (400-464) for claude without the registry call (449-454) and without _dependency_warnings, the Bash write classification and BASH_WRITE_RULES (471-673), the allowlist (676-779; extra globs from <config>/steward-delegation/allowlist), tool classification, session id and the atomic counter (782-947), gate mode (950-977; file <config>/steward-delegation/gate holding off, soft or hard, else env STEWARD_DELEGATION_GATE, default hard), gate_message (980-1012), cmd_gate (1160-1231) without the PR-gate lines 1184-1197, cmd_delegated (1238-1246), and its own _dispatch and main.",
+          "Claude session-start reads skills/delegating/SKILL.md under its plugin root and prints {\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": \"<STEWARD>...</STEWARD>\"}}, with the header naming the `steward-delegation:delegating` skill (today `steward:delegating` at :439). A missing skill file prints nothing and exits 0.",
+          "The claude gate_message starts with 'steward delegation gate' (the prefix the pi extension matches), and names `steward-delegation:coder-opus-medium`, `steward-delegation:mechanic-haiku-medium`, the path <config>/steward-delegation/gate and env STEWARD_DELEGATION_GATE.",
+          "Left out of this script: get_harness and STEWARD_HARNESS, EM_DASH, _ensure_registry and REGISTRY_SKELETON, _dependency_warnings, and every PR-gate and prose-gate function.",
+          "No import of, and no path into, another plugin folder or hooks/steward_hook.py; no file under plugins/steward-delegation names steward_hook.",
+          "package.json scripts.test: insert ` && python3 -m unittest discover -s plugins/steward-delegation/tests` directly after `python3 -m unittest discover -s tests`, so the order matches the design's Tests section; node stays the last segment, joined by &&."
+        ],
+        "tests": [
+          "plugins/steward-delegation/tests/helpers.py: a copy of StewardTestCase and run_hook (tests/test_steward_hook.py:41-120) that runs delegation_hook.py with the harness as first argument, points STEWARD_DELEGATION_ROOT at a temp plugin root, and clears the new env names; it names no other plugin and not steward_hook.",
+          "plugins/steward-delegation/tests/test_delegation_claude.py ports, to `delegation_hook.py claude <mode>`: SessionStartTests (:123; output shape, frontmatter stripped, missing skill fails open; the plainlanguage-warning cases retire with the file probe, and the registry cases went to steward-orchestration), GateSubagentAndOffTests, GateCounterTests, GateModeFileTests, GateAllowlistTests, BashClassificationTests, DelegatedTests, AllowlistCwdResolutionTests, SanitizeSessionIdTests and CounterAtomicityTests (:216-470, :782, :1052-1135), with the new paths and env names. It adds: session-start never creates the orchestration registry; a `gh pr create` whose body has two AI-tell markers is not denied as a PR and counts only as a direct edit (the design's delegation form of test_clean_pr_body_passes_through_to_normal_gate); the gate message names the new profile names, path and env; an unknown harness and an unknown mode exit 0 with no output.",
+          "The originals stay in tests/test_steward_hook.py until retire-old-tests."
+        ],
+        "red_when": "A ported case fails; the gate still denies a PR body; session-start creates the registry or warns about plainlanguage; the discover segment is missing from scripts.test (no plugins/steward-delegation unittest line prints).",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "package.json"
+      ],
+      "touches": [
+        "plugins/steward-delegation/hooks/delegation_hook.py",
+        "plugins/steward-delegation/tests/helpers.py",
+        "plugins/steward-delegation/tests/test_delegation_claude.py",
+        "package.json"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:new-surface: delegation_hook.py <harness> <mode> CLI; <config>/steward-delegation/{gate,allowlist}; env STEWARD_DELEGATION_GATE and STEWARD_DELEGATION_ROOT; state dir <state>/steward-delegation/",
+          "contract:existing-surface: the delegation gate no longer runs the PR gate, so STEWARD_DELEGATION_GATE=off no longer turns it off (design 'Behavior changes the split causes')",
+          "blast-radius: delegation_hook.py is also edited by delegation-hook-copilot-codex and model-plan-pi-branch; package.json scripts.test by pi-extension-move",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The run prints one more unittest result than at the item's base (plugins/steward-delegation/tests), directly after the root run; the other runs' totals are unchanged.",
+          "test_delegation_claude.py holds the ported session-start, gate, counter, mode, allowlist, Bash-rule and delegated cases, plus the no-registry, PR-body-not-denied, gate-message and unknown harness and mode cases.",
+          "`grep -nE 'pr_gate_violation|_ensure_registry|_dependency_warnings|STEWARD_HARNESS|\\bSTEWARD_GATE\\b|EM_DASH|steward:[a-z]' plugins/steward-delegation/hooks/delegation_hook.py` prints nothing (positive control: the same grep on hooks/steward_hook.py hits lines 29, 140 and 1133).",
+          "`grep -rn steward_hook plugins/` prints nothing (positive control: the same grep on hooks/hooks.json prints its five command lines)."
+        ]
+      }
+    },
+    {
+      "id": "delegation-hook-copilot-codex",
+      "title": "Delegation hook on Copilot and Codex",
+      "summary": "Teach the delegation hook to run under Copilot, with its own record of the main session and the bound-profile note, and under Codex, which gets the edict but no gate.",
+      "estimate": "L",
+      "depends_on": [
+        "delegation-hook-claude"
+      ],
+      "contract": {
+        "design": "Build sequence step 11; The four plugins (Codex keeps no delegation gate); Hook split (Hook entries, delegation Copilot and Codex rows; Map rows 42-61, 184-208, 211-229, 232-239, 242-272, 676-779 with line 702, 863-865; codex/steward.py is retired, its session-start goes to D); Names (Copilot rows); Tests (test_copilot_harness.py and test_codex_harness.py rows); Profiles and edict copies.",
+        "does": [
+          "Copilot branch of delegation_hook.py. get_config_dir copilot: $COPILOT_HOME or ~/.copilot.",
+          "`copilot session-start` first records the main session under <state>/steward-delegation/copilot-main/ (copy of hooks/steward_hook.py:211-229 with _sanitize_session_id 863-865; an OSError never costs the injection), then reads copilot/skills/delegating/SKILL.md under its plugin root and prints the flat {\"additionalContext\": ...} form (as :242-272) with the bound-profile note and without a plainlanguage warning. A missing skill file falls back to _COPILOT_FALLBACK_EDICT (232-239) with agent_type `steward-delegation:<profile>` and no em-dash clause.",
+          "_copilot_bound_profiles_note (184-208) lists only settings.json subagents.agents keys that start with `steward-delegation:` (today `steward:` at :197).",
+          "`copilot gate` and `copilot delegated` act only for a recorded main session (as :1167-1168), with today's Copilot payload shapes (apply_patch as a bare string, path fields), the Copilot allowlist (676-779) with `steward/**` at :702 changed to `steward-*/**`, and a Copilot gate message naming `steward-delegation:coder`, `steward-delegation:mechanic`, the new gate path and STEWARD_DELEGATION_GATE.",
+          "Codex branch: get_config_dir codex: $CODEX_HOME or ~/.codex (codex/steward.py:19-21). `codex session-start` prints {\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": <codex/skills/delegating/SKILL.md without frontmatter>}}, as codex/steward.py:27-30 does; a missing skill prints nothing. Codex gets no gate and no delegated mode, because Codex children share the parent's session_id (codex/steward.py:33-34): `codex gate` exits 0 with no output.",
+          "Create plugins/steward-delegation/copilot/hooks.json: SessionStart (timeout 15) session-start; PreToolUse matcher Edit|Write|Bash (10) gate; PreToolUse and PostToolUse matcher Agent (10) delegated. Every command is `python3 \"${PLUGIN_ROOT}/hooks/delegation_hook.py\" copilot <mode>`, with no VAR=value prefix and no STEWARD_HARNESS.",
+          "Create plugins/steward-delegation/codex/hooks.json: one SessionStart entry (timeout 15), `python3 \"${PLUGIN_ROOT}/hooks/delegation_hook.py\" codex session-start`."
+        ],
+        "tests": [
+          "plugins/steward-delegation/tests/test_delegation_copilot.py ports the delegation parts of tests/test_copilot_harness.py to `delegation_hook.py copilot <mode>`: CopilotConfigDirTests (test_harness_detection retires with STEWARD_HARNESS), CopilotSessionStartTests (the three plainlanguage-probe cases retire; the no-registry case stays), CopilotGateTests (test_pr_gate_in_main_session stays with steward-prose-gate), CopilotAgentProfileTests (parity of copilot/agents/ with agents/, :719-748) and CopilotSkillTests (:750-771, without the em-dash assertion). The bound-profile cases use `steward-delegation:` keys, and one more case shows a `steward:` key is not listed. Plus a copilot/hooks.json case: events, matchers, timeouts, and every command naming delegation_hook.py with the copilot argument.",
+          "plugins/steward-delegation/tests/test_delegation_codex.py ports from tests/test_codex_harness.py: session-start injects the Codex edict without creating the registry, missing skill fails open, CODEX_HOME config dir, CodexAgentInstallTests and CodexAstraFallbackTests (without the em-dash assertion), with paths inside the plugin. It adds: `codex gate` exits 0 with no output, and a codex/hooks.json case (SessionStart only).",
+          "The originals stay in tests/test_copilot_harness.py and tests/test_codex_harness.py until retire-old-tests."
+        ],
+        "red_when": "The bound note lists a `steward:` key or misses a `steward-delegation:` key; an unrecorded Copilot session is gated, or a recorded one is not; Codex gets a gate; a hooks.json carries STEWARD_HARNESS or names the wrong script.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "plugins/steward-delegation/hooks/delegation_hook.py",
+        "plugins/steward-delegation/copilot/hooks.json",
+        "plugins/steward-delegation/codex/hooks.json",
+        "plugins/steward-delegation/tests/helpers.py",
+        "plugins/steward-delegation/tests/test_delegation_copilot.py",
+        "plugins/steward-delegation/tests/test_delegation_codex.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:new-surface: Copilot and Codex hooks.json for the delegation plugin; state dir <state>/steward-delegation/copilot-main/",
+          "contract:existing-surface: Copilot settings.json keys `steward:<role>` no longer feed the bound-profile note; only `steward-delegation:<role>` keys do (the operator renames them in manual step 23)",
+          "blast-radius: delegation_hook.py is also edited by delegation-hook-claude and model-plan-pi-branch",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "test_delegation_copilot.py has session-start record, fallback and bound-note cases (with `steward-delegation:` keys and a rejected `steward:` key), main-session gate and skip cases, the agent parity cases and a copilot/hooks.json case; test_delegation_codex.py has session-start, fail-open, installer, fallback, silent codex gate and codex/hooks.json cases.",
+          "`grep -n STEWARD_HARNESS plugins/steward-delegation/copilot/hooks.json plugins/steward-delegation/codex/hooks.json` prints nothing (positive control: the same grep on the root copilot/hooks.json prints five lines).",
+          "plugins/steward-delegation/codex/hooks.json has exactly one event, SessionStart, naming delegation_hook.py with the codex argument.",
+          "`grep -rn steward_hook plugins/` prints nothing (positive control: the same grep on hooks/hooks.json prints its five command lines)."
+        ]
+      }
+    },
+    {
+      "id": "model-plan-move",
+      "title": "Move the model plan code into the delegation plugin",
+      "summary": "Move the four pi model plan modules into the delegation plugin's hooks folder and point the old hook and the existing tests at them, with no change in behavior.",
+      "estimate": "M",
+      "depends_on": [
+        "delegation-hook-copilot-codex"
+      ],
+      "contract": {
+        "design": "Build sequence step 12 (first half: the module move and the one-line _hook_module repoint); steward-delegation (Contents: hooks/model_plan.py, model_plan_render.py, model_plan_apply.py, delegation_stats.py); Hook split (Map rows 275-397).",
+        "does": [
+          "`git mv hooks/model_plan.py hooks/model_plan_render.py hooks/model_plan_apply.py hooks/delegation_stats.py plugins/steward-delegation/hooks/`.",
+          "hooks/steward_hook.py: _hook_module (302-308) imports from plugins/steward-delegation/hooks, found relative to the script's own file (not STEWARD_PLUGIN_ROOT, which tests point at a temp dir). No other line of the monolith changes.",
+          "plugins/steward-delegation/hooks/model_plan.py:171 DEFAULT_AGENTS_DIR goes back to `Path(__file__).resolve().parent.parent / \"pi\" / \"agents\"`, which now resolves to plugins/steward-delegation/pi/agents.",
+          "The docstring at model_plan.py:332-334 names the delegation hook (hooks/delegation_hook.py) instead of steward_hook, so no file under plugins/ names steward_hook.",
+          "The 13 model-plan and stats test files stay in tests/ for now; only their path constants change. Where one constant does two jobs it splits in two, an import dir for the moved modules and the path of hooks/steward_hook.py (which stays): test_pi_model_plan.py MODULE (:18); test_pi_model_plan_render.py HOOKS (:28, used both for imports and for steward_hook.py at :348-418); test_pi_model_plan_apply.py HOOKS and HOOK (:24-25); test_pi_delegation_stats.py HOOKS and RENDER_HOOKS (:127, :169, :185); test_pi_small_fixes.py sys.path (:10-11); test_pi_model_plan_fixes2b.py (:249); and any other constant a run shows."
+        ],
+        "tests": [
+          "No new tests; every model-plan and stats test keeps passing against the moved modules, both through direct imports and through the monolith's CLI modes."
+        ],
+        "red_when": "The monolith's pi model plan block or its model-plan, model-plan-apply or delegation-stats modes cannot import the moved modules (root model-plan tests fail); DEFAULT_AGENTS_DIR names a missing dir; a test runs a script that is no longer there.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "hooks/model_plan.py",
+        "hooks/model_plan_render.py",
+        "hooks/model_plan_apply.py",
+        "hooks/delegation_stats.py",
+        "plugins/steward-delegation/hooks/model_plan.py",
+        "plugins/steward-delegation/hooks/model_plan_render.py",
+        "plugins/steward-delegation/hooks/model_plan_apply.py",
+        "plugins/steward-delegation/hooks/delegation_stats.py",
+        "hooks/steward_hook.py",
+        "tests/test_pi_model_plan.py",
+        "tests/test_pi_model_plan_2c.py",
+        "tests/test_pi_model_plan_2c_review.py",
+        "tests/test_pi_model_plan_apply.py",
+        "tests/test_pi_model_plan_apply_final.py",
+        "tests/test_pi_model_plan_apply_review3.py",
+        "tests/test_pi_model_plan_fixes2b.py",
+        "tests/test_pi_model_plan_render.py",
+        "tests/test_pi_model_plan_resolver.py",
+        "tests/test_pi_model_plan_review2.py",
+        "tests/test_pi_delegation_stats.py",
+        "tests/test_pi_release_review.py",
+        "tests/test_pi_small_fixes.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: the monolith's _hook_module search path changes (internal; same modules, same behavior)",
+          "blast-radius: model_plan.py and the 13 test files are edited again by model-plan-pi-branch and pi-extension-move",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The printed totals equal the item's base totals exactly.",
+          "The four modules exist under plugins/steward-delegation/hooks/ and `git ls-files hooks/model_plan.py hooks/model_plan_render.py hooks/model_plan_apply.py hooks/delegation_stats.py` prints nothing; `git show -M --name-status HEAD` lists the four as renames.",
+          "`git show HEAD -- hooks/steward_hook.py` changes only lines inside _hook_module.",
+          "`grep -rn steward_hook plugins/` prints nothing (positive control: `git show HEAD~1:hooks/model_plan.py | grep -c steward_hook` prints 2)."
+        ]
+      }
+    },
+    {
+      "id": "model-plan-pi-branch",
+      "title": "Delegation hook on pi with the model plan commands",
+      "summary": "Add the pi branch to the delegation hook, including the model plan block and the three pi commands, and move the model plan and stats tests into the plugin.",
+      "estimate": "L",
+      "depends_on": [
+        "model-plan-move"
+      ],
+      "contract": {
+        "design": "Build sequence step 12 (second half: pi branch, the three CLI modes, test move, BASE_COMMIT retirement); Hook split (Hook entries, delegation pi row; Map rows 275-397, 400-464, 467-468, 1579-1605, 1608-1634: D keeps the three CLI modes with exit codes 2 and 3); Tests (rows for the ten test_pi_model_plan*.py files, test_pi_delegation_stats.py, test_pi_release_review.py, test_pi_small_fixes.py, the BASE_COMMIT row and the test_pi_harness.py row).",
+        "does": [
+          "pi branch of delegation_hook.py: get_config_dir pi ($PI_CODING_AGENT_DIR or ~/.pi/agent). `pi session-start` reads pi/skills/steward-delegating/SKILL.md under its plugin root and prints it without <STEWARD> tags and without plainlanguage warnings, appends the model plan block when the payload carries valid model_facts, and adds stewardLaunches when block_launches_ok (copies of 275-397, 400-464 and 467-468). `pi gate` and `pi delegated` use pi's lowercase tools (bash, edit, write), pi's allowlist globs (**/AGENTS.md, **/.pi/**) and the pi gate message (steward.coder and steward.mechanic, names unchanged, with the new gate path and env).",
+          "CLI modes `delegation_hook.py pi model-plan`, `pi model-plan-apply [args]` and `pi delegation-stats` (copies of cmd_model_plan, cmd_model_plan_apply and cmd_delegation_stats, 321-397 and 1579-1605): JSON on stdin, JSON on stdout. Bad input prints {\"error\": ...} and exits 2 (MODEL_PLAN_USAGE_EXIT, :299); a refused apply exits 3 (:361); an internal error exits 1, as main does today (1608-1626). _hook_module imports the sibling modules from the script's own hooks/ dir.",
+          "`git mv` into plugins/steward-delegation/tests/: the ten test_pi_model_plan*.py files, test_pi_delegation_stats.py, test_pi_release_review.py and test_pi_small_fixes.py; and tests/pi/profile_check.mjs and tests/pi/resolve_model.mjs into plugins/steward-delegation/tests/pi/ (helpers, not *.test.mjs, so node does not run them as tests). Every moved file runs `delegation_hook.py pi <mode>` instead of steward_hook.py, imports StewardTestCase, run_hook and the hook module from plugins/steward-delegation/tests/helpers.py instead of test_steward_hook (render :26, apply, delegation_stats), and reads only files inside plugins/steward-delegation. test_pi_model_plan_render.py defines its own EM_DASH constant until edicts-copilot-codex removes it with its uses (:86, :265, :426). test_pi_model_plan.py:155 compares model_plan's pi config dir with the delegation hook's.",
+          "Doc- and README-reading cases do not move into the plugin: test_doc_operator_plan_matches_tests (test_pi_model_plan_review2.py:273) and ReadmeExamplePlanTests and ReadmeWordingTests (test_pi_release_review.py:229-286) go to one root file, tests/test_model_plan_docs.py, which loads the moved model_plan module by path and gets OPERATOR_PLAN by loading the moved test_pi_model_plan.py by path (or carries its own copy). Inside the plugin every doc_operator_plan() call (2c, render, fixes2b) uses the OPERATOR_PLAN constant, which the root case keeps equal to the doc.",
+          "BASE_COMMIT (test_pi_model_plan_render.py:34-37, 320-332): the four FailOpenTests cases that compare with `git show eb80786:hooks/steward_hook.py` (test_pi_without_facts_matches_base, test_pi_with_facts_appends_block, test_other_harnesses_ignore_facts, test_fail_open_cases) compare instead with fixed expected output embedded in the test, captured once at build time for the payloads they use, or with the same script's output without facts. Nothing runs git. test_missing_base_commit_fails_loudly (test_pi_model_plan_fixes2b.py:254-263) and STEWARD_ALLOW_MISSING_BASE_COMMIT are retired.",
+          "Port the hook-level pi parts of tests/test_pi_harness.py into plugins/steward-delegation/tests/test_delegation_pi.py, run as `delegation_hook.py pi <mode>`: PiConfigDirTests (test_harness_defaults_to_claude retires with STEWARD_HARNESS), PiSessionStartTests (the three plainlanguage-probe cases retire; the no-registry case stays) and PiGateTests (test_pr_gate_on_lowercase_bash stays with steward-prose-gate).",
+          "The pi model plan file (<agent-dir>/steward/model-plan.json) and the launch log path do not change here; pi-extension-move changes them together with the extension."
+        ],
+        "tests": [
+          "The moved files plus test_delegation_pi.py inside the plugin; tests/test_model_plan_docs.py at the root."
+        ],
+        "red_when": "A CLI mode exits with the wrong code on bad or refused input; the pi session-start text or block differs from the monolith's for the same payload (apart from the dropped warnings); a moved test still reads outside plugins/steward-delegation or imports test_steward_hook; the pi-subagents tests error instead of skipping because resolve_model.mjs or profile_check.mjs is not where they look.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "plugins/steward-delegation/hooks/delegation_hook.py",
+        "plugins/steward-delegation/tests/helpers.py",
+        "plugins/steward-delegation/tests/test_delegation_pi.py",
+        "tests/test_pi_model_plan.py",
+        "tests/test_pi_model_plan_2c.py",
+        "tests/test_pi_model_plan_2c_review.py",
+        "tests/test_pi_model_plan_apply.py",
+        "tests/test_pi_model_plan_apply_final.py",
+        "tests/test_pi_model_plan_apply_review3.py",
+        "tests/test_pi_model_plan_fixes2b.py",
+        "tests/test_pi_model_plan_render.py",
+        "tests/test_pi_model_plan_resolver.py",
+        "tests/test_pi_model_plan_review2.py",
+        "tests/test_pi_delegation_stats.py",
+        "tests/test_pi_release_review.py",
+        "tests/test_pi_small_fixes.py",
+        "tests/pi/profile_check.mjs",
+        "tests/pi/resolve_model.mjs",
+        "plugins/steward-delegation/tests/test_pi_model_plan.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_2c.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_2c_review.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_apply.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_apply_final.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_apply_review3.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_fixes2b.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_render.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_resolver.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_review2.py",
+        "plugins/steward-delegation/tests/test_pi_delegation_stats.py",
+        "plugins/steward-delegation/tests/test_pi_release_review.py",
+        "plugins/steward-delegation/tests/test_pi_small_fixes.py",
+        "plugins/steward-delegation/tests/pi/profile_check.mjs",
+        "plugins/steward-delegation/tests/pi/resolve_model.mjs",
+        "tests/test_model_plan_docs.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:new-surface: `delegation_hook.py pi model-plan|model-plan-apply|delegation-stats` with exit codes 0, 1, 2 and 3 (the pi extension's /steward-models calls them from pi-extension-move on)",
+          "destructive: retires test_missing_base_commit_fails_loudly and STEWARD_ALLOW_MISSING_BASE_COMMIT; the four BASE_COMMIT comparisons lose their link to eb80786",
+          "blast-radius: about 330 test cases change folder; delegation_hook.py is also edited by two earlier items",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "Totals: the root run drops by the cases the 13 moved files held at the item's base (326 at 2e351f8, 13 of them skipped) minus the cases kept in tests/test_model_plan_docs.py; the plugins/steward-delegation run grows by the moved cases minus exactly one retired case (test_missing_base_commit_fails_loudly), plus the new test_delegation_pi.py cases. The skipped total stays 13.",
+          "`grep -rnE 'BASE_COMMIT|ALLOW_MISSING_BASE|eb80786' plugins/steward-delegation tests` prints nothing (positive control: the same grep at the item's base hits tests/test_pi_model_plan_render.py:34).",
+          "`grep -rnE 'steward_hook|test_steward_hook' plugins/` prints nothing (positive control: the same grep on tests/test_pi_model_plan_render.py at the item's base hits :26).",
+          "plugins/steward-delegation/tests/pi/resolve_model.mjs and profile_check.mjs exist, `git ls-files tests/pi/resolve_model.mjs tests/pi/profile_check.mjs` prints nothing, and the moved resolver and apply tests point at the plugin copies.",
+          "`echo nope | python3 plugins/steward-delegation/hooks/delegation_hook.py pi model-plan; echo $?` prints an {\"error\": ...} line and then 2.",
+          "tests/test_model_plan_docs.py holds the doc-equality case and the README example-plan and wording cases, and passes."
+        ]
+      }
+    },
+    {
+      "id": "pi-extension-prose-cut",
+      "title": "Take the prose checks out of the old pi extension",
+      "summary": "Remove the prose and PR checks from the old pi extension, now that the prose gate extension does that job, and load the prose gate extension from the root package.",
+      "estimate": "S",
+      "depends_on": [
+        "model-plan-pi-branch"
+      ],
+      "contract": {
+        "design": "Build sequence step 14 (first half, done before the move because the moved extension would otherwise send prose-gate calls to delegation_hook.py, which has no prose-gate mode); Hook split (Pi extensions, first bullet); Behavior changes the split causes (the pi bullets); Pi packaging.",
+        "does": [
+          "In pi/extensions/steward/index.ts (still at its old path, still spawning hooks/steward_hook.py): remove the agent_before_settle prose-gate handler (:1127-1153), isProseRevision (:186-197), lastAssistantText (:169-184) and PROSE_GATE_MESSAGE_TYPE (:55). The tool_call handler (:1071-1101) keeps its delegation-gate downgrade as it is; only the comment at :1082-1084 changes, to say the steward-prose-gate extension is the one that still blocks a PR body.",
+          "tests/pi/steward-extension.test.mjs: delete the cases steward-prose-gate already carries (its step 5 port list): :319 'PR gate blocks a gh pr create body with an em-dash', :345 'prose gate sends a reply back once, keeping earlier entries', :378 'isProseRevision', :390 'prose gate skips aborted runs' and :429 'lastAssistantText'; cut the PR halves of :150 and :186 and keep their delegation halves; drop the removed imports (:13) and the EM_DASH constant (:15), whose last uses go with those cases.",
+          "package.json pi.extensions gains ./plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts, so a pi install of this tree still gets the prose gate while the old extension lacks it."
+        ],
+        "tests": [
+          "No new tests; the remaining node cases pass."
+        ],
+        "red_when": "A remaining node case fails; the old extension still registers agent_before_settle; package.json names a prose-gate extension path that does not exist (tests/test_pi_harness.py test_manifest_paths_exist fails).",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "package.json"
+      ],
+      "touches": [
+        "pi/extensions/steward/index.ts",
+        "tests/pi/steward-extension.test.mjs",
+        "package.json"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: the root package's pi extensions list gains the prose-gate extension; the old extension stops sending prose-gate calls",
+          "destructive: deletes five node cases that steward-prose-gate already ported",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "Node totals drop by exactly the five deleted cases; Python totals are unchanged.",
+          "`grep -nE 'agent_before_settle|isProseRevision|lastAssistantText|PROSE_GATE_MESSAGE_TYPE|\"prose-gate\"|EM_DASH' pi/extensions/steward/index.ts tests/pi/steward-extension.test.mjs` prints nothing (positive control: the same grep at the item's base hits index.ts:55 and :1127 and steward-extension.test.mjs:15).",
+          "package.json pi.extensions lists ./pi/extensions/steward/index.ts and ./plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts, and both files exist."
+        ]
+      }
+    },
+    {
+      "id": "pi-extension-move",
+      "title": "Move the pi extension into the delegation plugin",
+      "summary": "Move the pi extension into the delegation plugin, run it on the delegation hook with the new names and paths, and give the root package its final pi entries.",
+      "estimate": "L",
+      "depends_on": [
+        "pi-extension-prose-cut"
+      ],
+      "contract": {
+        "design": "Build sequence step 14 (second half); Hook split (Pi extensions, first bullet); Config, state and env vars (model-plan.json, pi-delegations.jsonl, STEWARD_DELEGATION_ROOT, STEWARD_DELEGATION_HOOK_LOG and STEWARD_DELEGATION_PYTHON rows); Pi packaging (root package.json pi field); Tests (tests/pi rows; test_pi_harness.py row); Profiles and edict copies (test_pi_harness.py:289-300).",
+        "does": [
+          "`git mv pi/extensions/steward plugins/steward-delegation/pi/extensions/steward-delegation`. PLUGIN_ROOT stays three directories up (:41), now plugins/steward-delegation. HOOK_SCRIPT (:42) is hooks/delegation_hook.py. runHook spawns `process.env.STEWARD_DELEGATION_PYTHON || \"python3\"` with [HOOK_SCRIPT, \"pi\", subcommand] and no longer sets STEWARD_HARNESS or STEWARD_PLUGIN_ROOT (:116-117). DELEGATION_GATE_PREFIX stays 'steward delegation gate' (:57). The header comment (:5) names delegation_hook.py.",
+          "Env and paths: STEWARD_HOOK_LOG becomes STEWARD_DELEGATION_HOOK_LOG (:22, :74, :87, :583). The launch log moves from resolve(state, \"steward\", ...) (:300) to steward-delegation, and so does delegation_stats.py log_path (:37-38). The user model plan moves from <agent-dir>/steward/model-plan.json to <agent-dir>/steward-delegation/model-plan.json (model_plan.py:1907, model_plan_apply.py:154, with the docstrings at model_plan.py:26, model_plan_apply.py:3 and delegation_stats.py:4-5). Names that stay: the steward system-prompt section, steward.<role> profiles, /steward-models, .pi/steward-model-plan.json and profiles/pi-subagents/steward.json.",
+          "`git mv` the remaining tests/pi/*.test.mjs (steward-extension, steward-delegation-log, steward-model-apply, steward-model-plan, steward-write-stdout) into plugins/steward-delegation/tests/pi/, importing ../../pi/extensions/steward-delegation/index.ts, with env keys STEWARD_DELEGATION_GATE, STEWARD_DELEGATION_PYTHON and STEWARD_DELEGATION_HOOK_LOG and the new state and config paths; the header comments that name hooks/steward_hook.py (steward-extension.test.mjs:3, steward-model-plan.test.mjs:4) name delegation_hook.py. The moved Python tests that write or read model-plan.json or pi-delegations.jsonl use the steward-delegation dirs.",
+          "Root package.json pi field takes its final shape (design 'Pi packaging'): extensions [./plugins/steward-delegation/pi/extensions/steward-delegation/index.ts, ./plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts], skills [./plugins/steward-delegation/pi/skills], subagents.agents [./plugins/steward-delegation/pi/agents]. The scripts.test node segment becomes `node --test 'plugins/*/tests/pi/*.test.mjs'`, since tests/pi/ is now empty.",
+          "Port the package, profile and skill parts of tests/test_pi_harness.py: PiAgentProfileTests (:275-342, including test_each_profile_mirrors_its_claude_twin at :289-300) and PiSkillTests (:344-370, without the em-dash assertion at :350) into plugins/steward-delegation/tests/test_delegation_pi_profiles.py; PiPackageManifestTests minus its version case (:249-267: manifest paths exist, pi-package keyword, orchestrating skill not shipped to pi) into a root repo-level file tests/test_pi_package.py, because plugin tests cannot read the root package.json. test_version_matches_claude_plugin (:269-272) retires: the root package version is not a release number (design 'Versions and tags')."
+        ],
+        "tests": [
+          "The moved node files; test_delegation_pi_profiles.py inside the plugin; tests/test_pi_package.py at the root."
+        ],
+        "red_when": "A moved node case fails; the extension resolves the hook outside its plugin, still sets STEWARD_HARNESS, or still reads STEWARD_PYTHON or STEWARD_HOOK_LOG; the node glob misses the plugin's tests/pi (node totals drop); a package.json pi path does not exist.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "package.json"
+      ],
+      "touches": [
+        "pi/extensions/steward/index.ts",
+        "plugins/steward-delegation/pi/extensions/steward-delegation/index.ts",
+        "plugins/steward-delegation/hooks/model_plan.py",
+        "plugins/steward-delegation/hooks/model_plan_apply.py",
+        "plugins/steward-delegation/hooks/delegation_stats.py",
+        "tests/pi/steward-extension.test.mjs",
+        "tests/pi/steward-delegation-log.test.mjs",
+        "tests/pi/steward-model-apply.test.mjs",
+        "tests/pi/steward-model-plan.test.mjs",
+        "tests/pi/steward-write-stdout.test.mjs",
+        "plugins/steward-delegation/tests/pi/steward-extension.test.mjs",
+        "plugins/steward-delegation/tests/pi/steward-delegation-log.test.mjs",
+        "plugins/steward-delegation/tests/pi/steward-model-apply.test.mjs",
+        "plugins/steward-delegation/tests/pi/steward-model-plan.test.mjs",
+        "plugins/steward-delegation/tests/pi/steward-write-stdout.test.mjs",
+        "plugins/steward-delegation/tests/test_pi_model_plan.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_apply.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_apply_review3.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_render.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_review2.py",
+        "plugins/steward-delegation/tests/test_pi_delegation_stats.py",
+        "plugins/steward-delegation/tests/test_delegation_pi_profiles.py",
+        "tests/test_pi_package.py",
+        "package.json"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: env STEWARD_PYTHON and STEWARD_HOOK_LOG become STEWARD_DELEGATION_PYTHON and STEWARD_DELEGATION_HOOK_LOG; ~/.pi/agent/steward/model-plan.json and ~/.local/state/steward/pi-delegations.jsonl move to steward-delegation dirs, with no migration code (the README says what to move)",
+          "contract:existing-surface: the root package.json pi field changes to the split layout, which is what `pi install git:github.com/tejgandham/steward` loads from main",
+          "capability: the pi extension entry point moves and now spawns a different hook script",
+          "blast-radius: package.json is also edited by three other items; the model-plan modules by model-plan-move and edicts-copilot-codex",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "Node totals equal the item's base node totals (cases moved, none dropped); the plugin and root Python runs grow only by the ported test_pi_harness cases.",
+          "`grep -nE 'steward_hook|STEWARD_HARNESS|STEWARD_PLUGIN_ROOT|STEWARD_PYTHON|STEWARD_HOOK_LOG' plugins/steward-delegation/pi/extensions/steward-delegation/index.ts` prints nothing (positive control: the same grep on `git show HEAD~1:pi/extensions/steward/index.ts` hits :42 and :116-117), and `grep -rn steward_hook plugins/` prints nothing (positive control: `git show HEAD~1:tests/pi/steward-extension.test.mjs | grep -c steward_hook` prints 1).",
+          "`grep -rnE '\"steward\", \"model-plan.json\"|\"steward\", LOG_NAME|resolve\\(state, \"steward\"' plugins/steward-delegation` prints nothing (positive control: the same grep at the item's base hits model_plan.py:1907, model_plan_apply.py:154, delegation_stats.py:38 and index.ts:300).",
+          "`git ls-files pi tests/pi` prints nothing, and package.json's pi field equals the design's final shape with every path existing.",
+          "The scripts.test node segment is `node --test 'plugins/*/tests/pi/*.test.mjs'` and is the last segment."
+        ]
+      }
+    },
+    {
+      "id": "edicts-claude-pi",
+      "title": "Rewrite the Claude Code and pi edicts and all profile bodies",
+      "summary": "Give the Claude Code and pi edicts, the routing table and all four copies of the profile bodies the new plugin names, the plainlanguage fallback and the new hook paths, without the role check or the em-dash rule.",
+      "estimate": "L",
+      "depends_on": [
+        "pi-extension-move"
+      ],
+      "contract": {
+        "design": "Build sequence steps 15 and 16; Names; Dependencies: manual on every harness (steward-delegation row: the rule 4 fallback); steward-delegation (Changes the split forces: no Role check); Personal content (Em-dash rule); Profiles and edict copies; Appendix A (plainlanguage preload).",
+        "does": [
+          "Gate first: before any edit, look in docs/roadmap/plugin-split.md for a line starting 'Step 15 result:'. If there is none, stop, commit nothing, and report: 'Manual step 15 (plainlanguage preload check) has not recorded its result. Run it, add a line starting \"Step 15 result:\" to docs/roadmap/plugin-split.md on plugin-split, merge plugin-split into hatch/steward-delegation/integration, then resume this item.'",
+          "plugins/steward-delegation/skills/delegating/SKILL.md (the Claude edict) and routing.md: every `steward:<x>` becomes `steward-delegation:<x>` (14 and 32 lines at c5fd21b); the frontmatter description names the steward-delegation plugin; the Role check section (:41-42) is removed, since steward-orchestration's session-start block carries it; rule 4 (:12) drops its em-dash sentences and gains the fallback: use the plainlanguage skill, and if it is not in your skill list, tell the operator once and apply the rules in this rule directly (as codex/skills/delegating/SKILL.md:40 does); the Hooks section (:44-45) describes only the delegation gate, with <config dir>/steward-delegation/gate, env STEWARD_DELEGATION_GATE and default hard, and says the prose and PR gates come from steward-prose-gate when it is installed. 'Claude Opus never runs at max' stays.",
+          "plugins/steward-delegation/pi/skills/steward-delegating/SKILL.md: rule 4 (:12) drops its em-dash text and gains the same fallback; the Hooks section (:57) describes the delegation extension's gate with ~/.pi/agent/steward-delegation/gate and STEWARD_DELEGATION_GATE and names steward-prose-gate for the prose and PR gates. pi names (steward.<role>, steward-delegating) stay.",
+          "All four profile-body copies drop their em-dash text in this one commit, so the parity tests stay equal: agents/reviewer-opus-max.md:10 and agents/writer-sonnet-medium.md:12, their pi copies (pi/agents/top-reviewer.md, pi/agents/writer.md), their Copilot copies (copilot/agents/top-reviewer.agent.md, copilot/agents/writer.agent.md) and the matching instructions in codex/skills/delegating/profiles.json (:38, :54), all under plugins/steward-delegation/.",
+          "The writer profile's `skills:` frontmatter (plugins/steward-delegation/agents/writer-sonnet-medium.md:6-7) takes the form recorded on the 'Step 15 result:' line, or is removed when that line records dropping the preload. The pi copy keeps `skills: plainlanguage`; the Copilot copy has no skills field.",
+          "Tests move with the content (`git mv` into plugins/steward-delegation/tests/): test_routing_tables.py (COPIES name `steward-delegation:mechanic-haiku-medium` for the Claude edict and routing.md; the Copilot entry stays `steward:mechanic` until edicts-copilot-codex; the em-dash assertion at :62 is dropped) and test_pi_edict_2d.py (EM_DASH at :15 and its assertion at :97 dropped; the rest of test_style stays). tests/test_no_opus_max.py splits: plugins/steward-delegation/tests/test_no_opus_max.py takes test_claude_code_agents, test_pi_agents, test_copilot_agents_against_edict_models, HelperTests, and the Claude, pi and Copilot edict and routing.md rows of test_profile_tables, test_profile_bullets and test_edicts_carry_the_rule; the root tests/test_no_opus_max.py keeps test_repo_pi_settings, test_operator_case_plan, test_plan_doc_and_readme_json_examples, and the README and onboarding-template rows of those three shared tests.",
+          "Add cases in plugins/steward-delegation/tests (for example in test_delegation_claude.py) that pin the writer profile's skills frontmatter to the recorded form, and that the Claude edict has no Role check and no `steward:` name."
+        ],
+        "tests": [
+          "Moved test_routing_tables.py, test_pi_edict_2d.py and the plugin half of test_no_opus_max.py; the two new cases above; the parity tests from earlier items keep passing on the changed bodies."
+        ],
+        "red_when": "The Step 15 line is missing and the item edits anyway; a parity test fails because one body copy changed without the others; a routing or no-Opus-max case fails; a moved test reads outside its folder.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "plugins/steward-delegation/skills/delegating/SKILL.md",
+        "plugins/steward-delegation/skills/delegating/routing.md",
+        "plugins/steward-delegation/pi/skills/steward-delegating/SKILL.md",
+        "plugins/steward-delegation/agents/reviewer-opus-max.md",
+        "plugins/steward-delegation/agents/writer-sonnet-medium.md",
+        "plugins/steward-delegation/pi/agents/top-reviewer.md",
+        "plugins/steward-delegation/pi/agents/writer.md",
+        "plugins/steward-delegation/copilot/agents/top-reviewer.agent.md",
+        "plugins/steward-delegation/copilot/agents/writer.agent.md",
+        "plugins/steward-delegation/codex/skills/delegating/profiles.json",
+        "tests/test_routing_tables.py",
+        "tests/test_pi_edict_2d.py",
+        "tests/test_no_opus_max.py",
+        "plugins/steward-delegation/tests/test_routing_tables.py",
+        "plugins/steward-delegation/tests/test_pi_edict_2d.py",
+        "plugins/steward-delegation/tests/test_no_opus_max.py",
+        "plugins/steward-delegation/tests/test_delegation_claude.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: skill and profile ids steward:<x> become steward-delegation:<x> in the Claude edict and routing table; the Role check leaves the edict",
+          "open-question: the writer profile's skills form depends on manual step 15; the item halts if its result line is absent",
+          "blast-radius: changes all four profile-body copies at once; tests/test_no_opus_max.py is also edited by orchestration-content (other binder) and docs-index",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "`grep -n '^Step 15 result:' docs/roadmap/plugin-split.md` prints exactly one line, and the skills frontmatter of plugins/steward-delegation/agents/writer-sonnet-medium.md matches the form it records (or is absent when it records dropping the preload).",
+          "`grep -nE 'steward:[a-z]' plugins/steward-delegation/skills/delegating/SKILL.md plugins/steward-delegation/skills/delegating/routing.md` prints nothing (positive control: `git show HEAD~1:plugins/steward-delegation/skills/delegating/routing.md | grep -c 'steward:'` prints 32).",
+          "`grep -rniE 'em.?dash|EM_DASH|u2014' plugins/steward-delegation/skills plugins/steward-delegation/pi/skills plugins/steward-delegation/agents plugins/steward-delegation/pi/agents plugins/steward-delegation/copilot/agents plugins/steward-delegation/codex/skills/delegating/profiles.json` prints nothing (positive control: the same grep at the item's base hits skills/delegating/SKILL.md:12 and agents/writer-sonnet-medium.md:12).",
+          "`grep -nE 'Role check|initiatives.md' plugins/steward-delegation/skills/delegating/SKILL.md` prints nothing (positive control: the same grep at the item's base hits :41-42).",
+          "'Claude Opus never runs at max' is still in the Claude, pi and Copilot edicts and the onboarding template, and both halves of test_no_opus_max.py run (one in the root run, one in the plugin run).",
+          "Totals: the root run drops by exactly the cases moved out (test_routing_tables.py, test_pi_edict_2d.py and the moved test_no_opus_max.py cases); the plugin run grows by the same cases plus the new ones; no case is deleted."
+        ]
+      }
+    },
+    {
+      "id": "edicts-copilot-codex",
+      "title": "Rewrite the Copilot and Codex edicts",
+      "summary": "Give the Copilot and Codex edicts the new plugin names and hook paths without the em-dash rule, and remove the last em-dash handling from the model plan code.",
+      "estimate": "M",
+      "depends_on": [
+        "edicts-claude-pi"
+      ],
+      "contract": {
+        "design": "Build sequence step 16 (second half) and its done-checks; Names (Copilot rows and the `steward:[a-z]` done-check); Personal content (Em-dash rule and its done-check); Dependencies (the rule 4 fallback).",
+        "does": [
+          "plugins/steward-delegation/copilot/skills/delegating/SKILL.md: every `steward:<role>` becomes `steward-delegation:<role>` (22 lines at c5fd21b, including rule 2 at :10 and the profile table at :22-28); rule 4 (:12) drops its em-dash sentences and gains the plainlanguage fallback; the Hooks section (:62) describes the delegation gate with ~/.copilot/steward-delegation/gate and STEWARD_DELEGATION_GATE and names steward-prose-gate for the prose and PR gates; the agent_type wording matches the hook's fallback edict (`steward-delegation:<profile>`).",
+          "plugins/steward-delegation/codex/skills/delegating/SKILL.md: drop the em-dash text from :40 (the plainlanguage fallback there stays); skill self-references name `steward-delegation:delegating`; Codex agent names steward-<role> stay.",
+          "plugins/steward-delegation/hooks/model_plan_render.py: remove EM_DASH (:46), the replace in _text (:52) and 'em-dashes become -' from the docstring (:17). An em-dash in a model name or message now passes through unchanged.",
+          "Plugin tests follow: test_routing_tables.py COPIES names `steward-delegation:mechanic` for the Copilot edict; test_no_opus_max.py's regexes (:93, :95) match `| steward-delegation:<role> |` rows; test_delegation_copilot.py CopilotSkillTests expect `steward-delegation:` plus each role and the `| steward-delegation:<role> | <model> | <effort> |` rows; test_pi_model_plan_render.py drops the em-dash check from assert_clean (:86) and from test_report_has_every_finding_and_source (:426), and drops EM_DASH from the hostile string at :265 (the other hostile parts stay), then drops its local EM_DASH constant.",
+          "Root tests/test_copilot_harness.py: delete its two CopilotSkillTests cases (:751, :758), which read the Copilot edict for `steward:` rows; their ported copies in test_delegation_copilot.py carry them with the new names. The commit message names them."
+        ],
+        "tests": [
+          "The updated plugin tests above; no new cases."
+        ],
+        "red_when": "A Copilot row still says steward:<role>; a no-Opus-max regex matches nothing (its rows dict is empty and the case fails); model_plan_render still rewrites em-dashes; a render test still expects the replacement.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "plugins/steward-delegation/copilot/skills/delegating/SKILL.md",
+        "plugins/steward-delegation/codex/skills/delegating/SKILL.md",
+        "plugins/steward-delegation/hooks/model_plan_render.py",
+        "plugins/steward-delegation/tests/test_routing_tables.py",
+        "plugins/steward-delegation/tests/test_no_opus_max.py",
+        "plugins/steward-delegation/tests/test_delegation_copilot.py",
+        "plugins/steward-delegation/tests/test_pi_model_plan_render.py",
+        "tests/test_copilot_harness.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: Copilot agent_type values steward:<role> become steward-delegation:<role> in the edict the model follows",
+          "contract:existing-surface: model_plan_render stops rewriting em-dashes in rendered model-plan text",
+          "destructive: deletes two root CopilotSkillTests cases (ported copies remain)",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "Totals: the root run drops by exactly the two deleted CopilotSkillTests cases; the plugin totals are unchanged.",
+          "`grep -rnE 'steward:[a-z]' plugins/steward-delegation` prints nothing (positive control: `git show HEAD~1:plugins/steward-delegation/copilot/skills/delegating/SKILL.md | grep -c 'steward:'` prints 22).",
+          "`grep -rniE 'em.?dash|EM_DASH|u2014' plugins/steward-delegation` prints nothing (positive control: the same grep at the item's base hits model_plan_render.py:17, :46 and :52)."
+        ]
+      }
+    },
+    {
+      "id": "delegation-packaging",
+      "title": "Package the delegation plugin",
+      "summary": "Give the delegation plugin its manifests, Claude Code hook list, README, version test and catalog entries so it can be installed on its own.",
+      "estimate": "M",
+      "depends_on": [
+        "edicts-copilot-codex"
+      ],
+      "contract": {
+        "design": "Build sequence step 17; Repo layout after the reorg (catalog entries); Versions and tags; Dependencies: manual on every harness; Hook split (Hook entries, delegation Claude rows); Profiles and edict copies (one version test per plugin); Release and migration.",
+        "does": [
+          "Create plugins/steward-delegation/.claude-plugin/plugin.json (name steward-delegation; agents/, skills/ and hooks/hooks.json at their default paths), .codex-plugin/plugin.json (skills ./codex/skills/, hooks ./codex/hooks.json, an interface block adapted from the root .codex-plugin/plugin.json) and .github/plugin/plugin.json (agents copilot/agents/, skills [copilot/skills/], hooks copilot/hooks.json). Each has \"version\": \"0.15.0\" and no dependencies field.",
+          "Create plugins/steward-delegation/hooks/hooks.json for Claude Code: SessionStart matcher startup|resume|clear|compact|fork (timeout 15) session-start; PreToolUse matcher ^(Edit|Write|MultiEdit|NotebookEdit|Bash)$ (10) gate; PreToolUse and PostToolUse matcher ^(Task|Agent)$ (10) delegated. Commands are `python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/delegation_hook.py\" claude <mode>`. No Stop entry.",
+          "Create plugins/steward-delegation/README.md: what it ships per harness (design table 'What each plugin ships per harness'); install per harness; that it relies on plainlanguage (soft) and, on pi, pi-subagents, both installed by hand; the gate switch <config>/steward-delegation/gate and env STEWARD_DELEGATION_GATE; the allowlist file; on pi, STEWARD_DELEGATION_PYTHON and STEWARD_DELEGATION_HOOK_LOG; the renamed ids (steward-delegation:<x>). No em-dash text. The long pi and Copilot sections move here in docs-index.",
+          "Catalogs: .claude-plugin/marketplace.json gains {name: steward-delegation, source: ./plugins/steward-delegation}; .agents/plugins/marketplace.json gains {name: steward-delegation, source: {source: local, path: ./plugins/steward-delegation}} with policy and category as the steward entry. The pinned steward entries stay untouched."
+        ],
+        "tests": [
+          "plugins/steward-delegation/tests/test_delegation_manifests.py: every manifest carries name steward-delegation and the same version; no manifest has a dependencies field; the Copilot and Codex manifest paths exist (ported from tests/test_copilot_harness.py:684-688) and the Copilot skills hold delegating without orchestrating (:714-716); the Claude hooks.json case (HooksJsonTests, tests/test_steward_hook.py:1028, for this plugin's file)."
+        ],
+        "notes": "Whether Copilot finds .github/plugin/plugin.json inside a plugins/<name>/ folder, and the scratch session `claude --plugin-dir plugins/steward-delegation` (edict injected, second direct edit denied), are manual step 21 checks.",
+        "red_when": "Manifest versions differ; a manifest path does not exist; a catalog entry does not resolve to its manifest (tests/test_catalogs.py fails); a pinned steward entry changes.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "root-catalogs"
+      ],
+      "touches": [
+        "plugins/steward-delegation/.claude-plugin/plugin.json",
+        "plugins/steward-delegation/.codex-plugin/plugin.json",
+        "plugins/steward-delegation/.github/plugin/plugin.json",
+        "plugins/steward-delegation/hooks/hooks.json",
+        "plugins/steward-delegation/README.md",
+        "plugins/steward-delegation/tests/test_delegation_manifests.py",
+        ".claude-plugin/marketplace.json",
+        ".agents/plugins/marketplace.json"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: both root marketplace catalogs gain a steward-delegation entry (additive)",
+          "contract:new-surface: plugin id steward-delegation@steward and steward-delegation@steward-codex, which namespace the skill and the seven profiles",
+          "open-question: Copilot finding a manifest inside plugins/<name>/ is unconfirmed; checked live in manual step 21",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The three manifests exist with name steward-delegation and \"version\": \"0.15.0\"; none has a dependencies field.",
+          "plugins/steward-delegation/hooks/hooks.json has SessionStart, PreToolUse (gate and delegated) and PostToolUse (delegated) entries naming delegation_hook.py with the claude argument, and no Stop entry.",
+          "tests/test_catalogs.py passes: the steward entries still pin v0.14.2 and both steward-delegation entries resolve to plugins/steward-delegation manifests.",
+          "`grep -rnE 'steward:[a-z]|steward_hook' plugins/steward-delegation` prints nothing (positive control: the same grep on README.md prints its `steward:delegating` lines)."
+        ]
+      }
+    },
+    {
+      "id": "retire-old-tests",
+      "title": "Retire the old plugin's test files",
+      "summary": "Delete the four test files of the old single plugin after checking that each of their tests now lives in a plugin or is retired on purpose.",
+      "estimate": "M",
+      "depends_on": [
+        "delegation-packaging"
+      ],
+      "contract": {
+        "design": "Build sequence step 18 (first half, before the monolith goes, so no old test runs against deleted code); Tests (the 'Today / Goes to' table).",
+        "does": [
+          "Audit every test in tests/test_steward_hook.py, tests/test_copilot_harness.py, tests/test_codex_harness.py and tests/test_pi_harness.py against the design's Tests table: each is ported (name the plugin or root test file that holds it) or retired (one stated reason). Known retired groups: plainlanguage file-probe warnings (the probe is dropped); harness detection and STEWARD_HARNESS (the harness is the first argument); em-dash cases (no em-dash rule); monolith manifest, version and hooks.json checks (replaced by per-plugin manifest tests and tests/test_pi_package.py); the root package version check (not a release number). A test found neither ported nor retireable is ported now, before deletion.",
+          "The commit message body carries the audit: one line per test class or group of cases, with its new home or its reason.",
+          "Delete the four files. Afterwards nothing imports test_steward_hook."
+        ],
+        "tests": [
+          "No new tests unless the audit finds a case that was never ported."
+        ],
+        "red_when": "A deleted case has no ported copy and no stated reason; a remaining test imports a deleted module.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "tests/test_steward_hook.py",
+        "tests/test_copilot_harness.py",
+        "tests/test_codex_harness.py",
+        "tests/test_pi_harness.py",
+        "plugins/steward-delegation/tests/"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "destructive: deletes four test files (255 cases at 2e351f8, less the two CopilotSkillTests cases edicts-copilot-codex removed)",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "Totals: the root run drops by exactly the cases the four files held at the item's base (253 if nothing else changed them: 144, 61, 13 and 35); a plugin run grows only by cases the audit ported.",
+          "`git ls-files tests/test_steward_hook.py tests/test_copilot_harness.py tests/test_codex_harness.py tests/test_pi_harness.py` prints nothing, and `grep -rln test_steward_hook tests plugins` prints nothing (positive control: at the item's base it lists tests/test_copilot_harness.py, tests/test_codex_harness.py and tests/test_pi_harness.py).",
+          "`git log -1 --format=%B` lists each test class of the four files with a test file that now holds it or a retirement reason."
+        ]
+      }
+    },
+    {
+      "id": "retire-monolith",
+      "title": "Delete the old single plugin",
+      "summary": "Delete the old hook scripts, hook lists and root manifests, set the root package version to 0.15.0, and make sure nothing outside the history docs still points at the old script.",
+      "estimate": "S",
+      "depends_on": [
+        "retire-old-tests"
+      ],
+      "contract": {
+        "design": "Build sequence step 18 (second half) and its done-check; Repo layout after the reorg ('Deleted from the root'); Versions and tags (root package.json).",
+        "does": [
+          "Delete hooks/steward_hook.py, hooks/hooks.json, codex/steward.py, codex/hooks.json, copilot/hooks.json, .claude-plugin/plugin.json, .codex-plugin/plugin.json and .github/plugin/plugin.json. Afterwards git tracks nothing under agents/, skills/, hooks/, copilot/, codex/ or pi/ at the root; .claude-plugin/ keeps marketplace.json only.",
+          "Root package.json: \"version\": \"0.15.0\" (not a release number; no test ties it to a plugin). Its pi field already has the final shape.",
+          "README.md:109 and :133 name hooks/steward_hook.py. Reword those two lines to name the new hook scripts (plugins/steward-delegation/hooks/delegation_hook.py and plugins/steward-prose-gate/hooks/prose_gate_hook.py); the rest of the README is docs-index's work.",
+          "The design's step 18 grep, scoped as the operator decided: `grep -rn steward_hook --exclude-dir=docs --exclude-dir=.git --exclude-dir=.hatch .` prints nothing."
+        ],
+        "tests": [
+          "No new tests; the suite passes with the monolith gone."
+        ],
+        "red_when": "A test or file still reads a deleted path (the suite fails); a steward_hook reference survives outside docs/, .git and .hatch; package.json version is not 0.15.0.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "package.json"
+      ],
+      "touches": [
+        "hooks/steward_hook.py",
+        "hooks/hooks.json",
+        "codex/steward.py",
+        "codex/hooks.json",
+        "copilot/hooks.json",
+        ".claude-plugin/plugin.json",
+        ".codex-plugin/plugin.json",
+        ".github/plugin/plugin.json",
+        "package.json",
+        "README.md"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "destructive: deletes the 1,638-line monolith hook script, its Codex adapter, three hook lists and three root manifests",
+          "contract:existing-surface: the repo root stops being a Claude Code, Copilot or Codex plugin; marketplace installs keep resolving the v0.14.2 tag, and direct Copilot installs of the repo root break (the README 'Staying on 0.14.2' notice covers them)",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The printed totals equal the item's base totals exactly.",
+          "`grep -rn steward_hook --exclude-dir=docs --exclude-dir=.git --exclude-dir=.hatch .` prints nothing (positive control: the same command at the item's base lists hooks/hooks.json, copilot/hooks.json, codex/steward.py and README.md:109).",
+          "`git ls-files hooks codex copilot pi skills agents .claude-plugin/plugin.json .codex-plugin .github/plugin` prints nothing.",
+          "`node -p \"require('./package.json').version\"` prints 0.15.0.",
+          "tests/test_catalogs.py passes; the pinned steward entries are unchanged."
+        ]
+      }
+    },
+    {
+      "id": "layout-tests",
+      "title": "Repo-level layout tests",
+      "summary": "Add root tests that keep each plugin self-contained: no plugin points into another, each plugin's manifests share one version, and each plugin folder copied alone still runs every hook.",
+      "estimate": "M",
+      "depends_on": [
+        "retire-monolith"
+      ],
+      "contract": {
+        "design": "Build sequence step 19; Tests (new root tests, tests/test_layout.py); Goals (each plugin folder is self-contained and releasable on its own).",
+        "does": [
+          "Create tests/test_layout.py with four rules. (1) No file under plugins/<a>/ contains a path into another plugin, matched by path shape (`plugins/<b>` or `../<b>` for each other plugin folder name b), and none contains `steward_hook`. Bare plugin names stay allowed: the orchestration block names `steward-delegation:delegating` by design and READMEs list install sets. (2) Each plugin's manifests (.claude-plugin, .codex-plugin, .github/plugin, whichever exist) carry one version. (3) No plugin folder holds a package.json. (4) Each plugin folder copied alone to a temp dir runs every hook mode for every harness it ships with a minimal payload, under temp HOME, XDG_STATE_HOME and config dirs, and exits as its contract says: 0 for every hook command read from its hooks.json files and for the pi modes its extension spawns (delegation: pi session-start, gate, delegated; prose gate: pi pr-gate, prose-gate), and 2 for `delegation_hook.py pi model-plan`, `pi model-plan-apply` and `pi delegation-stats` on bad input (hooks/steward_hook.py:299 and :361 at 2e351f8). The copied delegation and orchestration folders' Claude session-start print non-empty additionalContext, which shows they read only their own folder.",
+          "A self-check case proves rule (1) fires: it plants `plugins/steward-delegation/x` text in a temp copy of another plugin and expects the scanner to flag it.",
+          "The scan needle for the old script name is built without writing it as one literal (for example \"steward_\" + \"hook\"), so the operator's whole-tree grep `grep -rn steward_hook --exclude-dir=docs --exclude-dir=.git --exclude-dir=.hatch .` stays empty.",
+          "The root package.json pi-path check already lives in tests/test_pi_package.py (from pi-extension-move); test_layout.py does not repeat it."
+        ],
+        "tests": [
+          "tests/test_layout.py as above."
+        ],
+        "red_when": "A plugin reads outside its own folder (its copied-alone run fails or prints nothing); a cross-plugin path or steward_hook appears under plugins/; manifests disagree; a package.json appears in a plugin folder.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "tests/test_layout.py"
+      ],
+      "surface": {
+        "flagged": false,
+        "signals": [
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The root run grows only by the test_layout.py cases.",
+          "test_layout.py has the four rules, the copied-alone run for all three plugins (every hooks.json command for claude, copilot and codex, plus the pi modes), and the planted-path self-check.",
+          "`grep -rn steward_hook --exclude-dir=docs --exclude-dir=.git --exclude-dir=.hatch .` still prints nothing (positive control: `git show v0.14.2:hooks/hooks.json | grep -c steward_hook` prints 5)."
+        ]
+      }
+    },
+    {
+      "id": "docs-index",
+      "title": "README index and plugin READMEs",
+      "summary": "Turn the root README into an index of the four plugins with install sets, move the detailed sections into the plugin READMEs, and point the old design docs at the new one.",
+      "estimate": "L",
+      "depends_on": [
+        "layout-tests"
+      ],
+      "contract": {
+        "design": "Build sequence step 20; Release and migration (README sections per plugin); Dependencies (install sets); Pi packaging (selective-install filters); Existing users: tag and pin ('Staying on 0.14.2'); Names (README, history docs); Personal content (README sauron quote; em-dash done-check).",
+        "does": [
+          "Root README.md becomes an index: one line per plugin (plainlanguage, steward-prose-gate, steward-delegation, steward-orchestration) with a link to its README; install sets (prose rules only: plainlanguage + steward-prose-gate; delegation: plainlanguage + steward-delegation, plus steward-prose-gate to enforce the prose half of the edict; orchestration on Claude Code: all four); install commands per harness; the pi selective-install filter examples (they name plugins/<name>/ paths, so they live in the root README, not in a plugin README); the 'Staying on 0.14.2' notice, kept; local development and tests (npm test is the full suite).",
+          "Today's README sections move, with new names, paths and env, to the plugin READMEs (headings at 2e351f8; the design's line numbers predate the Staying notice): to plugins/steward-delegation/README.md 'The subagent profiles', the delegation-gate parts of 'What the hooks do', the gate mode text, 'Pi' with its subsections ('Model plan on pi', 'Launch log and stats on pi', the delegation part of 'Gates on pi' and the rest), 'GitHub Copilot' with its subsections minus the prose-gate parts, and 'If you already have these rules in CLAUDE.md' without the sauron quote (README.md:447); to plugins/steward-prose-gate/README.md whatever it lacks of 'What the hooks do', 'Your own banned phrases' and the prose parts of 'Gates on pi' and 'Gates on Copilot'; to plugins/steward-orchestration/README.md the roles text and the edict.md note if missing.",
+          "No README carries a `steward:<name>` id, sauron text or the word em-dash (the design's done-check allows em-dash hits only in prose-gate tests); plugin READMEs name no other plugin's folder path (tests/test_layout.py rule 1). plugins/steward-delegation/README.md keeps STEWARD_DELEGATION_GATE, STEWARD_DELEGATION_PYTHON and STEWARD_DELEGATION_HOOK_LOG (shared terms).",
+          "Tests that read README sections follow them: tests/test_model_plan_docs.py (ReadmeExamplePlanTests and ReadmeWordingTests, from test_pi_release_review.py:229-286) reads '### Model plan on pi' and '### Gates on pi' from plugins/steward-delegation/README.md; the README rows of the root tests/test_no_opus_max.py cover the root README and the three plugin READMEs.",
+          "docs/roadmap/orchestration-split.md: its status line reads 'Superseded by plugin-split.md'. docs/roadmap/codex-port.md and docs/roadmap/copilot-port.md each get one line pointing to plugin-split.md; their history text is unchanged."
+        ],
+        "tests": [
+          "The repointed README-reading cases; no new cases required."
+        ],
+        "red_when": "A README-reading test cannot find its section; a README keeps steward: ids, sauron text or em-dash text; a plugin README names another plugin's folder path (test_layout fails); the design's whole-tree greps find leftovers.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "README.md",
+        "plugins/steward-delegation/README.md",
+        "plugins/steward-prose-gate/README.md",
+        "plugins/steward-orchestration/README.md",
+        "tests/test_model_plan_docs.py",
+        "tests/test_no_opus_max.py",
+        "docs/roadmap/orchestration-split.md",
+        "docs/roadmap/codex-port.md",
+        "docs/roadmap/copilot-port.md"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: the root README stops documenting the monolith; the install instructions users follow change",
+          "blast-radius: edits the READMEs of all three plugins, two of them built by the earlier binders",
+          "open-question: every README install command is confirmed live only in manual step 21",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "`grep -rnE 'steward:[a-z]' plugins/ README.md` prints nothing (positive control: the same grep at the item's base prints README.md lines).",
+          "`grep -rn sauron README.md plugins/` prints nothing (positive control: the same grep at the item's base hits README.md:447).",
+          "`grep -rniE 'em.?dash|EM_DASH|u2014' plugins/` prints only lines in plugins/steward-prose-gate/tests/ that assert an em-dash does not block (the design's Personal content done-check), and `grep -niE 'em.?dash' README.md` prints nothing (positive control: the same grep at the item's base hits README.md:74-75).",
+          "`grep -rn steward_hook --exclude-dir=docs --exclude-dir=.git --exclude-dir=.hatch .` prints nothing (positive control: `git show v0.14.2:README.md | grep -c steward_hook` prints 2 or more).",
+          "The root README names the four plugins, gives the three install sets and keeps a 'Staying on 0.14.2' section; plugins/steward-delegation/README.md has '### Model plan on pi' and '### Gates on pi', and tests/test_model_plan_docs.py reads them from there.",
+          "`head -5 docs/roadmap/orchestration-split.md` shows 'Superseded by plugin-split.md', and `grep -c plugin-split.md docs/roadmap/codex-port.md docs/roadmap/copilot-port.md` prints 1 or more for each."
+        ]
+      }
+    }
+  ]
+}

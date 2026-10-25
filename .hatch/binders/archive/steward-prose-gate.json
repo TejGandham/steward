@@ -1,0 +1,352 @@
+{
+  "slug": "steward-prose-gate",
+  "title": "Prose gate as its own plugin",
+  "summary": "Builds the steward-prose-gate plugin inside this repo, beside the existing steward plugin, which keeps working unchanged. This is the first slice of the split in docs/roadmap/plugin-split.md.",
+  "motivation": "Steward 0.14.2 is one 1,638-line hook script doing four jobs for four harnesses, so a user cannot take one part, one switch turns off two gates, and personal text ships to everyone (docs/roadmap/plugin-split.md, Why).",
+  "scope": {
+    "included": [
+      "Shape: one binder. Every outside event (tags, pushes, live installs, merges) is a manual step before or after it; no after edges.",
+      "Design steps 2-6 of docs/roadmap/plugin-split.md 'Build sequence', which is the source of truth for every file, contract and done-check: the prose gate hook for Claude Code (2), Copilot (3), Codex (4), the pi extension (5) and packaging (6). One item per step.",
+      "Branch: hatch builds from plugin-split after main, carrying manual steps 0 and 1 (tag v0.14.2, pinned catalogs, README notice, tests/test_catalogs.py), is merged into it with --no-ff.",
+      "New plugin folder plugins/steward-prose-gate/ with hook, word list, per-harness hook files, pi extension, manifests, tests and README. Outside that folder this binder edits only package.json (scripts.test gains the plugin's unittest and node test runs) and appends one entry to each root marketplace catalog (.claude-plugin/marketplace.json, .agents/plugins/marketplace.json).",
+      "The monolith is NOT modified: hooks/steward_hook.py, codex/steward.py, pi/extensions/steward/, the root manifests and hook files, and every existing test (tests/ and its pi tests) stay untouched. The old gates keep running and keep their tests; the ported cases are copies. No item's touches list names any of these files.",
+      "Item check for every item: `PI_SUBAGENTS_DIR=/nonexistent npm test` from the repo root. npm test is package.json scripts.test, at binder start `python3 -m unittest discover -s tests && node --test 'tests/pi/*.test.mjs'`, extended per item as the contracts say. node stays the last segment joined by &&, so its final 'fail 0' line prints only when every unittest run before it passed.",
+      "Baseline measured at 7d23926 on this machine, 2026-10-24, with PI_SUBAGENTS_DIR=/nonexistent: Python 'Ran 608 tests', 'OK (skipped=13)'; node 'tests 102', 'pass 102', 'fail 0'. Manual step 1 adds tests/test_catalogs.py before the binder starts.",
+      "Known baseline: PI_SUBAGENTS_DIR=/nonexistent skips the 13 tests that need an installed pi-subagents. Two of them already fail at c5fd21b on this machine when not skipped, because pi-subagents 0.82.0 is installed and 0.78.0 is mirrored: tests/test_pi_model_plan_apply.py:575 (test_version_is_pinned) and tests/test_pi_model_plan_resolver.py:27 (the mirrored constant; the failing assertion, test_installed_version_is_the_mirrored_one, is at :260). The split does not cause them.",
+      "Test totals: an item's printed Python and node totals may grow only by tests it adds; the old tests are not retired here, so no total drops.",
+      "Repo rules for every item: one commit per item; never rebase; no agent attribution in commit messages; no em-dashes in shipped texts; Markdown tables use the |-|-| separator.",
+      "Runtime: Node 22.18 or newer runs the TypeScript pi extensions without a build step (README.md:419-426); hook scripts are stdlib Python 3.9 or newer (hooks/steward_hook.py:5). No file pins either.",
+      "Env: the repo has no environment to start; tests run directly. env_contract.command only reports the two runtimes."
+    ],
+    "excluded": [
+      "Later binder: the remaining design steps 7-12, 14 and 16-20 (orchestration, delegation, edicts, retiring the monolith, layout tests, docs). Later steps per the design.",
+      "Before this binder, manual step 0: tag v0.14.2 at c5fd21b and push the tag (operator authorizes).",
+      "Before this binder, manual step 1: pin the root catalogs' steward entries to v0.14.2 on main with the README notice and tests/test_catalogs.py, plus the live old-install checks on Claude Code and Copilot.",
+      "After this binder, manual step 21 (prose-gate parts): live checks on Claude Code, Copilot, Codex and pi, including step 6's scratch-session check (`claude --plugin-dir plugins/steward-prose-gate`) and whether Codex loads a hooks-only manifest, and the full suite without PI_SUBAGENTS_DIR, including the 13 pi-subagents tests.",
+      "Merging plugin-split to main with --no-ff is manual and decided later.",
+      "Building the Engen-Tech/plugins marketplace.",
+      "Design non-goals relevant here: harness dependency fields; migration code that reads old config paths; a user override for the word list; cross-plugin imports.",
+      "Edits to the operator's personal files (~/AGENTS.md, prose-patterns files)."
+    ]
+  },
+  "design_facts": {
+    "source": null,
+    "stack": "Agent-harness plugins for Claude Code, Copilot CLI, Codex CLI and pi: stdlib Python 3.9+ hook scripts, TypeScript pi extensions run by Node 22.18+ type stripping, JSON manifests and Markdown skills; tests are Python unittest and node:test; no third-party dependencies."
+  },
+  "sme": [
+    "minimalism"
+  ],
+  "shared_terms": [
+    {
+      "id": "prose-gate-env",
+      "canonical": "STEWARD_PROSE_GATE",
+      "items": [
+        "prose-gate-claude",
+        "prose-gate-packaging"
+      ]
+    },
+    {
+      "id": "prose-gate-python-env",
+      "canonical": "STEWARD_PROSE_GATE_PYTHON",
+      "items": [
+        "prose-gate-pi",
+        "prose-gate-packaging"
+      ]
+    },
+    {
+      "id": "word-list-file",
+      "canonical": "ai-tells.txt",
+      "items": [
+        "prose-gate-claude",
+        "prose-gate-packaging"
+      ]
+    }
+  ],
+  "env_contract": {
+    "command": "python3 --version && node --version",
+    "supports_isolation": false,
+    "isolation_params": []
+  },
+  "runtime_contract": {
+    "runtimes": [
+      {
+        "name": "node",
+        "version": ">=22.18"
+      },
+      {
+        "name": "python",
+        "version": ">=3.9"
+      }
+    ],
+    "on_unavailable": "halt"
+  },
+  "work_items": [
+    {
+      "id": "prose-gate-claude",
+      "title": "Prose gate hook for Claude Code",
+      "summary": "Build the prose gate's own hook script and word list file for Claude Code, beside the old script, with its tests.",
+      "estimate": "L",
+      "depends_on": [],
+      "contract": {
+        "design": "docs/roadmap/plugin-split.md: Build sequence step 2; steward-prose-gate; Hook split (Map of hooks/steward_hook.py, P rows); Word list; Config, state and env vars; Tests.",
+        "does": [
+          "Create plugins/steward-prose-gate/hooks/prose_gate_hook.py: stdlib Python 3.9+, called as `prose_gate_hook.py <harness> <mode>`. This item implements harness `claude` with modes `pr-gate` and `prose-gate`. An unknown harness or mode exits 0 with no output (fail open).",
+          "Copy from hooks/steward_hook.py per the map's P rows: get_config_dir (42-61, claude branch: $CLAUDE_CONFIG_DIR or ~/.claude), get_state_dir (64-70, dir name steward-prose-gate), get_plugin_root (82-88, used to find data/ai-tells.txt), _expand_user and _non_empty_str (91-104), _compile_marker (1033-1038) compiled from the data file at load, operator patterns with find_operator_hits and find_markers (1044-1089), the PR gate (1092-1153) without the em-dash branch and PR_EMDASH_MSG, cmd_pr_gate = the agent_id skip (1161-1162) plus the switch plus lines 1184-1197, _clean_text (1253-1278), the transcript tail and _extract_last_assistant_text (1281-1361), PROSE_OPERATOR_MSG_TEMPLATE and cmd_prose_gate (1494-1549) without the em-dash count, and its own _dispatch and main.",
+          "Create plugins/steward-prose-gate/data/ai-tells.txt: UTF-8, one literal marker per line (not a regex), lines starting with # and blank lines skipped, whitespace trimmed. Content is the 30 entries of MARKERS (hooks/steward_hook.py:1019-1030) in order. A missing or unreadable file means no markers (fail open). Matching stays as _compile_marker does it; the gate blocks on two or more distinct markers or any operator pattern.",
+          "Switch: <config>/steward-prose-gate/gate holding on or off, read on every call; when the file is absent, env STEWARD_PROSE_GATE (on|off); default on. One switch covers both gates; there is no soft value.",
+          "Operator patterns file: <config>/steward-prose-gate/prose-patterns, format unchanged (one case-insensitive regex per line, # comments, ^ and $ per line, a bad line skipped, one hit blocks). No default file ships.",
+          "Kept behavior: a payload agent_id returns early; stop_hook_active skips the check (one revision per reply). No em-dash rule anywhere.",
+          "No import of, and no path into, another plugin folder or the old hooks/steward_hook.py; no file under plugins/steward-prose-gate names steward_hook.",
+          "package.json scripts.test appends ` && python3 -m unittest discover -s plugins/steward-prose-gate/tests` before the node segment; node stays the last segment, joined by &&."
+        ],
+        "tests": [
+          "plugins/steward-prose-gate/tests/helpers.py: a copy of StewardTestCase and run_hook (tests/test_steward_hook.py:41-120) that runs prose_gate_hook.py with the harness as first argument.",
+          "plugins/steward-prose-gate/tests/test_prose_gate_claude.py ports PrGateTests (:702), ProseGateTests (:815), MarkerRegexTests (:1011) and OperatorPatternTests (:1136) to `prose_gate_hook.py claude <mode>`, drops their em-dash cases, and adds: an em-dash alone does not block (reply and PR body); the shipped ai-tells.txt parses to exactly the 30 MARKERS entries in order; switch cases (file off, env off, file wins over env, default on); unknown harness and unknown mode exit 0 with no output.",
+          "The originals stay in tests/test_steward_hook.py; this binder does not touch them."
+        ],
+        "red_when": "A ported case fails; ai-tells.txt drifts from MARKERS; an em-dash alone still blocks; the discover segment is missing from scripts.test (then the run prints no plugins/steward-prose-gate unittest line, which the totals assertion catches).",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "package.json"
+      ],
+      "touches": [
+        "plugins/steward-prose-gate/hooks/prose_gate_hook.py",
+        "plugins/steward-prose-gate/data/ai-tells.txt",
+        "plugins/steward-prose-gate/tests/helpers.py",
+        "plugins/steward-prose-gate/tests/test_prose_gate_claude.py",
+        "package.json"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:new-surface: prose_gate_hook.py <harness> <mode> CLI, <config>/steward-prose-gate/{gate,prose-patterns}, env STEWARD_PROSE_GATE",
+          "novelty: first per-plugin folder and first hook script that takes the harness as its first argument",
+          "blast-radius: package.json scripts.test is also edited by prose-gate-pi (serialized through shared_resources)",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The run prints one more unittest result than before the item (plugins/steward-prose-gate/tests); the root totals are unchanged.",
+          "test_prose_gate_claude.py holds the ported PR, prose, marker and operator-pattern cases, an em-dash-alone-passes case for a reply and for a PR body, switch cases, and a word-list case asserting 30 entries equal to MARKERS.",
+          "`grep -cvE '^[[:space:]]*(#|$)' plugins/steward-prose-gate/data/ai-tells.txt` prints 30.",
+          "`grep -rniE 'EM_DASH|em.?dash|u2014' plugins/steward-prose-gate/hooks` prints nothing (positive control: the same grep on hooks/steward_hook.py hits lines 29, 1145 and 1530).",
+          "`grep -rn steward_hook plugins/steward-prose-gate` prints nothing."
+        ]
+      }
+    },
+    {
+      "id": "prose-gate-copilot",
+      "title": "Prose gate on Copilot",
+      "summary": "Teach the prose gate script to run under Copilot, including its own record of which session is the main one.",
+      "estimate": "M",
+      "depends_on": [
+        "prose-gate-claude"
+      ],
+      "contract": {
+        "design": "Build sequence step 3; steward-prose-gate (New: Copilot SessionStart record); Hook split (Hook entries, map rows 211-229, 242-272, 863-865, 1366-1491).",
+        "does": [
+          "Copilot branch of prose_gate_hook.py. get_config_dir copilot: $COPILOT_HOME or ~/.copilot.",
+          "`copilot session-start` records the main session under <state>/steward-prose-gate/copilot-main/ (copy of hooks/steward_hook.py:211-229 with _sanitize_session_id 863-865) and prints nothing. Without this record the Copilot gates would fail open for every session.",
+          "`copilot pr-gate` and `copilot prose-gate` run only for a recorded main session (as at :1167-1168 and :1509-1510); any other session exits 0 with no output, so subagents are not gated.",
+          "`copilot prose-gate` reads Copilot events.jsonl (1366-1491), including the task_complete summary and the wait for the file.",
+          "Create plugins/steward-prose-gate/copilot/hooks.json: SessionStart (timeout 10), PreToolUse matcher Bash (10), Stop (15); every command is `python3 \"${PLUGIN_ROOT}/hooks/prose_gate_hook.py\" copilot <mode>`, with no VAR=value prefix and no STEWARD_HARNESS."
+        ],
+        "tests": [
+          "plugins/steward-prose-gate/tests/test_prose_gate_copilot.py ports the prose-gate parts of tests/test_copilot_harness.py: main-session record and skip, events.jsonl wait, task_complete cases, PR gate; plus a hooks.json case checking events, matchers, timeouts and that every command names prose_gate_hook.py with the copilot argument."
+        ],
+        "red_when": "A session that was never recorded gets gated, or a recorded main session fails open; copilot/hooks.json carries STEWARD_HARNESS or the wrong script.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "plugins/steward-prose-gate/hooks/prose_gate_hook.py",
+        "plugins/steward-prose-gate/copilot/hooks.json",
+        "plugins/steward-prose-gate/tests/test_prose_gate_copilot.py",
+        "plugins/steward-prose-gate/tests/helpers.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:new-surface: Copilot hooks.json and state dir <state>/steward-prose-gate/copilot-main/",
+          "blast-radius: prose_gate_hook.py is also edited by 3 other items",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "test_prose_gate_copilot.py has main-session record and skip, events.jsonl wait, task_complete and PR-gate cases.",
+          "`grep -n STEWARD_HARNESS plugins/steward-prose-gate/copilot/hooks.json` prints nothing (positive control: root copilot/hooks.json carries STEWARD_HARNESS=copilot), and every command in it runs hooks/prose_gate_hook.py with copilot as the first argument."
+        ]
+      }
+    },
+    {
+      "id": "prose-gate-codex",
+      "title": "Prose gate on Codex",
+      "summary": "Teach the prose gate script to run under Codex, which checks every PR command and reads only the last reply.",
+      "estimate": "S",
+      "depends_on": [
+        "prose-gate-copilot"
+      ],
+      "contract": {
+        "design": "Build sequence step 4; steward-prose-gate (Behavior kept from today); Hook split (Hook entries; codex/steward.py is retired, its gate and prose-gate go to P).",
+        "does": [
+          "Codex branch of prose_gate_hook.py. get_config_dir codex: $CODEX_HOME or ~/.codex (codex/steward.py:19-21).",
+          "`codex pr-gate` runs for every call, parent or child, because Codex children share the parent's session_id (codex/steward.py:32-46).",
+          "`codex prose-gate` reads only last_assistant_message, never a transcript (codex/steward.py:48-65, 51-56), without the em-dash count; stop_hook_active gives one revision.",
+          "Create plugins/steward-prose-gate/codex/hooks.json: PreToolUse matcher ^Bash$ (timeout 10) and Stop (15), commands `python3 \"${PLUGIN_ROOT}/hooks/prose_gate_hook.py\" codex pr-gate|prose-gate`."
+        ],
+        "tests": [
+          "plugins/steward-prose-gate/tests/test_prose_gate_codex.py ports the gate and prose-gate cases of tests/test_codex_harness.py: the PR body file is checked against cwd (the old 'even with gate off' case becomes: STEWARD_DELEGATION_GATE=off does not turn the PR gate off; only the prose gate's own switch does), operator patterns read from $CODEX_HOME/steward-prose-gate/prose-patterns, one revision and no transcript parsing, fail open; plus a hooks.json case."
+        ],
+        "red_when": "The Codex prose gate reads a transcript; the PR gate skips a call because of a shared session id; the PR gate stops on STEWARD_DELEGATION_GATE.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "touches": [
+        "plugins/steward-prose-gate/hooks/prose_gate_hook.py",
+        "plugins/steward-prose-gate/codex/hooks.json",
+        "plugins/steward-prose-gate/tests/test_prose_gate_codex.py",
+        "plugins/steward-prose-gate/tests/helpers.py"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:new-surface: Codex hooks.json; config dir $CODEX_HOME/steward-prose-gate/",
+          "blast-radius: prose_gate_hook.py is also edited by 3 other items",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "test_prose_gate_codex.py has the PR-gate, prose-gate (one revision, no transcript), operator-pattern path and fail-open cases, and a case that STEWARD_DELEGATION_GATE=off leaves the PR gate on.",
+          "plugins/steward-prose-gate/codex/hooks.json has exactly PreToolUse ^Bash$ and Stop entries naming prose_gate_hook.py with the codex argument."
+        ]
+      }
+    },
+    {
+      "id": "prose-gate-pi",
+      "title": "Prose gate extension for pi",
+      "summary": "Add a small pi extension that runs the prose and PR checks through the new prose gate script.",
+      "estimate": "M",
+      "depends_on": [
+        "prose-gate-codex"
+      ],
+      "contract": {
+        "design": "Build sequence step 5; Hook split (Pi extensions, second bullet); Config, state and env vars (STEWARD_PROSE_GATE_PYTHON).",
+        "does": [
+          "pi branch of prose_gate_hook.py: config dir $PI_CODING_AGENT_DIR or ~/.pi/agent; modes pr-gate and prose-gate with the payloads the pi extension sends today (tool_name bash, tool_input, cwd; last_assistant_message, stop_hook_active).",
+          "Create plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts: a copy of runHook (pi/extensions/steward/index.ts:96-150) without the debug log, spawning `process.env.STEWARD_PROSE_GATE_PYTHON || \"python3\"` with [HOOK_SCRIPT, \"pi\", mode], where HOOK_SCRIPT is hooks/prose_gate_hook.py under the plugin root found three directories up from the file; lastAssistantText (169-184); isProseRevision (186-197); the pi-subagents child check (519: registers nothing when PI_SUBAGENT_CHILD is set); a tool_call handler for bash that returns {block: true, reason} on a pr-gate deny; today's agent_before_settle handler (1127-1153) calling pi prose-gate; one notice when python3 cannot start, then fail open.",
+          "The extension imports nothing outside plugins/steward-prose-gate and does not touch the root package.json pi field (a later binder sets the final pi field).",
+          "package.json scripts.test node segment becomes `node --test 'tests/pi/*.test.mjs' 'plugins/*/tests/pi/*.test.mjs'`, still last and joined by &&."
+        ],
+        "tests": [
+          "plugins/steward-prose-gate/tests/pi/prose-gate-extension.test.mjs ports from tests/pi/steward-extension.test.mjs the PR halves of :150-198, :319 (rewritten to block on two markers, not an em-dash), :345-401 (prose gate, isProseRevision, aborted runs) and :429 (lastAssistantText), and adds the child case and the no-python case.",
+          "plugins/steward-prose-gate/tests/test_prose_gate_pi.py covers the pi branch modes, including tests/test_pi_harness.py:181 test_pr_gate_on_lowercase_bash.",
+          "The originals in tests/pi/steward-extension.test.mjs stay; this binder does not touch them."
+        ],
+        "red_when": "A ported node case fails; the extension resolves the hook outside its plugin; the node glob misses the plugin test folder (then node totals do not grow).",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "package.json"
+      ],
+      "touches": [
+        "plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts",
+        "plugins/steward-prose-gate/hooks/prose_gate_hook.py",
+        "plugins/steward-prose-gate/tests/pi/prose-gate-extension.test.mjs",
+        "plugins/steward-prose-gate/tests/test_prose_gate_pi.py",
+        "package.json"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:new-surface: pi extension steward-prose-gate, env STEWARD_PROSE_GATE_PYTHON",
+          "capability: new pi extension entry point (a new integration surface on pi)",
+          "blast-radius: package.json scripts.test is also edited by prose-gate-claude (serialized through shared_resources); prose_gate_hook.py by 3 others",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "Node totals grow by the cases in prose-gate-extension.test.mjs, which cover PR-gate block, one prose revision, isProseRevision, lastAssistantText, aborted runs, child registers nothing, and python missing notifies once then fails open.",
+          "`grep -nE 'steward_hook|steward-delegation|STEWARD_PYTHON' plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts` prints nothing.",
+          "package.json scripts.test node segment includes 'plugins/*/tests/pi/*.test.mjs' and is the last segment."
+        ]
+      }
+    },
+    {
+      "id": "prose-gate-packaging",
+      "title": "Package the prose gate plugin",
+      "summary": "Give the prose gate plugin its manifests, Claude Code hook list, README and catalog entries so it can be installed on its own.",
+      "estimate": "M",
+      "depends_on": [
+        "prose-gate-pi"
+      ],
+      "contract": {
+        "design": "Build sequence step 6; Repo layout after the reorg (catalog entries); Versions and tags; Dependencies: manual on every harness; Release and migration (prose-gate README sections).",
+        "does": [
+          "Create plugins/steward-prose-gate/.claude-plugin/plugin.json, .codex-plugin/plugin.json (hooks ./codex/hooks.json, no skills field) and .github/plugin/plugin.json (hooks copilot/hooks.json), each with name steward-prose-gate and \"version\": \"0.15.0\", and no dependencies field.",
+          "Create plugins/steward-prose-gate/hooks/hooks.json for Claude Code: PreToolUse matcher ^Bash$ pr-gate (timeout 10) and Stop prose-gate (15), commands `python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/prose_gate_hook.py\" claude <mode>`.",
+          "Create plugins/steward-prose-gate/README.md: what the plugin does, install per harness, the switch (<config>/steward-prose-gate/gate, env STEWARD_PROSE_GATE), the prose-patterns path per harness, the word list file ai-tells.txt, STEWARD_PROSE_GATE_PYTHON on pi, and that block messages name the plainlanguage skill but work without it. Content comes from root README.md:61-76 and the prose-gate parts of 289-305 and 398-417, with new names and paths; no em-dash rule.",
+          "Catalogs: .claude-plugin/marketplace.json gains {name: steward-prose-gate, source: ./plugins/steward-prose-gate}; .agents/plugins/marketplace.json gains {name: steward-prose-gate, source: {source: local, path: ./plugins/steward-prose-gate}} with policy and category as the existing entry. The pinned steward entries stay untouched; tests/test_catalogs.py from manual step 1 must pass."
+        ],
+        "tests": [
+          "plugins/steward-prose-gate/tests/test_prose_gate_manifests.py: every manifest carries the same version and the name steward-prose-gate; no manifest has a dependencies field; the Claude hooks.json case (HooksJsonTests :1028, for this plugin's file)."
+        ],
+        "notes": "Whether Codex loads a hooks-only .codex-plugin/plugin.json is unconfirmed (design Open questions); manual step 21 checks it live together with the `claude --plugin-dir plugins/steward-prose-gate` scratch session.",
+        "red_when": "Manifest versions differ; a catalog entry's path or name does not match its manifest (test_catalogs fails); a pinned steward entry changes.",
+        "repo_rules": "One commit for this item; never rebase; no agent attribution in the commit message; no em-dash in shipped text; Markdown tables use the |-|-| separator."
+      },
+      "shared_resources": [
+        "root-catalogs"
+      ],
+      "touches": [
+        "plugins/steward-prose-gate/.claude-plugin/plugin.json",
+        "plugins/steward-prose-gate/.codex-plugin/plugin.json",
+        "plugins/steward-prose-gate/.github/plugin/plugin.json",
+        "plugins/steward-prose-gate/hooks/hooks.json",
+        "plugins/steward-prose-gate/README.md",
+        "plugins/steward-prose-gate/tests/test_prose_gate_manifests.py",
+        ".claude-plugin/marketplace.json",
+        ".agents/plugins/marketplace.json"
+      ],
+      "surface": {
+        "flagged": true,
+        "signals": [
+          "contract:existing-surface: both root marketplace catalogs gain a steward-prose-gate entry (additive)",
+          "open-question: Codex loading a hooks-only manifest is unconfirmed; checked live in manual step 21",
+          "not-computed:sensitive-zone (no per-repo sensitive-path setting and no .hatch config to match against)"
+        ]
+      },
+      "oracle": {
+        "type": "unit",
+        "command": "PI_SUBAGENTS_DIR=/nonexistent npm test",
+        "expect": "fail 0",
+        "assertions": [
+          "`PI_SUBAGENTS_DIR=/nonexistent npm test` exits 0 from the repo root: every unittest run ends with an OK line (skips only the 13 pi-subagents tests), node ends with fail 0, and the printed totals change only by tests this item adds, moves or names as retired.",
+          "The three manifests exist with name steward-prose-gate and \"version\": \"0.15.0\"; none has a dependencies field.",
+          "hooks/hooks.json has PreToolUse ^Bash$ and Stop entries naming prose_gate_hook.py with the claude argument.",
+          "tests/test_catalogs.py passes: the steward entries still pin v0.14.2 and the new entries resolve to plugins/steward-prose-gate.",
+          "`grep -rn steward_hook plugins/steward-prose-gate` prints nothing.",
+          "No file under plugins/ contains a literal U+2014 (`grep -rlP '\\x{2014}' plugins/` prints nothing)."
+        ]
+      }
+    }
+  ]
+}
