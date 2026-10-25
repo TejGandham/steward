@@ -5,14 +5,15 @@ Called as `prose_gate_hook.py <harness> <mode>`. Reads one JSON object
 from stdin and prints at most one JSON object to stdout. Stdlib only,
 python3.9+.
 
-Harnesses: claude, copilot and codex. Modes: pr-gate (PreToolUse on
+Harnesses: claude, copilot, codex and pi. Modes: pr-gate (PreToolUse on
 Bash: deny a `gh pr create|edit` whose body has AI tells) and prose-gate
 (Stop: block a reply that has AI tells). Copilot also has session-start,
 which records the main session and prints nothing; Copilot sends no
 agent_id, so its gates run only for a recorded main session. Codex
 children share the parent's session_id, so its gates run for every
 call, and its prose gate reads only last_assistant_message, never a
-transcript.
+transcript. The pi extension registers nothing in a pi-subagents child
+and sends last_assistant_message itself.
 
 This script must never raise to whoever called it. Any error, bad
 input, unknown harness or mode, or missing file means: exit 0, no
@@ -36,8 +37,13 @@ PLUGIN_DIR_NAME = "steward-prose-gate"
 def get_config_dir(harness, env):
     """Where the harness keeps its config. Claude Code: $CLAUDE_CONFIG_DIR
     or ~/.claude. Copilot: $COPILOT_HOME or ~/.copilot. Codex:
-    $CODEX_HOME or ~/.codex."""
+    $CODEX_HOME or ~/.codex. pi: $PI_CODING_AGENT_DIR or ~/.pi/agent."""
     home = env.get("HOME") or os.path.expanduser("~")
+    if harness == "pi":
+        value = env.get("PI_CODING_AGENT_DIR")
+        if value:
+            return _expand_user(value, env)
+        return os.path.join(home, ".pi", "agent")
     if harness in ("copilot", "codex"):
         value = env.get(harness.upper() + "_HOME")
         if value:
@@ -120,7 +126,8 @@ def _skip_session(harness, payload, env):
     """True when this call is not the main session's. Claude Code marks a
     subagent with agent_id. Copilot sends no agent_id; a subagent's calls
     carry its own session_id, which session-start never recorded. Codex
-    children share the parent's session_id, so no Codex call is skipped."""
+    children share the parent's session_id, so no Codex call is skipped.
+    pi never sends agent_id: its extension does not run in a child."""
     if harness == "codex":
         return False
     if _non_empty_str(payload.get("agent_id")):
@@ -662,6 +669,10 @@ _MODES = {
         "prose-gate": cmd_prose_gate,
     },
     "codex": {
+        "pr-gate": cmd_pr_gate,
+        "prose-gate": cmd_prose_gate,
+    },
+    "pi": {
         "pr-gate": cmd_pr_gate,
         "prose-gate": cmd_prose_gate,
     },
