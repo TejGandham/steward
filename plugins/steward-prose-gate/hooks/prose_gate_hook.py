@@ -5,9 +5,11 @@ Called as `prose_gate_hook.py <harness> <mode>`. Reads one JSON object
 from stdin and prints at most one JSON object to stdout. Stdlib only,
 python3.9+.
 
-Harness: claude. Modes: pr-gate (PreToolUse on Bash: deny a
-`gh pr create|edit` whose body has AI tells) and prose-gate (Stop: block
-a reply that has AI tells).
+Harnesses: claude and copilot. Modes: pr-gate (PreToolUse on Bash: deny
+a `gh pr create|edit` whose body has AI tells) and prose-gate (Stop:
+block a reply that has AI tells). Copilot also has session-start, which
+records the main session and prints nothing; Copilot sends no agent_id,
+so its gates run only for a recorded main session.
 
 This script must never raise to whoever called it. Any error, bad
 input, unknown harness or mode, or missing file means: exit 0, no
@@ -18,6 +20,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 PLUGIN_DIR_NAME = "steward-prose-gate"
@@ -29,8 +32,13 @@ PLUGIN_DIR_NAME = "steward-prose-gate"
 
 def get_config_dir(harness, env):
     """Where the harness keeps its config. Claude Code: $CLAUDE_CONFIG_DIR
-    or ~/.claude."""
+    or ~/.claude. Copilot: $COPILOT_HOME or ~/.copilot."""
     home = env.get("HOME") or os.path.expanduser("~")
+    if harness == "copilot":
+        value = env.get("COPILOT_HOME")
+        if value:
+            return _expand_user(value, env)
+        return os.path.join(home, ".copilot")
     value = env.get("CLAUDE_CONFIG_DIR")
     if value:
         return value
@@ -66,6 +74,62 @@ def _expand_user(path, env):
 
 def _non_empty_str(value):
     return isinstance(value, str) and value != ""
+
+
+# ---------------------------------------------------------------------------
+# Copilot main-session record
+# ---------------------------------------------------------------------------
+
+# A session id is used as a filename. Keep only safe characters so a
+# crafted session id can never point outside the state directory.
+_SESSION_ID_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.-]")
+_MAX_SESSION_ID_LEN = 200
+
+
+def _sanitize_session_id(session_id):
+    cleaned = _SESSION_ID_UNSAFE_RE.sub("_", session_id)
+    return cleaned[:_MAX_SESSION_ID_LEN]
+
+
+def _copilot_main_dir(env):
+    return os.path.join(get_state_dir(env), "copilot-main")
+
+
+def _record_copilot_main_session(env, session_id):
+    if not _non_empty_str(session_id):
+        return
+    directory = _copilot_main_dir(env)
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, _sanitize_session_id(session_id))
+    with open(path, "a", encoding="utf-8"):
+        pass
+
+
+def _is_copilot_main_session(env, session_id):
+    if not _non_empty_str(session_id):
+        return False
+    path = os.path.join(_copilot_main_dir(env), _sanitize_session_id(session_id))
+    return os.path.isfile(path)
+
+
+def _skip_session(harness, payload, env):
+    """True when this call is not the main session's. Claude Code marks a
+    subagent with agent_id. Copilot sends no agent_id; a subagent's calls
+    carry its own session_id, which session-start never recorded."""
+    if _non_empty_str(payload.get("agent_id")):
+        return True
+    if harness == "copilot":
+        return not _is_copilot_main_session(env, payload.get("session_id"))
+    return False
+
+
+def cmd_session_start(harness, payload, env):
+    """Copilot SessionStart: record the main session. Prints nothing."""
+    try:
+        _record_copilot_main_session(env, payload.get("session_id"))
+    except OSError:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +335,7 @@ def pr_gate_violation(command, cwd=None, operator_patterns=()):
 
 
 def cmd_pr_gate(harness, payload, env):
-    if _non_empty_str(payload.get("agent_id")):
+    if _skip_session(harness, payload, env):
         return None
     if not gate_is_on(harness, env):
         return None
@@ -390,6 +454,137 @@ def _extract_last_assistant_text(transcript_path):
     return "".join(texts)
 
 
+# Copilot runs the Stop hook before it has flushed the final
+# assistant.message to events.jsonl. It writes a hook.start event for the
+# agentStop invocation after that message, so the gate polls for it.
+_COPILOT_FLUSH_POLL_SECONDS = 0.1
+_COPILOT_FLUSH_LIMIT_SECONDS = 3.0
+_COPILOT_STOP_MATCH_MS = 1000
+
+
+def _parse_iso_ms(value):
+    """Milliseconds since the epoch for an ISO 8601 string, or None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    from datetime import datetime, timezone
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return int(round(moment.timestamp() * 1000))
+
+
+def _find_copilot_stop_marker(lines, session_id, stop_ms):
+    """Index of the agentStop hook.start line for this stop, or None.
+    Without stop_ms, only a marker after the last main user.message
+    counts."""
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i].strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        if kind == "user.message" and "agentId" not in event and stop_ms is None:
+            return None
+        if kind != "hook.start":
+            continue
+        data = event.get("data")
+        if not isinstance(data, dict) or data.get("hookType") != "agentStop":
+            continue
+        hook_input = data.get("input")
+        if not isinstance(hook_input, dict) or hook_input.get("sessionId") != session_id:
+            continue
+        if stop_ms is None:
+            return i
+        ms = hook_input.get("timestamp")
+        if isinstance(ms, bool) or not isinstance(ms, (int, float)):
+            continue
+        if abs(ms - stop_ms) <= _COPILOT_STOP_MATCH_MS:
+            return i
+    return None
+
+
+def _read_copilot_until_stop(path, session_id, stop_ms):
+    """The transcript tail up to (not including) this stop's hook.start
+    line, polling until it appears. Past the limit, the whole tail."""
+    deadline = time.monotonic() + _COPILOT_FLUSH_LIMIT_SECONDS
+    while True:
+        raw = _read_transcript_tail(path)
+        lines = raw.splitlines()
+        idx = _find_copilot_stop_marker(lines, session_id, stop_ms)
+        if idx is not None:
+            return "\n".join(lines[:idx])
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return raw
+        time.sleep(min(_COPILOT_FLUSH_POLL_SECONDS, remaining))
+
+
+def _extract_last_copilot_text(transcript_path, session_id=None, stop_timestamp=None):
+    """What the operator sees as the final answer of the last turn of a
+    Copilot events.jsonl: the last non-empty main assistant.message
+    content plus any task_complete summaries after the last main-agent
+    user.message. Subagent events carry agentId and are skipped. None if
+    no user.message boundary is in the tail that was read. With a
+    session_id, first waits for the runtime to flush this stop."""
+    if not transcript_path:
+        return None
+    path = os.path.expanduser(transcript_path)
+    try:
+        if _non_empty_str(session_id):
+            raw = _read_copilot_until_stop(path, session_id, _parse_iso_ms(stop_timestamp))
+        else:
+            raw = _read_transcript_tail(path)
+    except OSError:
+        return None
+
+    final_message = None
+    summaries = []
+    found_boundary = False
+    for line in reversed(raw.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or "agentId" in event:
+            continue
+        kind = event.get("type")
+        data = event.get("data")
+        if not isinstance(data, dict):
+            data = {}
+        if kind == "user.message":
+            found_boundary = True
+            break
+        if kind == "assistant.message":
+            value = data.get("content")
+            if final_message is None and isinstance(value, str) and value.strip():
+                final_message = value
+        elif kind == "session.task_complete":
+            value = data.get("summary")
+            if isinstance(value, str) and value.strip():
+                summaries.append(value)
+
+    if not found_boundary:
+        return None
+    texts = ([final_message] if final_message is not None else []) + summaries[::-1]
+    if not texts:
+        return None
+    return "\n\n".join(texts)
+
+
 PROSE_OPERATOR_MSG_TEMPLATE = (
     "steward prose gate: your last reply has {found}. The operator's rule "
     "is plain language. Revise the reply with the plainlanguage skill and "
@@ -401,7 +596,7 @@ def cmd_prose_gate(harness, payload, env):
     # One revision per reply: a Stop that follows a block is let through.
     if payload.get("stop_hook_active") is True:
         return None
-    if _non_empty_str(payload.get("agent_id")):
+    if _skip_session(harness, payload, env):
         return None
     if not gate_is_on(harness, env):
         return None
@@ -411,7 +606,14 @@ def cmd_prose_gate(harness, payload, env):
         transcript_path = payload.get("transcript_path")
         text = None
         if isinstance(transcript_path, str) and transcript_path:
-            text = _extract_last_assistant_text(transcript_path)
+            if harness == "copilot":
+                text = _extract_last_copilot_text(
+                    transcript_path,
+                    session_id=payload.get("session_id"),
+                    stop_timestamp=payload.get("timestamp"),
+                )
+            else:
+                text = _extract_last_assistant_text(transcript_path)
 
     if not text:
         return None
@@ -442,6 +644,11 @@ def cmd_prose_gate(harness, payload, env):
 
 _MODES = {
     "claude": {
+        "pr-gate": cmd_pr_gate,
+        "prose-gate": cmd_prose_gate,
+    },
+    "copilot": {
+        "session-start": cmd_session_start,
         "pr-gate": cmd_pr_gate,
         "prose-gate": cmd_prose_gate,
     },
