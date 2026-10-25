@@ -5,9 +5,9 @@ import importlib
 import sys
 import unittest
 
-from test_pi_model_plan import FIREWORKS, HAIKU, OLLAMA, OPUS, REPO_ROOT, SOL, SONNET, PlanTestCase
+from test_pi_model_plan import FIREWORKS, HAIKU, OLLAMA, OPUS, PLUGIN_ROOT, SOL, SONNET, PlanTestCase
 
-PLAN_HOOKS = REPO_ROOT / "plugins" / "steward-delegation" / "hooks"
+PLAN_HOOKS = PLUGIN_ROOT / "hooks"
 if str(PLAN_HOOKS) not in sys.path:
     sys.path.insert(0, str(PLAN_HOOKS))
 render = importlib.import_module("model_plan_render")

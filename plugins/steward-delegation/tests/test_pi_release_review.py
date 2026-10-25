@@ -1,20 +1,18 @@
 """Fixes from the 0.11.0 release review (docs/roadmap/pi-model-plan.md,
 "Release review"): edict wording for rows the no-plan block shows, per-call
 models checked against an enforced modelScope and maxThinking, the relaunch
-after a "pass model X" row, the drift hint, and the README example plan.
+after a "pass model X" row and the drift hint. The README example plan cases
+live in the repo's tests/test_model_plan_docs.py.
 
 Every test builds its own temp HOME, agent dir and project dir.
 """
 
-import json
-import re
 import unittest
 
-from test_pi_model_plan import OPUS, SOL, SONNET, OLLAMA, REPO_ROOT, PlanTestCase, mp
+from test_pi_model_plan import OPUS, SOL, SONNET, OLLAMA, PLUGIN_ROOT, PlanTestCase, mp
 from test_pi_model_plan_render import render, table_rows
 
-PI_SKILL = REPO_ROOT / "plugins" / "steward-delegation" / "pi" / "skills" / "steward-delegating" / "SKILL.md"
-README = REPO_ROOT / "README.md"
+PI_SKILL = PLUGIN_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md"
 NOCREDS = "openai/gpt-6.1-nocreds"
 # Edict size at 55106f6 was 10,251 bytes; the fixes may add a little.
 # The edict rides in every pi request's system prompt, so the budget stays tight.
@@ -224,62 +222,6 @@ class DriftHintTests(PlanTestCase):
 class HeadingTests(PlanTestCase):
     def test_heading_names_thinking_switch(self):
         self.assertIn("rebuilt on a model or thinking switch", render.HEADING)
-
-
-def readme_plan():
-    text = README.read_text(encoding="utf-8")
-    section = text.split("### Model plan on pi", 1)[1].split("\n### ", 1)[0]
-    block = re.search(r"```json\n(.*?)```", section, re.S).group(1)
-    return json.loads(block)
-
-
-class ReadmeExamplePlanTests(PlanTestCase):
-    """N6: the README example keeps judgment roles off a lower tier."""
-
-    def test_deep_reasoner_does_not_fall_back_to_sonnet(self):
-        plan = readme_plan()
-        dr = plan["roles"]["deep-reasoner"]
-        self.assertIn("fallback", dr)
-        for ref in dr["fallback"] or []:
-            self.assertIn("opus", ref)
-        self.assertIn("top-reviewer", plan["roles"])
-        self.assertIsNone(plan["roles"]["top-reviewer"]["escalate"])
-
-    def test_example_evaluates_without_plan_errors(self):
-        self.user_plan(readme_plan())
-        result = self.run_plan(main=OPUS)
-        self.assertFalse([f for f in result["findings"] if f["code"].startswith("plan-")])
-        for role in ("deep-reasoner", "top-reviewer"):
-            relaunch = result["roles"][role]["effectiveRelaunch"]
-            self.assertTrue(relaunch is None or "opus" in relaunch["model"], relaunch)
-        self.assertNotIn("sonnet", result["roles"]["top-reviewer"]["escalate"] and
-                         result["roles"]["top-reviewer"]["escalate"].get("model") or "")
-
-
-class ReadmeWordingTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.text = README.read_text(encoding="utf-8")
-        cls.section = cls.text.split("### Model plan on pi", 1)[1].split("\n### Gates on pi", 1)[0]
-
-    def test_lists_are_advisory(self):
-        self.assertNotIn("apply even when you decline project trust", self.section)
-        self.assertIn("modelScope", self.section)
-        self.assertIn("do not stop a launch", self.section)
-
-    def test_guardrails_are_the_edicts(self):
-        self.assertIn("guardrails** the edict states", self.section)
-
-    def test_hook_log_contents_described(self):
-        self.assertIn("STEWARD_HOOK_LOG", self.section)
-        self.assertIn("session-start", self.section)
-        self.assertNotIn("every hook call then appends", self.section)
-
-    def test_style(self):
-        self.assertNotIn(chr(0x2014), self.section)
-        lower = self.section.lower()
-        for word in ("load-bearing", "load bearing", "fencing", "earned its keep", "landmine", "footgun"):
-            self.assertNotIn(word, lower)
 
 
 if __name__ == "__main__":

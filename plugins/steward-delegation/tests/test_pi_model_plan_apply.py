@@ -20,9 +20,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-PLAN_HOOKS = REPO_ROOT / "plugins" / "steward-delegation" / "hooks"
-HOOK = REPO_ROOT / "hooks" / "steward_hook.py"
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+PLAN_HOOKS = PLUGIN_ROOT / "hooks"
+HOOK = PLAN_HOOKS / "delegation_hook.py"
 HELPER = Path(__file__).resolve().parent / "pi" / "profile_check.mjs"
 if str(PLAN_HOOKS) not in sys.path:
     sys.path.insert(0, str(PLAN_HOOKS))
@@ -615,8 +615,8 @@ class PiSubagentsProfileTests(ApplyTestCase):
 
 class HookSubcommandTests(ApplyTestCase):
     def run_hook(self, payload, *args):
-        env = dict(self.env, STEWARD_HARNESS="pi", PATH=os.environ.get("PATH", ""))
-        proc = subprocess.run([sys.executable, str(HOOK), "model-plan-apply", *args],
+        env = dict(self.env, PATH=os.environ.get("PATH", ""))
+        proc = subprocess.run([sys.executable, str(HOOK), "pi", "model-plan-apply", *args],
                               input=json.dumps(payload) if not isinstance(payload, str) else payload,
                               capture_output=True, text=True, env=env, timeout=60)
         return proc.returncode, json.loads(proc.stdout), proc.stderr
@@ -658,10 +658,12 @@ class HookSubcommandTests(ApplyTestCase):
             code, out, _ = self.run_hook(payload)
             self.assertEqual(code, 2, payload)
             self.assertIn("error", out)
-        env = dict(self.env, STEWARD_HARNESS="claude", PATH=os.environ.get("PATH", ""))
-        proc = subprocess.run([sys.executable, str(HOOK), "model-plan-apply"], input="{}", capture_output=True,
-                              text=True, env=env, timeout=60)
-        self.assertEqual(proc.returncode, 2)
+        # Only harness pi has the CLI modes: for another harness it is an
+        # unknown mode, which exits 0 with no output.
+        env = dict(self.env, PATH=os.environ.get("PATH", ""))
+        proc = subprocess.run([sys.executable, str(HOOK), "claude", "model-plan-apply"], input="{}",
+                              capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual((proc.returncode, proc.stdout), (0, ""))
 
 
 class DriftHintTests(ApplyTestCase):

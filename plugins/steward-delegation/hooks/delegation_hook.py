@@ -18,6 +18,14 @@ Harness `codex` has session-start only. Codex children share the
 parent's session_id, so a per-session edit counter would charge a
 worker's edits to the parent: Codex gets no gate and no delegated mode.
 
+Harness `pi` has the same three hook modes, run by the pi extension.
+session-start also appends the model plan block when the payload carries
+valid model_facts. pi also has three CLI modes for /steward-models:
+model-plan, model-plan-apply and delegation-stats. They read JSON on
+stdin and print JSON on stdout, and they are the one exception to the
+rule below: bad input exits 2, a refused apply exits 3, an internal
+error exits 1.
+
 This script must never raise to whoever called it. Any error, bad
 input, missing file, unknown harness or unknown mode means: exit 0, no
 output. Fail open, always.
@@ -45,8 +53,13 @@ except ImportError:
 def get_config_dir(env, harness="claude"):
     """Where the harness keeps its config. Claude Code: $CLAUDE_CONFIG_DIR
     or ~/.claude. Copilot: $COPILOT_HOME or ~/.copilot. Codex: $CODEX_HOME
-    or ~/.codex."""
+    or ~/.codex. pi: $PI_CODING_AGENT_DIR or ~/.pi/agent."""
     home = env.get("HOME") or os.path.expanduser("~")
+    if harness == "pi":
+        value = env.get("PI_CODING_AGENT_DIR")
+        if value:
+            return _expand_user(value, env)
+        return os.path.join(home, ".pi", "agent")
     if harness == "copilot":
         value = env.get("COPILOT_HOME")
         if value:
@@ -231,6 +244,180 @@ def cmd_codex_session_start(payload, env):
             "additionalContext": skill_body,
         }
     })
+
+
+# ---------------------------------------------------------------------------
+# pi session-start and the model plan
+#
+# Payload contract. The pi extension may add a `model_facts` key to the
+# session-start payload ({"session_id", "model_facts"}). It holds exactly
+# the registry facts documented in model_plan.py beside this script:
+#
+#   {"main": {"provider", "id", "thinkingLevel"} | null,
+#    "models": [{"provider", "id", "available", "thinkingLevels"?,
+#                "maxTokens"?, ...}],
+#    "projectTrusted": bool, "cwd": str}
+#
+# With valid facts, pi session-start appends the Model plan block. Without
+# the key, with malformed facts, or on any error the output is the edict
+# alone. Other harnesses ignore the key.
+# ---------------------------------------------------------------------------
+
+def _hook_module(name):
+    """Import a sibling module from this script's own hooks/ dir."""
+    import importlib
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    return importlib.import_module(name)
+
+
+def _pi_model_plan_block(payload, env):
+    facts = payload.get("model_facts")
+    if not isinstance(facts, dict):
+        return None, None
+    try:
+        return _hook_module("model_plan_render").session_block_and_launches(facts, env)
+    except Exception:  # session start must fail open
+        return None, None
+
+
+def block_launches_ok(launches):
+    return isinstance(launches, dict) and bool(launches)
+
+
+def cmd_pi_session_start(payload, env):
+    # pi wraps the text in a <steward> system-prompt section itself, so no
+    # tags here.
+    skill_body = _read_skill_body(os.path.join(
+        get_plugin_root(env), "pi", "skills", "steward-delegating", "SKILL.md"))
+    text = (
+        "You run under the steward delegation edict. The full text of "
+        "the steward-delegating skill follows; read it as standing "
+        "instructions.\n\n" + skill_body
+    )
+    block, launches = _pi_model_plan_block(payload, env)
+    if block:
+        text += "\n\n" + block
+    output = {
+        "hookEventName": "SessionStart",
+        "additionalContext": text,
+    }
+    if block_launches_ok(launches):
+        # Each profile's relaunch and escalation model strings, as data,
+        # for the extension's outcome log.
+        output["stewardLaunches"] = launches
+    return json.dumps({"hookSpecificOutput": output})
+
+
+# ---------------------------------------------------------------------------
+# pi CLI modes (/steward-models). Each returns (stdout, stderr, exit code).
+#
+# model-plan (/steward-models check) reads {"model_facts", "cwd"}; `cwd`
+# fills model_facts.cwd when that is missing. It prints {"report": "..."}
+# and exits 0, findings or not. It writes no files.
+#
+# model-plan-apply (/steward-models apply) reads {"model_facts", "dryRun",
+# "expect"?}. It writes only when "dryRun" is false and no --dry-run
+# argument is given; otherwise it is a preview. stdout is the result
+# object, exit 0. A refusal (nothing written) prints {"error",
+# "refused": true} and exits 3.
+#
+# delegation-stats (/steward-models stats) reads {"days"?, "path"?, "now"?}
+# and prints {"report": "..."}. It reads only the outcome log.
+#
+# Unusable input to any of them prints {"error": "..."}, writes the message
+# to stderr and exits 2.
+# ---------------------------------------------------------------------------
+
+MODEL_PLAN_USAGE_EXIT = 2
+MODEL_PLAN_REFUSED_EXIT = 3
+
+
+def cmd_model_plan(stdin_text, env, argv=()):
+    def fail(message):
+        message = "model-plan: " + message
+        return json.dumps({"error": message}), message, MODEL_PLAN_USAGE_EXIT
+
+    try:
+        payload = json.loads(stdin_text) if stdin_text and stdin_text.strip() else None
+    except ValueError:
+        return fail("stdin is not JSON")
+    if not isinstance(payload, dict):
+        return fail("stdin must be a JSON object {\"model_facts\": {...}, \"cwd\": \"...\"}")
+    facts = payload.get("model_facts")
+    if not isinstance(facts, dict):
+        return fail("model_facts is missing or not an object")
+    cwd = payload.get("cwd")
+    if "cwd" not in facts and isinstance(cwd, str) and cwd:
+        facts = dict(facts, cwd=cwd)
+    if isinstance(facts.get("cwd"), str) and facts["cwd"] and not os.path.isabs(facts["cwd"]):
+        return fail("cwd must be an absolute path, got a relative one")
+    mp = _hook_module("model_plan")
+    try:
+        mp.validate_facts(facts)
+    except ValueError as exc:
+        return fail("model_facts is malformed: %s" % exc)
+    render = _hook_module("model_plan_render")
+    result = mp.evaluate(facts, env=env)
+    return json.dumps({"report": render.render_report(result)}), "", 0
+
+
+def cmd_model_plan_apply(stdin_text, env, argv=()):
+    def fail(message, code=MODEL_PLAN_USAGE_EXIT, refused=False):
+        message = "model-plan-apply: " + message
+        body = {"error": message}
+        if refused:
+            body["refused"] = True
+        return json.dumps(body), message, code
+
+    try:
+        payload = json.loads(stdin_text) if stdin_text and stdin_text.strip() else None
+    except ValueError:
+        return fail("stdin is not JSON")
+    if not isinstance(payload, dict):
+        return fail("stdin must be a JSON object {\"model_facts\": {...}, \"dryRun\": bool}")
+    facts = payload.get("model_facts")
+    if not isinstance(facts, dict):
+        return fail("model_facts is missing or not an object")
+    expect = payload.get("expect")
+    if expect is not None and not (isinstance(expect, dict)
+                                   and all(v is None or isinstance(v, str) for v in expect.values())):
+        return fail("expect must be an object of file hashes")
+    dry_run = "--dry-run" in argv or payload.get("dryRun") is not False
+    mpa = _hook_module("model_plan_apply")
+    try:
+        result = mpa.apply(facts, env=env, dry_run=dry_run, expect=expect)
+    except ValueError as exc:
+        return fail("model_facts is malformed: %s" % exc)
+    except mpa.Refused as exc:
+        return fail(str(exc), MODEL_PLAN_REFUSED_EXIT, refused=True)
+    result.pop("newSettings", None)
+    return json.dumps(result), "", 0
+
+
+def cmd_delegation_stats(stdin_text, env, argv=()):
+    def fail(message):
+        message = "delegation-stats: " + message
+        return json.dumps({"error": message}), message, MODEL_PLAN_USAGE_EXIT
+
+    try:
+        payload = json.loads(stdin_text) if stdin_text and stdin_text.strip() else {}
+    except ValueError:
+        return fail("stdin is not JSON")
+    if not isinstance(payload, dict):
+        return fail("stdin must be a JSON object")
+    stats = _hook_module("delegation_stats")
+    days = payload.get("days", stats.DEFAULT_DAYS)
+    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 3650:
+        return fail("days must be a whole number from 1 to 3650")
+    path = payload.get("path")
+    if not isinstance(path, str) or not path:
+        path = stats.log_path(env)
+    now = payload.get("now")
+    if isinstance(now, bool) or not isinstance(now, (int, float)):
+        now = time.time()
+    return json.dumps({"report": stats.report(path, days, float(now))}), "", 0
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +634,10 @@ def default_allowlist_globs(env, harness="claude"):
     home = env.get("HOME") or os.path.expanduser("~")
     harness_globs = []
     config_globs = [os.path.join(config_dir, "**")]
-    if harness == "copilot":
+    if harness == "pi":
+        # pi's counterparts of CLAUDE.md and a project's .claude directory.
+        harness_globs = ["**/AGENTS.md", "**/.pi/**"]
+    elif harness == "copilot":
         harness_globs = [
             "**/AGENTS.md",
             "**/.github/copilot-instructions.md",
@@ -761,6 +951,17 @@ def gate_message(count, config_dir, harness="claude"):
             "to {gate_path} (takes effect immediately; "
             "STEWARD_DELEGATION_GATE only applies at next start)."
         ).format(n=count, gate_path=_gate_mode_path(config_dir))
+    if harness == "pi":
+        return (
+            "steward delegation gate: this is direct edit #{n} on the main "
+            "thread with no subagent call in between. The edict says every "
+            "non-trivial task runs in a subagent. Delegate it with the "
+            "subagent tool (agent steward.coder for code, "
+            "steward.mechanic for rote edits), or ask the operator "
+            "to set the gate to soft or off by writing that word to "
+            "{gate_path} (takes effect immediately; "
+            "STEWARD_DELEGATION_GATE only applies at next start)."
+        ).format(n=count, gate_path=_gate_mode_path(config_dir))
     return (
         "steward delegation gate: this is direct edit #{n} on the main "
         "thread with no subagent call in between. The edict says every "
@@ -859,6 +1060,10 @@ def cmd_copilot_delegated(payload, env):
     return cmd_delegated(payload, env)
 
 
+def cmd_pi_gate(payload, env):
+    return cmd_gate(payload, env, "pi")
+
+
 # ---------------------------------------------------------------------------
 # dispatch
 # ---------------------------------------------------------------------------
@@ -879,6 +1084,21 @@ _MODES = {
     "codex": {
         "session-start": cmd_codex_session_start,
     },
+    "pi": {
+        "session-start": cmd_pi_session_start,
+        "gate": cmd_pi_gate,
+        "delegated": cmd_delegated,
+    },
+}
+
+# pi's /steward-models modes. Unlike the hook modes above they read stdin
+# raw, take extra arguments and set the exit code.
+_CLI_MODES = {
+    "pi": {
+        "model-plan": cmd_model_plan,
+        "model-plan-apply": cmd_model_plan_apply,
+        "delegation-stats": cmd_delegation_stats,
+    },
 }
 
 
@@ -897,7 +1117,23 @@ def _dispatch(argv, stdin_text, env):
     return handler(payload, env)
 
 
+def _run_cli(name, handler):
+    try:
+        out, err, code = handler(sys.stdin.read(), os.environ, sys.argv[3:])
+    except Exception as exc:
+        err = "%s: internal error (%s)" % (name, type(exc).__name__)
+        out, code = json.dumps({"error": err}), 1
+    sys.stdout.write(out + "\n")
+    if err:
+        sys.stderr.write(err + "\n")
+    return code
+
+
 def main():
+    if len(sys.argv) >= 3:
+        handler = _CLI_MODES.get(sys.argv[1], {}).get(sys.argv[2])
+        if handler is not None:
+            return _run_cli(sys.argv[2], handler)
     try:
         stdin_text = sys.stdin.read()
         output = _dispatch(sys.argv, stdin_text, os.environ)

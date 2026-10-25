@@ -1,4 +1,4 @@
-// Drift-guard helper for tests/test_pi_model_plan_resolver.py. Runs a corpus
+// Drift-guard helper for ../test_pi_model_plan_resolver.py. Runs a corpus
 // through the installed pi-subagents and prints the results as JSON.
 //
 // usage: node resolve_model.mjs <pi-subagents dir> <sha256 of stdin>   (corpus on stdin)

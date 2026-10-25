@@ -9,8 +9,8 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PLAN_HOOKS = os.path.join(os.path.dirname(HERE), "plugins", "steward-delegation", "hooks")
-HOOK = os.path.join(os.path.dirname(HERE), "hooks", "steward_hook.py")
+PLAN_HOOKS = os.path.join(os.path.dirname(HERE), "hooks")
+HOOK = os.path.join(PLAN_HOOKS, "delegation_hook.py")
 sys.path.insert(0, PLAN_HOOKS)
 sys.path.insert(0, HERE)
 
@@ -123,9 +123,9 @@ class RenderTests(unittest.TestCase):
 
 class SubcommandTests(unittest.TestCase):
     def run_hook(self, payload, env_extra=None):
-        env = dict(os.environ, STEWARD_HARNESS="pi")
+        env = dict(os.environ)
         env.update(env_extra or {})
-        proc = subprocess.run([sys.executable, HOOK, "delegation-stats"],
+        proc = subprocess.run([sys.executable, HOOK, "pi", "delegation-stats"],
                               input=json.dumps(payload), capture_output=True, text=True, env=env)
         return proc.returncode, json.loads(proc.stdout)
 
@@ -167,7 +167,7 @@ class SessionLaunchesTests(FactsCase):
     data, so the outcome log can classify a launch's `kind` without parsing the block."""
 
     def test_launches_are_structured(self):
-        proc = subprocess.run([sys.executable, HOOK, "session-start"],
+        proc = subprocess.run([sys.executable, HOOK, "pi", "session-start"],
                               input=json.dumps({"session_id": "s1", "model_facts": self.facts()}),
                               capture_output=True, text=True, env=self.pi_env())
         out = json.loads(proc.stdout)["hookSpecificOutput"]
@@ -183,7 +183,7 @@ class SessionLaunchesTests(FactsCase):
         self.assertTrue(any(e["relaunch"] for e in launches.values()))
 
     def test_no_facts_no_launches(self):
-        proc = subprocess.run([sys.executable, HOOK, "session-start"],
+        proc = subprocess.run([sys.executable, HOOK, "pi", "session-start"],
                               input=json.dumps({"session_id": "s1"}), capture_output=True, text=True,
                               env=self.pi_env())
         self.assertNotIn("stewardLaunches", json.loads(proc.stdout)["hookSpecificOutput"])

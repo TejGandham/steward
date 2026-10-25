@@ -1,4 +1,4 @@
-// Helper for tests/test_pi_model_plan_apply.py. Drives the installed
+// Helper for ../test_pi_model_plan_apply.py. Drives the installed
 // pi-subagents profile code against a temporary agent dir (the caller sets
 // PI_CODING_AGENT_DIR; this file never reads the real one).
 //
