@@ -18,6 +18,11 @@
       "name": "steward-prose-gate",
       "description": "Blocks replies and PR bodies that read like AI-generated text.",
       "source": "./plugins/steward-prose-gate"
+    },
+    {
+      "name": "steward-orchestration",
+      "description": "Primary and secondary session roles for multi-session initiatives (Claude Code only).",
+      "source": "./plugins/steward-orchestration"
     }
   ]
 }

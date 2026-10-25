@@ -16,7 +16,7 @@ EDICTS = (
     REPO_ROOT / "skills" / "delegating" / "SKILL.md",
     REPO_ROOT / "pi" / "skills" / "steward-delegating" / "SKILL.md",
     REPO_ROOT / "copilot" / "skills" / "delegating" / "SKILL.md",
-    REPO_ROOT / "skills" / "orchestrating" / "onboarding-template.md",
+    REPO_ROOT / "plugins" / "steward-orchestration" / "skills" / "orchestrating" / "onboarding-template.md",
 )
 PROFILE_DOCS = (README, ROUTING) + EDICTS
 RULE = "Claude Opus never runs at max"
