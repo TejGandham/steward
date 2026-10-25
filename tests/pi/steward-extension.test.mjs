@@ -10,9 +10,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import steward, { isProseRevision, launchesWork, lastAssistantText } from "../../pi/extensions/steward/index.ts";
+import steward, { launchesWork } from "../../pi/extensions/steward/index.ts";
 
-const EM_DASH = String.fromCodePoint(0x2014);
 const ENV_KEYS = ["HOME", "XDG_STATE_HOME", "PI_CODING_AGENT_DIR", "STEWARD_GATE", "STEWARD_PYTHON", "PI_SUBAGENT_CHILD"];
 
 let tmp;
@@ -147,7 +146,7 @@ test("second direct write is blocked until a subagent launch", async () => {
 	assert.equal(await fire("tool_call", write()), undefined);
 });
 
-test("without pi-subagents the delegation gate only reminds, the PR gate still blocks", async () => {
+test("without pi-subagents the delegation gate only reminds", async () => {
 	const { fire } = load({ tools: ["read", "bash", "edit", "write"] });
 	await fire("tool_call", write());
 	const second = write();
@@ -162,8 +161,6 @@ test("without pi-subagents the delegation gate only reminds, the PR gate still b
 	});
 	assert.match(result.content[1].text, /direct edit #2/);
 	assert.match(result.content[1].text, /STEWARD WARNING: the pi-subagents extension is not loaded/);
-	const pr = await fire("tool_call", call("bash", { command: `gh pr edit --body "a ${EM_DASH} b"` }));
-	assert.equal(pr.block, true);
 });
 
 const NOT_AVAILABLE_NOTE = /subagent tool is not available in this session/;
@@ -183,7 +180,7 @@ async function secondWriteNote(fire) {
 	return result.content[1].text;
 }
 
-test("subagent registered but not active: the delegation gate only reminds, the PR gate still blocks", async () => {
+test("subagent registered but not active: the delegation gate only reminds", async () => {
 	const { fire } = load({ active: ["read", "bash", "edit", "write"] });
 	const note = await secondWriteNote(fire);
 	assert.match(note, /direct edit #2/);
@@ -191,9 +188,7 @@ test("subagent registered but not active: the delegation gate only reminds, the 
 	assert.match(note, /"toolActivation": "eager"/);
 	assert.match(note, /\/reload/);
 	assert.doesNotMatch(note, /STEWARD WARNING: the pi-subagents extension is not loaded/);
-	assert.ok(!note.includes(EM_DASH));
-	const pr = await fire("tool_call", call("bash", { command: `gh pr edit --body "a ${EM_DASH} b"` }));
-	assert.equal(pr.block, true);
+	assert.ok(!note.includes("\u2014"));
 });
 
 test("subagent registered but not active: no missing-extension warning in the edict", async () => {
@@ -316,13 +311,6 @@ test("read-only bash and allowlisted paths pass", async () => {
 	}
 });
 
-test("PR gate blocks a gh pr create body with an em-dash", async () => {
-	const { fire } = load();
-	const result = await fire("tool_call", call("bash", { command: `gh pr create --title t --body "a ${EM_DASH} b"` }));
-	assert.equal(result.block, true);
-	assert.match(result.reason, /PR gate/);
-});
-
 test("soft mode lets the edit run and appends the reminder to its result", async () => {
 	mkdirSync(join(tmp, "config", "steward"));
 	writeFileSync(join(tmp, "config", "steward", "gate"), "soft\n");
@@ -340,63 +328,6 @@ test("soft mode lets the edit run and appends the reminder to its result", async
 	});
 	assert.equal(result.content.length, 2);
 	assert.match(result.content[1].text, /direct edit #2/);
-});
-
-test("prose gate sends a reply back once, keeping earlier entries", async () => {
-	const { fire } = load();
-	const earlier = { type: "custom", customType: "other" };
-	const reply = (text) => ({ role: "assistant", content: [{ type: "thinking", thinking: "t" }, { type: "text", text }] });
-	const settle = (contextMessages) => ({
-		type: "agent_before_settle",
-		outcome: "completed",
-		entries: [earlier],
-		continue: false,
-		// what pi reports for a finished reply: the context ends on the assistant turn
-		context: { canContinue: false, contextMessages },
-	});
-	const bad = reply(`It is crucial ${EM_DASH} and pivotal.`);
-	const first = await fire("agent_before_settle", settle([{ role: "user", content: "q" }, bad]));
-	assert.equal(first.continue, true);
-	assert.deepEqual(first.entries[0], earlier);
-	assert.equal(first.entries[1].type, "custom_message");
-	assert.equal(first.entries[1].customType, "steward-prose-gate");
-	assert.match(first.entries[1].content, /prose gate/);
-
-	// the revision is not sent back again, even if it still has tells
-	const gateMessage = { role: "custom", customType: "steward-prose-gate", content: first.entries[1].content };
-	const revised = [{ role: "user", content: "q" }, bad, gateMessage, reply(`Still ${EM_DASH} here.`)];
-	assert.equal(await fire("agent_before_settle", settle(revised)), undefined);
-
-	// a later turn is checked again
-	const later = [...revised, { role: "user", content: "next" }, reply(`Again ${EM_DASH} here.`)];
-	assert.equal((await fire("agent_before_settle", settle(later))).continue, true);
-
-	// clean replies pass
-	assert.equal(await fire("agent_before_settle", settle([{ role: "user", content: "q" }, reply("All done.")])), undefined);
-});
-
-test("isProseRevision", () => {
-	const gate = { role: "custom", customType: "steward-prose-gate" };
-	const notice = { role: "custom", customType: "subagent-done" };
-	const a = { role: "assistant", content: [] };
-	const tr = { role: "toolResult", content: [] };
-	assert.equal(isProseRevision([]), false);
-	assert.equal(isProseRevision([{ role: "user" }, a]), false);
-	assert.equal(isProseRevision([{ role: "user" }, a, gate, a, tr, a]), true);
-	assert.equal(isProseRevision([{ role: "user" }, a, gate, a, notice, a]), false);
-	assert.equal(isProseRevision([gate, a, { role: "user" }, a]), false);
-});
-
-test("prose gate skips aborted runs", async () => {
-	const { fire } = load();
-	const result = await fire("agent_before_settle", {
-		type: "agent_before_settle",
-		outcome: "aborted",
-		entries: [],
-		continue: false,
-		context: { canContinue: true, contextMessages: [{ role: "assistant", content: `a ${EM_DASH} b` }] },
-	});
-	assert.equal(result, undefined);
 });
 
 test("fails open when python cannot start", async () => {
@@ -424,18 +355,4 @@ test("launchesWork", () => {
 	assert.equal(launchesWork({ tasks: [] }), false);
 	assert.equal(launchesWork({}), false);
 	assert.equal(launchesWork(undefined), false);
-});
-
-test("lastAssistantText", () => {
-	assert.equal(lastAssistantText([]), undefined);
-	assert.equal(
-		lastAssistantText([
-			{ role: "assistant", content: [{ type: "text", text: "old" }] },
-			{ role: "user", content: "q" },
-			{ role: "assistant", content: [{ type: "text", text: "a" }, { type: "toolCall" }, { type: "text", text: "b" }] },
-		]),
-		"ab",
-	);
-	assert.equal(lastAssistantText([{ role: "assistant", content: [{ type: "toolCall" }] }]), undefined);
-	assert.equal(lastAssistantText([{ role: "assistant", content: "plain" }]), "plain");
 });

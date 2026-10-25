@@ -1,6 +1,6 @@
 /**
- * steward for pi: injects the delegation edict and runs the delegation gate, the prose gate and
- * the PR-body gate.
+ * steward for pi: injects the delegation edict and runs the delegation gate. The prose gate and
+ * the PR-body gate run in the steward-prose-gate extension.
  *
  * Every decision is made by hooks/steward_hook.py, the same engine the Claude Code plugin runs.
  * This file only translates pi events into that script's JSON payloads (with STEWARD_HARNESS=pi)
@@ -52,7 +52,6 @@ const SUBAGENT_TOOL = "subagent";
 const SUBAGENT_LOADER_TOOL = "subagents_enable";
 /** System prompt section name; pi renders it as <steward>...</steward>. */
 const SECTION = "steward";
-const PROSE_GATE_MESSAGE_TYPE = "steward-prose-gate";
 const EDICT_MESSAGE_TYPE = "steward-edict";
 const DELEGATION_GATE_PREFIX = "steward delegation gate";
 const MODELS_COMMAND = "steward-models";
@@ -163,37 +162,6 @@ export function launchesWork(input: unknown): boolean {
 	if (args.action !== undefined) return false;
 	const nonEmpty = (v: unknown) => Array.isArray(v) && v.length > 0;
 	return Boolean(args.agent) || Boolean(args.workflow) || nonEmpty(args.tasks) || nonEmpty(args.chain);
-}
-
-/** Text of the most recent assistant message, or undefined when it has none. */
-export function lastAssistantText(messages: readonly unknown[]): string | undefined {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i] as { role?: string; content?: unknown };
-		if (message?.role !== "assistant") continue;
-		const { content } = message;
-		if (typeof content === "string") return content.trim() ? content : undefined;
-		if (!Array.isArray(content)) return undefined;
-		const text = content
-			.filter((part) => part && part.type === "text" && typeof part.text === "string")
-			.map((part) => part.text as string)
-			.join("");
-		return text.trim() ? text : undefined;
-	}
-	return undefined;
-}
-
-/**
- * True when the latest reply answers a prose-gate message, so it is already the one revision the
- * gate allows. Walks back from the end: the gate's own message means yes; a user message or any
- * other custom message (a new prompt, a background-completion notice) means no.
- */
-export function isProseRevision(messages: readonly unknown[]): boolean {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i] as { role?: string; customType?: string };
-		if (message?.role === "user") return false;
-		if (message?.role === "custom") return message.customType === PROSE_GATE_MESSAGE_TYPE;
-	}
-	return false;
 }
 
 /** What the extension needs from `@earendil-works/pi-ai`. */
@@ -1081,7 +1049,8 @@ function register(
 			if (decision?.permissionDecision === "deny") {
 				const reason = String(decision.permissionDecisionReason ?? "steward gate");
 				// Without a delegation tool the model cannot delegate, so a delegation-gate denial
-				// could never be cleared. Downgrade it to a reminder. The PR gate still blocks.
+				// could never be cleared. Downgrade it to a reminder. A PR body is blocked by the
+				// steward-prose-gate extension, not here.
 				if (reason.startsWith(DELEGATION_GATE_PREFIX) && !canDelegateNow()) {
 					softNotes.set(event.toolCallId, `${reason}\n\n${cannotDelegateNote()}`);
 					return undefined;
@@ -1118,34 +1087,6 @@ function register(
 			return {
 				content: [...event.content, { type: "text" as const, text: note }],
 				structuredContent: event.structuredContent,
-			};
-		} catch {
-			return undefined;
-		}
-	});
-
-	pi.on("agent_before_settle", async (event, ctx) => {
-		try {
-			// No canContinue check: it describes the context before this handler's entries, and a
-			// finished reply always ends on the assistant turn. The custom message added below is what
-			// makes the next request runnable.
-			if (event.outcome !== "completed") return undefined;
-			const messages = event.context.contextMessages;
-			const text = lastAssistantText(messages);
-			if (!text) return undefined;
-			const { output } = await runHook("prose-gate", {
-				session_id: sessionId(ctx),
-				last_assistant_message: text,
-				// One revision per reply, like Claude Code's stop_hook_active.
-				stop_hook_active: isProseRevision(messages),
-			});
-			if (output?.decision !== "block" || typeof output.reason !== "string") return undefined;
-			return {
-				entries: [
-					...event.entries,
-					{ type: "custom_message" as const, customType: PROSE_GATE_MESSAGE_TYPE, content: output.reason, display: true },
-				],
-				continue: true,
 			};
 		} catch {
 			return undefined;
