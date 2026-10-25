@@ -89,7 +89,6 @@ Contents:
 ```
 plugins/steward-prose-gate/
   .claude-plugin/plugin.json      .codex-plugin/plugin.json      .github/plugin/plugin.json
-  package.json                    (pi: extensions ./pi/extensions/steward-prose-gate/index.ts)
   README.md
   data/ai-tells.txt               (the word list; see "Word list")
   hooks/hooks.json                (Claude Code)
@@ -108,7 +107,7 @@ Behavior kept from today:
 New:
 - Its own switch: `<config>/steward-prose-gate/gate` holding `on` or `off`, read on every call; when the file is absent, env `STEWARD_PROSE_GATE` (`on`|`off`); default `on`. One switch covers both gates. A Stop hook has no soft form, so there is no `soft` value **(orchestrator's call)**.
 - On Copilot it needs its own SessionStart hook that records the main session under its own state dir. Today the delegation side records it (`hooks/steward_hook.py:242-248`) and both gates read it (`:1167`, `:1509`); without its own record the prose and PR gates would fail open for every Copilot session **(orchestrator's call)**.
-- No built-in em-dash rule. See [Personal content](#personal-content) **(orchestrator's call)**.
+- No em-dash rule, built in or otherwise. The gate keeps the AI-tell word list (two or more distinct hits) and the operator's prose-patterns. See [Personal content](#personal-content) **(operator decided)**.
 
 ### steward-delegation
 
@@ -118,7 +117,6 @@ Contents (same relative paths as today, moved under the plugin folder):
 ```
 plugins/steward-delegation/
   .claude-plugin/plugin.json      .codex-plugin/plugin.json      .github/plugin/plugin.json
-  package.json                    (pi: extension, skills, subagents.agents)
   README.md
   agents/*.md                     (7, Claude Code)
   skills/delegating/SKILL.md, routing.md
@@ -183,7 +181,7 @@ Install sets for the READMEs:
 ```
 .claude-plugin/marketplace.json   catalog "steward": steward pinned to v0.14.2, plus the three new plugins
 .agents/plugins/marketplace.json  catalog "steward-codex": steward pinned to v0.14.2, plus steward-delegation, steward-prose-gate
-package.json                      private; pi entry for git installs; scripts.test runs every suite
+package.json                      private; the only pi manifest (git and local installs); scripts.test runs every suite
 .pi/settings.json                 dev-only profile overrides for this checkout (unchanged)
 .gitignore
 README.md                         index: the four plugins, install sets, staying on 0.14.2
@@ -214,9 +212,9 @@ The Codex docs show `ref` on a `git-subdir` source; if Codex rejects `ref` on `u
 ### Versions and tags
 
 - Each new plugin starts at **0.15.0** and moves on its own after that **(orchestrator's call)**. It reads as newer than 0.14.2 in any listing, says "the next steward release, split", and does not claim the stability a 1.0.0 would while orchestration has open problems.
-- All of one plugin's manifests carry the same version: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.github/plugin/plugin.json`, `package.json` (whichever exist). A test enforces it, including Codex, which no test checks today.
-- Release tags are `<plugin>--v<version>`, for example `steward-delegation--v0.15.0` **(orchestrator's call)**. This is Claude Code's documented form for one repo holding several plugins ([Appendix B](#appendix-b-harness-facts)) and cannot collide with the existing `v*` tags.
-- The root `package.json` is not a plugin. Its `version` stays `0.15.0` and is not a release number; no test ties it to a plugin.
+- All of one plugin's manifests carry the same version: `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.github/plugin/plugin.json` (whichever exist). A test enforces it, including Codex, which no test checks today.
+- Release tags are `<plugin>--v<version>`, for example `steward-delegation--v0.15.0` **(orchestrator's call)**. The marketplace release script clones a plugin's release by tag (hatch FINDINGS.md "Release flow", step 1), and the three plugins version independently, so each needs its own tag. The form also cannot collide with the existing `v*` tags. It is not tied to Claude Code dependency ranges: no plugin declares a dependency.
+- The root `package.json` is not a plugin. Its `version` stays `0.15.0` and is not a release number; no test ties it to a plugin. Plugin folders hold no `package.json`.
 
 ## Existing users: tag and pin
 
@@ -230,15 +228,15 @@ The Codex docs show `ref` on a `git-subdir` source; if Codex rejects `ref` on `u
 | Codex `steward@steward-codex` | Pinned entry; hook trust keys `steward@steward-codex:codex/hooks.json:*` still match the tag's tree | none |
 | pi `git:github.com/tejgandham/steward` (unpinned) | `pi update` moves to main and loads the new delegation and prose-gate extensions | pin before the merge: `pi install git:github.com/tejgandham/steward@v0.14.2`, or accept the new layout and move config |
 
-The README notice about pinning goes onto main before the reorg merges (build step 1).
+The README notice about pinning goes onto main before the reorg merges (build step 1). Step 1 also proves the first three rows on real old installs: install 0.14.2 the old way, change the catalog, run the marketplace update, and confirm nothing moves. If a harness re-resolves and breaks, the README "Staying on 0.14.2" section tells users to pin or reinstall from the tag; no other machinery.
 
 ## Pi packaging
 
 Constraint: pi installs one package per git URL and cannot install a subfolder of a repo; git identity is the URL without the ref; filters narrow what one package exposes ([Appendix B](#appendix-b-harness-facts)).
 
 Scheme **(orchestrator's call)**:
-- Each plugin folder has its own `package.json` with a `pi` field. That keeps the folder self-contained, and a local path install (`pi install /path/to/steward/plugins/steward-delegation`) works for development and for anyone who clones.
-- The root `package.json` on main is the git-install entry. It exposes both pi plugins:
+- The root `package.json` is the only pi manifest. pi cannot git-install a subfolder, so a manifest inside a plugin folder could serve only local path installs. Plugin folders carry no `package.json`, which also leaves nothing to install twice.
+- The root `package.json` on main is the entry for git installs and for local development. It exposes both pi plugins:
   ```json
   "pi": {
     "extensions": ["./plugins/steward-delegation/pi/extensions/steward-delegation/index.ts",
@@ -247,14 +245,13 @@ Scheme **(orchestrator's call)**:
     "subagents": {"agents": ["./plugins/steward-delegation/pi/agents"]}
   }
   ```
-  `pi install git:github.com/tejgandham/steward` therefore gives pi users what 0.14.2 gave them: edict, gates, profiles, model plan.
-- Selective install uses the settings object form, documented in the README:
+  `pi install git:github.com/tejgandham/steward` therefore gives pi users what 0.14.2 gave them: edict, gates, profiles, model plan. `pi install /path/to/steward` loads the same package from a checkout.
+- Selective install, from git or from a local path, uses the settings object form with resource filters, documented in the README:
   ```json
   {"source": "git:github.com/tejgandham/steward",
    "extensions": ["-plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts"]}
   ```
   drops the prose gate; `"extensions": ["plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts"], "skills": []` keeps only the prose gate. The seven `steward.*` agents are declared under pi-subagents' own `subagents.agents` key, which pi's filters do not cover, so they may still be listed; that is harmless.
-- Do not install the root package and a plugin folder at the same time; both would load.
 - Rejected: npm packages (a publish step and an account for no gain today); one repo per plugin (the operator decided on one repo); a stub extension that only says "moved" (machinery).
 
 Pinned users (`@v0.14.2`) never move: "Git tags and commits are also pinned; package updates reconcile the checkout but do not move a configured ref" (`earendil-pi packages/coding-agent/docs/packages.md:40`). An unpinned user on `pi update` gets the split layout; their old files under `~/.pi/agent/steward/` (gate, model-plan.json, the prose-patterns link) are no longer read, and the launch log starts a new file. No code migrates them **(orchestrator's call)**.
@@ -296,7 +293,7 @@ Claude Code commands use `${CLAUDE_PLUGIN_ROOT}`; Copilot and Codex use `${PLUGI
 | 42-61 | `get_config_dir` | copy in D (claude, copilot, pi) and P (claude, copilot, pi, plus codex: `$CODEX_HOME` or `~/.codex`, from `codex/steward.py:19-21`) |
 | 64-70 | `get_state_dir` | copy in D (`steward-delegation`) and P (`steward-prose-gate`) |
 | 73-79 | `get_orchestration_dir` | O |
-| 82-88 | `get_plugin_root` | D (env override `STEWARD_DELEGATION_ROOT`, tests only) |
+| 82-88 | `get_plugin_root` | copy in D (env override `STEWARD_DELEGATION_ROOT`, tests only) and P (finds `data/ai-tells.txt`) |
 | 91-104 | `_expand_user`, `_non_empty_str` | copy in D and P; `_non_empty_str` also O |
 | 111-124 | `REGISTRY_SKELETON` | O (namespace `steward-orchestration:orchestrating`) |
 | 127-137 | `strip_frontmatter` | D |
@@ -332,12 +329,13 @@ Claude Code commands use `${CLAUDE_PLUGIN_ROOT}`; Copilot and Codex use `${PLUGI
 
 ### Pi extensions
 
-- `plugins/steward-delegation/pi/extensions/steward-delegation/index.ts` is today's `pi/extensions/steward/index.ts` (1,332 lines) minus the prose gate handler (`:1127-1153`), `isProseRevision`, `lastAssistantText` and the PR-gate comment path in `tool_call` (`:1081-1086` stays: it downgrades only the delegation gate). `HOOK_SCRIPT` (`:42`) becomes `hooks/delegation_hook.py`, called with `pi` as the first argument. The launch log moves from `resolve(state, "steward", ...)` (`:300`) to `steward-delegation`.
+- `plugins/steward-delegation/pi/extensions/steward-delegation/index.ts` is today's `pi/extensions/steward/index.ts` (1,332 lines) minus the prose gate handler (`:1127-1153`), `isProseRevision`, `lastAssistantText` and the PR-gate comment path in `tool_call` (`:1081-1086` stays: it downgrades only the delegation gate; see [Behavior changes](#behavior-changes-the-split-causes) for load order). `HOOK_SCRIPT` (`:42`) becomes `hooks/delegation_hook.py`, called with `pi` as the first argument. The launch log moves from `resolve(state, "steward", ...)` (`:300`) to `steward-delegation`.
 - `plugins/steward-prose-gate/pi/extensions/steward-prose-gate/index.ts` is new and small: a copy of `runHook` (`:96-150`) without the debug log, `lastAssistantText` (`:169-184`), `isProseRevision` (`:186-197`), the child check (`:519`), a `tool_call` handler for `bash` that blocks on a `pr-gate` deny, and today's `agent_before_settle` handler (`:1127-1153`). It notifies once when python3 is missing.
 
 ### Behavior changes the split causes
 
-- A `gh pr create` that the PR gate denies now also counts as one direct edit for the delegation gate, because the two PreToolUse hooks run independently (today the PR gate returns before the counter, `:1184-1199`). Accepted; the alternative couples the plugins **(orchestrator's call)**.
+- A `gh pr create` that the PR gate denies may also count as one direct edit for the delegation gate, because the two hooks run independently (today the PR gate returns before the counter, `:1184-1199`). On Claude Code it always counts. On pi every extension's `tool_call` handler runs on a bash call until one returns `block: true`, and that block stops the rest (`runner.ts:1249-1266`, [Appendix B](#appendix-b-harness-facts)), so the deny counts only when the delegation extension loads first. Accepted either way; the alternative couples the plugins **(orchestrator's call)**.
+- On pi the delegation extension's downgrade (`index.ts:1081-1086`) returns no block, so later handlers still run: a prose-gate deny still blocks. The downgrade touches only reasons that start with `DELEGATION_GATE_PREFIX`. The code stays as it is; only its comment changes, to name the prose-gate extension as the one that still blocks.
 - `STEWARD_DELEGATION_GATE=off` no longer turns off the PR gate.
 - The plainlanguage warning is text in the edict, not a hook warning.
 - Sessions without steward-orchestration no longer create the registry or carry the role check.
@@ -448,7 +446,7 @@ Done-check: `grep -rnE 'steward:[a-z]' plugins/` returns nothing. (The pi extens
 **(orchestrator's call, from the decision log)**: personal content leaves the shipped plugins and moves to operator config.
 
 - **"sauron" edict** (`skills/orchestrating/SKILL.md:21`, `onboarding-template.md:15`, `README.md:434`). Removed. The orchestrating skill instead says: if `<registry dir>/edict.md` exists, the primary sends its text verbatim in the onboarding message and secondaries follow it. No code reads the file **(orchestrator's call)**. The operator writes `~/.claude/orchestration/edict.md` from `git show v0.14.2:skills/orchestrating/SKILL.md` line 21.
-- **Zero em-dash rule.** It is the operator's rule, and it overrides the plainlanguage skill, which allows an em-dash for an ordinary aside (`common-skills/plainlanguage/SKILL.md:77`). Removed from every shipped text and check **(orchestrator's call)**: the edict sentence in rule 4 (`skills/delegating/SKILL.md:12`, `pi/skills/steward-delegating/SKILL.md:12`, `copilot/skills/delegating/SKILL.md:12`, `codex/skills/delegating/SKILL.md:40`), agent bodies (`agents/reviewer-opus-max.md:10`, `agents/writer-sonnet-medium.md:12` and their pi, Copilot and Codex copies), `onboarding-template.md:13`, `_COPILOT_FALLBACK_EDICT`, the gate messages, and the `EM_DASH` checks (`hooks/steward_hook.py:1145`, `1530`). The operator keeps the rule in two places: one line `\u2014` in `prose-patterns` (Python `re` reads `\u2014` as the character; one hit blocks, as today), and one sentence in `~/AGENTS.md`. If the operator prefers to keep the built-in check, keep `EM_DASH` in `prose_gate_hook.py` and skip the patterns line; nothing else in this design changes. Done-check: `grep -rniE 'em.?dash|2014' plugins/` finds only tests that assert the built-in check is gone.
+- **Em-dash rule.** The operator dropped the em-dash ban entirely **(operator decided)**. No shipped text or check carries it, and this design prescribes no edit to the operator's personal files. Remove it from: the edict sentence in rule 4 (`skills/delegating/SKILL.md:12`, `pi/skills/steward-delegating/SKILL.md:12`, `copilot/skills/delegating/SKILL.md:12`, `codex/skills/delegating/SKILL.md:40`), agent bodies (`agents/reviewer-opus-max.md:10`, `agents/writer-sonnet-medium.md:12` and their pi, Copilot and Codex copies), `onboarding-template.md:13`, `_COPILOT_FALLBACK_EDICT`, the gate messages, and the `EM_DASH` checks (`hooks/steward_hook.py:1145`, `1530`), with their tests. Done-check: `grep -rniE 'em.?dash|EM_DASH|u2014' plugins/` finds only tests that assert an em-dash does not block.
 
 ## Profiles and edict copies
 
@@ -464,7 +462,7 @@ The seven profiles stay in four hand-kept copies (`agents/`, `pi/agents/`, `copi
 
 Baseline at c5fd21b on the operator's machine, 2026-10-24: 608 Python tests, 2 failing (`test_pi_model_plan_apply` `test_version_is_pinned` and `test_pi_model_plan_resolver` `test_installed_version_is_the_mirrored_one`: installed pi-subagents is 0.82.0, mirrored is 0.78.0); 102 node tests, all passing. The two failures come from the machine, not the code. Either install `npm:pi-subagents@0.78.0` for the build or carry them as the known baseline; no step may add a failure.
 
-Each plugin owns `plugins/<name>/tests/` (Python) and `plugins/<name>/tests/pi/` (node). Plugin tests read only files inside their plugin folder. Shared fixtures (`StewardTestCase`, `run_hook`, `EM_DASH` from `tests/test_steward_hook.py:52`, imported by `test_copilot_harness.py:19` and `test_codex_harness.py:11`) are copied into each plugin's `tests/helpers.py`. Root `tests/` keeps repo-level checks only.
+Each plugin owns `plugins/<name>/tests/` (Python) and `plugins/<name>/tests/pi/` (node). Plugin tests read only files inside their plugin folder. Shared fixtures (`StewardTestCase`, `run_hook` from `tests/test_steward_hook.py`, imported by `test_copilot_harness.py:19` and `test_codex_harness.py:11`) are copied into each plugin's `tests/helpers.py`. Root `tests/` keeps repo-level checks only.
 
 The full suite is `npm test` from the repo root, which runs `package.json` `scripts.test`. At the end it is:
 ```
@@ -480,7 +478,7 @@ python3 -m unittest discover -s tests
 |-|-|
 | `test_steward_hook.py` `SessionStartTests` (`:123`) | delegation (injection, frontmatter, missing skill fails open); orchestration (registry created once, not overwritten, unwritable dir); dropped: plainlanguage warning tests |
 | `GateSubagentAndOffTests`, `GateCounterTests`, `GateModeFileTests`, `GateAllowlistTests`, `BashClassificationTests`, `DelegatedTests`, `AllowlistCwdResolutionTests`, `SanitizeSessionIdTests`, `CounterAtomicityTests` (`:216-470`, `782`, `1052-1135`) | delegation |
-| `PrGateTests` (`:702`), `ProseGateTests` (`:815`), `MarkerRegexTests` (`:1011`), `OperatorPatternTests` (`:1136`) | prose-gate; em-dash cases rewritten as operator-pattern cases; `test_clean_pr_body_passes_through_to_normal_gate` becomes one test per plugin |
+| `PrGateTests` (`:702`), `ProseGateTests` (`:815`), `MarkerRegexTests` (`:1011`), `OperatorPatternTests` (`:1136`) | prose-gate; em-dash cases dropped, plus one case that an em-dash alone does not block; `test_clean_pr_body_passes_through_to_normal_gate` becomes one test per plugin |
 | `HooksJsonTests` (`:1028`) | one per plugin, for its own hooks.json |
 | `test_copilot_harness.py` (63) | delegation (session-start, bound note, gate, agents parity, manifest); prose-gate (main-session record, `events.jsonl`, `task_complete`, PR gate) |
 | `test_codex_harness.py` (13) | delegation (profiles, installer, session-start); prose-gate (gate, prose-gate, fail open) |
@@ -491,13 +489,14 @@ python3 -m unittest discover -s tests
 | `tests/pi/steward-extension.test.mjs` | delegation; its PR-gate and prose-gate cases (the PR halves of `:150-198`, and `:319`, `:345-401`, `:429`) to prose-gate |
 | `tests/pi/steward-delegation-log`, `steward-model-apply`, `steward-model-plan`, `steward-write-stdout` tests, `profile_check.mjs`, `resolve_model.mjs` | delegation |
 
-New root tests: `tests/test_catalogs.py` (the `steward` entries pin `v0.14.2`; every other entry's path exists and its name matches its plugin manifest) and `tests/test_layout.py` (no file under `plugins/<a>/` names another plugin's folder or `steward_hook`; each plugin's manifests share one version; the root `package.json` pi paths exist; each plugin folder copied alone to a temp dir runs every hook mode for every harness it ships with a minimal payload and exits as its contract says: 0 for hook modes, 2 for the pi CLI modes on bad input, `hooks/steward_hook.py:299`, `361`).
+New root tests: `tests/test_catalogs.py` (the `steward` entries pin `v0.14.2`; every other entry's path exists and its name matches its plugin manifest) and `tests/test_layout.py` (no file under `plugins/<a>/` names another plugin's folder or `steward_hook`; each plugin's manifests share one version; no plugin folder holds a `package.json`; the root `package.json` pi paths exist; each plugin folder copied alone to a temp dir runs every hook mode for every harness it ships with a minimal payload and exits as its contract says: 0 for hook modes, 2 for the pi CLI modes on bad input, `hooks/steward_hook.py:299`, `361`).
 
 ## Release and migration
 
 - README: the root README becomes an index (what each plugin does, install sets per harness, "Staying on 0.14.2", local development and tests). Today's sections move to the plugin READMEs. Delegation: README.md:35-51 (profiles), 53-60 (hooks, delegation gate), 78-85 (gate mode), 87-324 (pi), 326-417 (Copilot) and 428-435 without the sauron quote, each minus its prose-gate parts. Prose gate: 61-76 (prose and PR gates, banned phrases) and the prose-gate parts of 289-305 and 398-417. Orchestration: the roles text and the `edict.md` note.
 - `docs/roadmap/orchestration-split.md` gets its status line changed to "Superseded by plugin-split.md".
 - Plugin releases are tagged `<plugin>--v<version>`.
+- "Staying on 0.14.2" (README index) covers the fallback from build step 1: pin or reinstall from the tag `v0.14.2`.
 
 ### Operator's machine
 
@@ -505,9 +504,9 @@ Claude Code, in each `CLAUDE_CONFIG_DIR` profile:
 1. `claude plugin uninstall steward@steward`, then `claude plugin marketplace update steward`.
 2. `claude plugin install steward-delegation@steward --scope user`, the same for `steward-prose-gate` and `steward-orchestration`.
 3. Keep plainlanguage deployed in `~/.claude/skills/plainlanguage/`, or switch to the common-skills plugin once it exists; not both.
-4. `mkdir -p ~/.claude/steward-delegation ~/.claude/steward-prose-gate`, `mv ~/.claude/steward/gate ~/.claude/steward-delegation/gate`, `mv ~/.claude/steward/prose-patterns ~/.claude/steward-prose-gate/prose-patterns`, add the line `\u2014` to that file, `rmdir ~/.claude/steward`.
+4. `mkdir -p ~/.claude/steward-delegation ~/.claude/steward-prose-gate`, `mv ~/.claude/steward/gate ~/.claude/steward-delegation/gate`, `mv ~/.claude/steward/prose-patterns ~/.claude/steward-prose-gate/prose-patterns`, `rmdir ~/.claude/steward`.
 5. Write `~/.claude/orchestration/edict.md` with the sauron text.
-6. In `~/AGENTS.md`: add the zero em-dash sentence; update the steward section (skill names, `~/.claude/steward-prose-gate/prose-patterns`, `~/.pi/agent/steward-prose-gate/prose-patterns`).
+6. In `~/AGENTS.md`: update the steward section (skill names, `~/.claude/steward-prose-gate/prose-patterns`, `~/.pi/agent/steward-prose-gate/prose-patterns`).
 
 Copilot:
 1. Close running Copilot sessions first; a session that outlives its plugin folder fails closed on every PreToolUse (README:356).
@@ -532,41 +531,43 @@ Guidance for the implementation plan, not the plan. Each step is one commit, abo
 | # | Step | Files | Done-check |
 |-|-|-|-|
 | 0 | Tag the monolith | `git tag -a v0.14.2 c5fd21b`; push the tag (operator authorizes) | `git rev-parse v0.14.2^{commit}` prints c5fd21b2600b6fcbd137db80fd30f5dd2317d341; `git ls-remote origin refs/tags/v0.14.2` is non-empty |
-| 1 | Pin the catalogs; README notice | `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json` (`steward` entries to the tag); `README.md` top notice with the pi pin; new `tests/test_catalogs.py` | suite; a scratch `CLAUDE_CONFIG_DIR` that adds this checkout as a marketplace installs `steward@steward` at 0.14.2 with `hooks/steward_hook.py` in its cache |
+| 1 | Pin the catalogs; README notice | `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json` (`steward` entries to the tag); `README.md` top notice with the pi pin; new `tests/test_catalogs.py` | suite; two checks on real installs. First, before the catalog change reaches main: in a scratch `CLAUDE_CONFIG_DIR`, install 0.14.2 the old way (add the git-URL marketplace that follows main, `claude plugin install steward@steward`), and in a scratch `COPILOT_HOME` run `copilot plugin install steward@steward`. Then, after the catalog change is on main: run `claude plugin marketplace update` and the Copilot marketplace refresh, and confirm each installed steward stays at 0.14.2, its hooks and skills still work (one edict injected, one gate deny), and nothing reinstalls. Last, a scratch `CLAUDE_CONFIG_DIR` that adds this checkout as a marketplace installs `steward@steward` at 0.14.2 with `hooks/steward_hook.py` in its cache. If a harness re-resolves and breaks the old install, the fix is the README "Staying on 0.14.2" section, which tells users to pin or reinstall from the tag; add no machinery |
 | 2 | Prose gate, Claude Code | `plugins/steward-prose-gate/hooks/prose_gate_hook.py` (claude), `data/ai-tells.txt`, `tests/helpers.py`, `tests/test_prose_gate_claude.py`; `package.json` scripts.test | suite; ported prose, PR, marker and operator-pattern cases pass; the word-list file parses to the source list |
 | 3 | Prose gate, Copilot | Copilot branch and `session-start` record in `prose_gate_hook.py`; `copilot/hooks.json`; `tests/test_prose_gate_copilot.py` | suite; main-session record and skip, `events.jsonl` wait, `task_complete` cases pass |
 | 4 | Prose gate, Codex | Codex branch; `codex/hooks.json`; `tests/test_prose_gate_codex.py` | suite; ported Codex gate and prose-gate cases pass |
 | 5 | Prose gate, pi | `pi/extensions/steward-prose-gate/index.ts`; `tests/pi/prose-gate-extension.test.mjs`; scripts.test node glob | suite; ported pi PR-gate, prose-gate, `isProseRevision`, `lastAssistantText`, child and no-python cases pass |
-| 6 | Prose gate packaging | its `.claude-plugin/`, `.codex-plugin/`, `.github/plugin/` manifests, `package.json`, `hooks/hooks.json`, `README.md`, `tests/test_prose_gate_manifests.py`; catalog entries | suite; `claude --plugin-dir plugins/steward-prose-gate` in a scratch session sends back a reply with two markers and denies a `gh pr create` whose body has two markers |
+| 6 | Prose gate packaging | its `.claude-plugin/`, `.codex-plugin/`, `.github/plugin/` manifests, `hooks/hooks.json`, `README.md`, `tests/test_prose_gate_manifests.py`; catalog entries | suite; `claude --plugin-dir plugins/steward-prose-gate` in a scratch session sends back a reply with two markers and denies a `gh pr create` whose body has two markers |
 | 7 | Orchestration hook | `plugins/steward-orchestration/hooks/orchestration_hook.py`, `hooks/hooks.json`, `tests/test_orchestration_hook.py`; scripts.test | suite; registry created once, never overwritten, unwritable dir still prints the context block |
 | 8 | Orchestration content and packaging | `git mv skills/orchestrating plugins/steward-orchestration/skills/`; namespace, sauron and `edict.md` edits; `.claude-plugin/plugin.json`, `README.md`; catalog entry; `tests/test_no_opus_max.py` template path | suite; `grep -rn sauron plugins/` is empty |
 | 9 | Delegation content move | `git mv` `agents/`, `skills/delegating/`, `copilot/agents/`, `copilot/skills/`, `codex/skills/`, `codex/install_agents.py`, `pi/agents/`, `pi/skills/` to the same paths under `plugins/steward-delegation/`; repoint the monolith's reads (`hooks/steward_hook.py:250`, `407`, `409`; `codex/steward.py:29`; root `.github/plugin/plugin.json`, `.codex-plugin/plugin.json`, `package.json` pi paths) and test path constants | suite with the same totals as step 8 |
 | 10 | Delegation hook, Claude Code | `plugins/steward-delegation/hooks/delegation_hook.py` (claude: session-start, gate, delegated), `tests/helpers.py`, `tests/test_delegation_claude.py`; scripts.test | suite; ported gate, counter, mode, allowlist, Bash-rule and `delegated` cases pass |
 | 11 | Delegation hook, Copilot and Codex | Copilot and Codex branches; `copilot/hooks.json`, `codex/hooks.json`; ported delegation parts of `test_copilot_harness.py` and `test_codex_harness.py`, profile parity included | suite; bound-profile note uses `steward-delegation:` keys |
 | 12 | Model plan move | `git mv hooks/model_plan*.py hooks/delegation_stats.py plugins/steward-delegation/hooks/`; pi branch and the three CLI modes in `delegation_hook.py`; one-line `_hook_module` repoint in the monolith (`hooks/steward_hook.py:302-308`); `git mv` the 13 model-plan and stats test files, switched to `delegation_hook.py pi ...`; retire the `BASE_COMMIT` tests | suite; model-plan totals drop only by the retired tests |
-| 13 | Delegation pi extension | `git mv pi/extensions/steward plugins/steward-delegation/pi/extensions/steward-delegation`; hook path and `pi` argument; prose and PR gate code out; log and plan paths to `steward-delegation` (`index.ts:300`, `model_plan.py:1907`, `model_plan_apply.py:154`, `delegation_stats.py:37-38`); `git mv tests/pi/*` minus cases ported in step 5; port the pi parts of `test_pi_harness.py`; root `package.json` pi field to its final shape | suite; `pi install <checkout>` in a scratch `PI_CODING_AGENT_DIR` with pi-subagents lists seven `steward.*` agents |
-| 14 | Edict texts | the four edicts, `routing.md`, agent bodies (four copies); namespaces, Role check out, plainlanguage fallback sentence in, em-dash text out, Hooks sections with new paths and env; `git mv` `test_routing_tables.py`, `test_pi_edict_2d.py` and the skill and agent parts of `test_no_opus_max.py` into the plugin's tests | suite; the `steward:[a-z]` and em-dash greps above are clean |
-| 15 | Delegation packaging | its four manifests, `hooks/hooks.json`, `README.md`, version test; catalog entries | suite; `claude --plugin-dir plugins/steward-delegation` in a scratch session injects the edict and denies a second direct edit |
-| 16 | Retire the monolith | delete `hooks/steward_hook.py`, root `hooks/hooks.json`, `codex/steward.py`, `codex/hooks.json`, `copilot/hooks.json`, root `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.github/plugin/plugin.json`; delete `tests/test_steward_hook.py`, `test_copilot_harness.py`, `test_codex_harness.py`, `test_pi_harness.py` after checking each test is ported or listed as retired | suite; `grep -rn steward_hook --exclude-dir=docs .` is empty |
-| 17 | Repo-level tests | `tests/test_layout.py` | suite; the copied-folder smoke runs for all three plugins |
-| 18 | Docs | root `README.md`, the three plugin READMEs, status line of `orchestration-split.md`, pointers in `codex-port.md` and `copilot-port.md` | suite; every install command in the READMEs was run in step 19 |
-| 19 | Live checks | none (scratch config dirs per harness) | Claude Code, Copilot, Codex and pi each: install the new plugins from the checkout, see one prose-gate block, one PR-gate deny, and (except Codex) one delegation-gate deny; Copilot finds `.github/plugin/plugin.json` inside a `plugins/<name>/` folder |
-| 20 | Merge and tag | merge to main with `--no-ff`; tags `steward-delegation--v0.15.0`, `steward-prose-gate--v0.15.0`, `steward-orchestration--v0.15.0` (operator authorizes the push) | tags point at the merge commit |
-| 21 | Operator machine | the checklist above | each harness starts a session with one edict and no duplicate gates |
-| 22 | plainlanguage manifests | common-skills repo | `claude plugin install plainlanguage@stackhouse-common` in a scratch profile lists the skill with its two sibling files |
+| 13 | Pi handler order check | none; re-read `emitToolCall` in `/mnt/agent-storage/vader/src/earendil-pi/packages/coding-agent/src/core/extensions/runner.ts` for the pi version in use, and load two scratch extensions that both register a `tool_call` handler on `bash` | the answer in [Appendix B](#appendix-b-harness-facts) still holds: every handler runs in load order until one returns `block: true`, and a block stops the rest. If the source now says otherwise, fix Appendix B and the pi bullets in [Behavior changes](#behavior-changes-the-split-causes) before step 14 |
+| 14 | Delegation pi extension | `git mv pi/extensions/steward plugins/steward-delegation/pi/extensions/steward-delegation`; hook path and `pi` argument; prose and PR gate code out; log and plan paths to `steward-delegation` (`index.ts:300`, `model_plan.py:1907`, `model_plan_apply.py:154`, `delegation_stats.py:37-38`); `git mv tests/pi/*` minus cases ported in step 5; port the pi parts of `test_pi_harness.py`; root `package.json` pi field to its final shape; the comment at `index.ts:1081-1086` names the prose-gate extension as the one that still blocks | suite; `pi install <checkout>` in a scratch `PI_CODING_AGENT_DIR` with pi-subagents lists seven `steward.*` agents |
+| 15 | Plainlanguage preload check | none; scratch Claude Code session with `plainlanguage` loaded as a plugin (`--plugin-dir` on a scratch copy of the step 24 manifests) | an agent whose `skills:` lists `plainlanguage` has the skill text in its context. If not, the writer profile frontmatter (`agents/writer-sonnet-medium.md:6-7`) names the form that works (the namespaced `plainlanguage:plainlanguage`, once an unknown name in that list is confirmed ignored rather than fatal), or drops the preload and relies on the edict text naming the skill. Step 16 writes whichever form wins |
+| 16 | Edict texts | the four edicts, `routing.md`, agent bodies (four copies); namespaces, Role check out, plainlanguage fallback sentence in, em-dash text out, Hooks sections with new paths and env; `git mv` `test_routing_tables.py`, `test_pi_edict_2d.py` and the skill and agent parts of `test_no_opus_max.py` into the plugin's tests | suite; the `steward:[a-z]` grep in [Names](#names) and the em-dash grep in [Personal content](#personal-content) are clean |
+| 17 | Delegation packaging | its three manifests, `hooks/hooks.json`, `README.md`, version test; catalog entries | suite; `claude --plugin-dir plugins/steward-delegation` in a scratch session injects the edict and denies a second direct edit |
+| 18 | Retire the monolith | delete `hooks/steward_hook.py`, root `hooks/hooks.json`, `codex/steward.py`, `codex/hooks.json`, `copilot/hooks.json`, root `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json`, `.github/plugin/plugin.json`; delete `tests/test_steward_hook.py`, `test_copilot_harness.py`, `test_codex_harness.py`, `test_pi_harness.py` after checking each test is ported or listed as retired | suite; `grep -rn steward_hook --exclude-dir=docs .` is empty |
+| 19 | Repo-level tests | `tests/test_layout.py` | suite; the copied-folder smoke runs for all three plugins |
+| 20 | Docs | root `README.md`, the three plugin READMEs, status line of `orchestration-split.md`, pointers in `codex-port.md` and `copilot-port.md` | suite; every install command in the READMEs was run in step 21 |
+| 21 | Live checks | none (scratch config dirs per harness) | Claude Code, Copilot, Codex and pi each: install the new plugins from the checkout, see one prose-gate block, one PR-gate deny, and (except Codex) one delegation-gate deny; Copilot finds `.github/plugin/plugin.json` inside a `plugins/<name>/` folder |
+| 22 | Merge and tag | merge to main with `--no-ff`; tags `steward-delegation--v0.15.0`, `steward-prose-gate--v0.15.0`, `steward-orchestration--v0.15.0` (operator authorizes the push) | tags point at the merge commit |
+| 23 | Operator machine | the checklist above | each harness starts a session with one edict and no duplicate gates |
+| 24 | plainlanguage manifests | common-skills repo | `claude plugin install plainlanguage@stackhouse-common` in a scratch profile lists the skill with its two sibling files |
 
-The prose-gate steps (2-6) and the orchestration steps (7-8) can swap. Step 13 needs step 5. Step 22 can run any time.
+The prose-gate steps (2-6) and the orchestration steps (7-8) can swap. Step 14 needs step 5, and step 13 comes before it. Step 15 comes before step 16. Step 24 can run any time, but step 15 needs a scratch copy of its manifests.
 
 ## Decided versus left to the builder
 
-Operator decided (details in [Appendix A](#appendix-a-decision-log)): the four plugins, their names and boundaries; the unix principle; no backward compatibility for the new plugins; both gates in their own plugin; the word list in a data file with no user override; the prose-patterns file as personal config in the prose gate's config dir; the reorg in this repo; the marketplace out of scope; tag and pin; orchestration Claude Code only and depending on delegation; model plan and stats in delegation; dependencies manual on every harness; keep it simple.
+Operator decided (details in [Appendix A](#appendix-a-decision-log)): the four plugins, their names and boundaries; the unix principle; no backward compatibility for the new plugins; both gates in their own plugin; the word list in a data file with no user override; the prose-patterns file as personal config in the prose gate's config dir; the reorg in this repo; the marketplace out of scope; tag and pin; orchestration Claude Code only and depending on delegation; model plan and stats in delegation; dependencies manual on every harness; no em-dash rule in the gate or any shipped text; keep it simple.
 
 Orchestrator's calls carried from the decision log: one hook script per plugin with copied helpers and no cross-plugin imports; a config dir, switch and env names per plugin; plugins as folders in this repo with their own manifests, versions, hooks and tests; plainlanguage stays in common-skills; personal content leaves the plugins; this file supersedes orchestration-split.md.
 
 Orchestrator's calls new in this document (the operator should check these):
-1. Versions start at 0.15.0; tags `<plugin>--v<version>`; the root `package.json` version is not a release number.
+1. Versions start at 0.15.0; tags `<plugin>--v<version>` (the release script clones by tag and the plugins version independently); the root `package.json` version is not a release number.
 2. Root catalogs keep the pinned `steward` entry and list the new plugins; marketplace names unchanged.
-3. Pi: root `package.json` exposes delegation and prose gate; per-plugin `package.json` for local installs; filters for selective install; no migration code.
+3. Pi: the root `package.json` is the only pi manifest and exposes delegation and prose gate; filters cover selective and local installs; no per-plugin `package.json`; no migration code.
 4. Pi profile, skill, command and plan-file names and Codex agent names unchanged.
 5. Harness passed as the first argument; `STEWARD_HARNESS` removed.
 6. Prose gate switch is `on|off`, one switch for both gates.
@@ -574,17 +575,17 @@ Orchestrator's calls new in this document (the operator should check these):
 8. Missing-dependency notes are edict text, not file probes; delegation owns the plainlanguage note.
 9. The Role check moves into steward-orchestration's SessionStart block.
 10. The registry stays at `~/.claude/orchestration/`; the sauron text goes to `edict.md` beside it, read by the primary through the skill text.
-11. The em-dash rule leaves all shipped texts and checks; the operator keeps it in `prose-patterns` and `~/AGENTS.md`.
-12. Skills keep the names `delegating` and `orchestrating`.
-13. A PR-gate deny now also counts as one direct edit for the delegation gate.
-14. `ai-tells.txt` format; retiring the `BASE_COMMIT` regression tests; new root tests.
+11. Skills keep the names `delegating` and `orchestrating`.
+12. A PR-gate deny may also count as one direct edit for the delegation gate: always on Claude Code, and on pi when the delegation extension loads first.
+13. `ai-tells.txt` format; retiring the `BASE_COMMIT` regression tests; new root tests.
+14. Two check steps ahead of the steps they gate: pi handler order (step 13) and plainlanguage preload (step 15), each with a fallback.
 
 Left to the builder: function bodies and exact wording of messages; how tests are grouped within a plugin; README prose; the common-skills folder shape for plainlanguage.
 
 ## Open questions
 
-- Does a Claude Code agent's `skills: [plainlanguage]` (`agents/writer-sonnet-medium.md:6-7`) still preload the skill when plainlanguage comes from a plugin, where its full name is `plainlanguage:plainlanguage`? Check at step 19; if not, list the namespaced name too, after confirming an unknown name in that list is ignored rather than fatal.
-- Checks for step 19 that need no operator input, each with its fallback:
+- Checks for step 21 that need no operator input, each with its fallback:
+  - Old installs keep 0.14.2 after the catalog change (checked earlier, at step 1): a harness that re-resolves and breaks one falls back to the README "Staying on 0.14.2" pin or reinstall from the tag.
   - Codex accepts `ref` on a `url` source (else `git-subdir` with `path: "./"`).
   - Copilot finds `.github/plugin/plugin.json` in a subfolder (FINDINGS.md lists it as unconfirmed).
   - Codex loads a hooks-only `.codex-plugin/plugin.json` (prose gate has no `skills`; every documented example has one). A load failure here is a manifest question, not a hook bug.
@@ -610,7 +611,7 @@ The name `plainlanguage` stays as is; the other three are prefixed `steward-`. T
 
 **Prose and PR gate placement (roundtable deliberate, 2026-10-24, 8 panelists).**
 - A (gates in plainlanguage): antigravity, codex, kimi-k3, minimax. C (own plugin): deepseek, qwen, glm-5.3, mimo. B (in delegation): nobody. D (split the two gates): rejected by all 8.
-- Unanimous: the two gates stay together (they share the markers, `_clean_text`, the em-dash rule and the operator patterns loader); gates do not belong in delegation (Codex runs the prose and PR gates without the delegation gate); gates need their own switch (today `STEWARD_GATE=off` also disables the PR gate, because `pr_gate_violation` runs inside `cmd_gate`).
+- Unanimous: the two gates stay together (they share the markers, `_clean_text`, the em-dash rule, since dropped, and the operator patterns loader); gates do not belong in delegation (Codex runs the prose and PR gates without the delegation gate); gates need their own switch (today `STEWARD_GATE=off` also disables the PR gate, because `pr_gate_violation` runs inside `cmd_gate`).
 - All four A voters said they would pick C if plainlanguage must stay hook-free. The unix principle settles it: C. Operator accepted.
 - Keep today's behavior that subagent `gh pr` calls are not gated (glm). Codex's current hook set (Bash PreToolUse and Stop, no delegation gate) is exactly steward-prose-gate's hook set (antigravity, kimi).
 
@@ -624,7 +625,16 @@ The name `plainlanguage` stays as is; the other three are prefixed `steward-`. T
 
 **Resumability (operator requirement, relayed by the coordinator).** Work may stop when quota runs out and resume in a fresh session, so this document carries its own decision log and harness facts, and the build is cut into small steps that each leave the suite green.
 
-**Orchestrator calls recorded in the log before this document.** One hook script per plugin; the 1,638-line `hooks/steward_hook.py` is retired; shared helpers (config dir, harness detection and the like) are copied, about 30 lines each; no cross-plugin imports at runtime. Each plugin has its own config dir and switch, for example `<config>/steward-prose-gate/{gate,prose-patterns}` and `<config>/steward-delegation/{gate,allowlist}`; env vars renamed per plugin. All three steward plugins live as separate folders in this repo (`plugins/<name>/`), each with its own per-harness manifests, version, hooks and tests. plainlanguage source stays canonical in common-skills; its plugin manifests are added there. Personal content ("sauron" edict text, em-dash override) leaves the shipped plugins and moves to operator config. This design supersedes orchestration-split.md.
+**Orchestrator calls recorded in the log before this document.** One hook script per plugin; the 1,638-line `hooks/steward_hook.py` is retired; shared helpers (config dir, harness detection and the like) are copied, about 30 lines each; no cross-plugin imports at runtime. Each plugin has its own config dir and switch, for example `<config>/steward-prose-gate/{gate,prose-patterns}` and `<config>/steward-delegation/{gate,allowlist}`; env vars renamed per plugin. All three steward plugins live as separate folders in this repo (`plugins/<name>/`), each with its own per-harness manifests, version, hooks and tests. plainlanguage source stays canonical in common-skills; its plugin manifests are added there. Personal content (the "sauron" edict text) leaves the shipped plugins and moves to operator config; the em-dash override was later dropped (see below). This design supersedes orchestration-split.md.
+
+**Builder-check decisions (2026-10-24, after the first draft).**
+- Em-dash rule (operator decided). The operator dropped the em-dash ban entirely. steward-prose-gate has no em-dash rule, so `EM_DASH` leaves the built-in check, its messages, its tests and the word list. Shipped edicts and texts carry none. The gate keeps the AI-tell word list (two or more distinct hits) and the operator's prose-patterns. The operator's personal files are out of scope; this design prescribes no edit to them.
+- Old installs (orchestrator's call). Build step 1 installs 0.14.2 the old way on Claude Code and Copilot, changes the catalog, runs the marketplace update, and confirms nothing moves. Fallback: README "Staying on 0.14.2" says to pin or reinstall from the tag. No machinery.
+- plainlanguage preload (orchestrator's call). Build step 15 checks that a Claude Code agent's `skills: [plainlanguage]` preloads a plugin-installed skill, before step 16 rewrites the agent copies. Fallback: name the working form in the writer profile, or drop the preload and rely on the edict text.
+- pi handler order (orchestrator's call). Read in pi source: every extension's `tool_call` handler runs until one blocks, and a block stops the rest. A PR-gate deny may count as an edit on pi, as on Claude Code. Accepted either way; no cross-plugin coupling. Build step 13 re-checks it.
+- pi manifest (orchestrator's call). The root `package.json` is the only pi manifest, because pi cannot git-install a subfolder. Local development uses the root package with resource filters.
+- Tags (orchestrator's call). The marketplace release script clones a plugin's release by tag (hatch FINDINGS.md "Release flow", step 1), and the plugins version independently. Claude Code dependency ranges are not the reason.
+- `get_plugin_root` is copied into steward-prose-gate as well, to find `data/ai-tells.txt`.
 
 ## Appendix B: Harness facts
 
@@ -632,7 +642,7 @@ Researched 2026-10-24 unless marked. Each harness's own docs are the source; rec
 
 **Claude Code.** Source: https://code.claude.com/docs/en/plugins/dependencies and https://code.claude.com/docs/en/plugins/marketplace-reference.md.
 - A plugin may list `dependencies` in `.claude-plugin/plugin.json` or its marketplace entry; missing ones are auto-installed. A dependency from another marketplace needs `allowCrossMarketplaceDependenciesOn` in the root marketplace. The operator declined the field.
-- Version ranges resolve against git tags named `<plugin-name>--v<version>`; "The plugin-name prefix lets one marketplace repository host several plugins with independent version histories."
+- Version ranges (which steward does not use) resolve against git tags named `<plugin-name>--v<version>`; "The plugin-name prefix lets one marketplace repository host several plugins with independent version histories."
 - Remote plugin sources include `{"source":"github","repo":"owner/repo","ref":"...","sha":"..."}`, `url` and `git-subdir` (FINDINGS.md "Harness facts", 2026-10-03). Plugin id is `<name>@<marketplace>`; skills and agents are namespaced by the manifest name.
 
 **Codex CLI.** Source: https://developers.openai.com/codex/plugins/build.
@@ -652,5 +662,6 @@ Researched 2026-10-24 unless marked. Each harness's own docs are the source; rec
 - "Git tags and commits are also pinned; package updates reconcile the checkout but do not move a configured ref." (`docs/packages.md:40`)
 - Git packages are identified "by repository URL without the ref" (`docs/packages.md:129`), so one scope holds one install of this repo.
 - Filters narrow one package's `extensions`, `skills`, `prompts`, `themes`: `!pattern`, `+path`, `-path`; "Filters narrow the package manifest. They do not expose resources that the package itself did not declare." (`docs/packages.md:96-121`)
+- `tool_call` dispatch (`src/core/extensions/runner.ts:1249-1266`, re-read at build step 13): the handlers of every extension run in load order on one call. A result with `block: true` returns at once and skips the remaining handlers; any other result does not stop the chain. Later handlers see earlier mutations (`src/core/extensions/types.ts:1254`).
 - A package can depend on another pi package only by bundling it through npm `dependencies` (`docs/packages.md:80-94`).
 - A local path install loads in place without copying (`docs/packages.md:38`, `42`).
