@@ -125,7 +125,7 @@ Before the marketplace, plainlanguage was a skill folder you copied into your ha
 
 ## Moving from the steward marketplace
 
-Steward 0.15.0 and later ship only from the Engen-Tech marketplace. To move an install:
+Steward 1.0.0 and later ship only from the Engen-Tech marketplace. To move an install:
 
 | You have | Do this |
 |-|-|
