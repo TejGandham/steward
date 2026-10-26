@@ -8,12 +8,23 @@ import unittest
 from helpers import PLUGIN_ROOT
 
 NAME = "steward-prose-gate"
-VERSION = "1.0.0"
+VERSION = "1.0.1"
+DISPLAY_NAME = "Steward Prose Gate"
 MANIFESTS = (
     ".claude-plugin/plugin.json",
     ".codex-plugin/plugin.json",
     ".github/plugin/plugin.json",
 )
+
+AUTHOR = {"name": "Engen Inc.", "url": "https://engen.tech"}
+HOMEPAGE = "https://engen.tech"
+
+
+def png_size(path):
+    with open(path, "rb") as f:
+        head = f.read(24)
+    assert head[:8] == b"\x89PNG\r\n\x1a\n", path
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
 
 
 def load(path):
@@ -44,6 +55,30 @@ class ManifestTests(unittest.TestCase):
         data = load(PLUGIN_ROOT / ".github/plugin/plugin.json")
         self.assertEqual(data["hooks"], "copilot/hooks.json")
         self.assertTrue((PLUGIN_ROOT / "copilot" / "hooks.json").is_file())
+
+class BrandingTests(unittest.TestCase):
+    def test_every_manifest_names_engen_as_author_and_homepage(self):
+        for rel in MANIFESTS:
+            with self.subTest(manifest=rel):
+                data = load(PLUGIN_ROOT / rel)
+                self.assertEqual(data["author"], AUTHOR)
+                if rel != ".codex-plugin/plugin.json":
+                    self.assertEqual(data["homepage"], HOMEPAGE)
+
+    def test_claude_manifest_display_name(self):
+        data = load(PLUGIN_ROOT / ".claude-plugin/plugin.json")
+        self.assertEqual(data["displayName"], DISPLAY_NAME)
+
+    def test_codex_interface_branding(self):
+        interface = load(PLUGIN_ROOT / ".codex-plugin/plugin.json")["interface"]
+        self.assertEqual(interface["displayName"], DISPLAY_NAME)
+        self.assertEqual(interface["developerName"], "Engen Inc.")
+        self.assertEqual(interface["websiteURL"], HOMEPAGE)
+        self.assertEqual(interface["brandColor"], "#B7364A")
+        self.assertEqual(interface["logo"], "./assets/logo.png")
+        self.assertEqual(interface["composerIcon"], "./assets/icon.png")
+        self.assertEqual(png_size(PLUGIN_ROOT / interface["logo"]), (512, 512))
+        self.assertEqual(png_size(PLUGIN_ROOT / interface["composerIcon"]), (128, 128))
 
 
 class HooksJsonTests(unittest.TestCase):
