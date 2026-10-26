@@ -1,0 +1,31 @@
+# Release one steward plugin to github.com/Engen-Tech/plugin-marketplace.
+# Only a pushed release tag starts it: one tag, one plugin, one marketplace
+# commit. See docs "Release pipeline (product side)" in the marketplace repo.
+name: release-marketplace
+
+on:
+  push:
+    tags: ["steward-delegation--v*", "steward-prose-gate--v*", "steward-orchestration--v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Release to the marketplace
+        env:
+          MARKETPLACE_TOKEN: ${{ secrets.MARKETPLACE_TOKEN }}
+          GIT_AUTHOR_NAME: Tej
+          GIT_AUTHOR_EMAIL: 46010260+TejGandham@users.noreply.github.com
+          GIT_COMMITTER_NAME: Tej
+          GIT_COMMITTER_EMAIL: 46010260+TejGandham@users.noreply.github.com
+        run: scripts/release_marketplace.sh "$GITHUB_REF_NAME"

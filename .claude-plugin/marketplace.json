@@ -13,21 +13,6 @@
         "url": "https://github.com/TejGandham/steward.git",
         "ref": "v0.14.2"
       }
-    },
-    {
-      "name": "steward-delegation",
-      "description": "Delegation edict: pinned subagent profiles and a delegation gate.",
-      "source": "./plugins/steward-delegation"
-    },
-    {
-      "name": "steward-prose-gate",
-      "description": "Blocks replies and PR bodies that read like AI-generated text.",
-      "source": "./plugins/steward-prose-gate"
-    },
-    {
-      "name": "steward-orchestration",
-      "description": "Primary and secondary session roles for multi-session initiatives (Claude Code only).",
-      "source": "./plugins/steward-orchestration"
     }
   ]
 }

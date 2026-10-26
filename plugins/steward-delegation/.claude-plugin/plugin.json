@@ -1,12 +1,12 @@
 {
   "name": "steward-delegation",
   "description": "Delegation edict for Claude Code: seven pinned subagent profiles chosen by task complexity, and a gate that denies a second direct edit on the main thread.",
-  "version": "0.15.0",
+  "version": "1.0.0",
   "author": {
     "name": "Tej Gandham"
   },
   "repository": "https://github.com/tejgandham/steward",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "keywords": [
     "delegation",
     "subagents",

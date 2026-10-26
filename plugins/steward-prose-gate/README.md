@@ -5,7 +5,7 @@ steward-prose-gate stops replies and pull request text that read like AI-generat
 - **Prose gate**: when the agent finishes a reply, the gate checks the reply. If it finds two or more different AI-writing tells, or any of your own banned phrases, it sends the reply back once and asks for a revision.
 - **PR-body gate**: on `gh pr create` or `gh pr edit`, the gate checks the command text, which holds the PR title and body, and the file that `--body-file` or `-F` names. If it finds two or more different tells, or any banned phrase, it denies the command.
 
-The block messages say to revise with the plainlanguage skill. The plugin does not need that skill: if it is not installed, the agent revises the text without it.
+The block messages say to revise with the plainlanguage skill, which is a separate plugin, `plainlanguage@engen-tech`. The plugin does not need that skill: if it is not installed, the agent revises the text without it.
 
 Text in code blocks and inline code is never checked, so a banned word in backticks passes.
 
@@ -13,13 +13,13 @@ The gates work on Claude Code, GitHub Copilot, Codex and pi. Each one fails open
 
 ## Install
 
-The plugin needs nothing else. It pairs well with the plainlanguage skill, and with steward-delegation if you use the delegation edict.
+The plugin installs from the Engen-Tech marketplace, [Engen-Tech/plugin-marketplace](https://github.com/Engen-Tech/plugin-marketplace). It needs nothing else. It pairs well with the plainlanguage skill, and with steward-delegation if you use the delegation edict.
 
 Claude Code:
 
 ```
-claude plugin marketplace add tejgandham/steward
-claude plugin install steward-prose-gate@steward --scope user
+claude plugin marketplace add https://github.com/Engen-Tech/plugin-marketplace.git
+claude plugin install steward-prose-gate@engen-tech --scope user
 ```
 
 If you use several `CLAUDE_CONFIG_DIR` profiles, install once per profile.
@@ -27,8 +27,8 @@ If you use several `CLAUDE_CONFIG_DIR` profiles, install once per profile.
 GitHub Copilot:
 
 ```
-copilot plugin marketplace add tejgandham/steward
-copilot plugin install steward-prose-gate@steward
+copilot plugin marketplace add Engen-Tech/plugin-marketplace
+copilot plugin install steward-prose-gate@engen-tech
 ```
 
 Close running Copilot sessions before you install, remove or replace the plugin. A running session keeps the hooks of a deleted plugin folder, and Copilot then denies every shell command in it.
@@ -36,15 +36,15 @@ Close running Copilot sessions before you install, remove or replace the plugin.
 Codex:
 
 ```
-codex plugin marketplace add tejgandham/steward
-codex plugin add steward-prose-gate@steward-codex
+codex plugin marketplace add Engen-Tech/plugin-marketplace
+codex plugin add steward-prose-gate@engen-tech
 ```
 
-A local checkout path works in place of `tejgandham/steward`. Checked on codex-cli 0.164.0. In an interactive session, review and trust the two hooks once with `/hooks`. In `codex exec`, hooks of an untrusted plugin are skipped silently: no gate, no warning. For automation, run `codex exec --dangerously-bypass-hook-trust`. The Codex docs name that flag for vetted automation.
+In an interactive session, review and trust the two hooks once with `/hooks`. In `codex exec`, hooks of an untrusted plugin are skipped silently: no gate, no warning. For automation, run `codex exec --dangerously-bypass-hook-trust`. The Codex docs name that flag for vetted automation.
 
-pi: the repository's root package holds the pi extension, so `pi install git:github.com/tejgandham/steward` installs it. The root README of the repository shows how to install only the prose gate.
+pi: the marketplace's root package holds the pi extension, so `pi install git:github.com/Engen-Tech/plugin-marketplace` installs it. The [steward README](https://github.com/TejGandham/steward#pi) shows how to load only the prose gate.
 
-For local development, run Claude Code against this folder:
+For local development from a steward checkout, run Claude Code against this folder. This is not a way to install the plugin.
 
 ```
 claude --plugin-dir /path/to/steward/plugins/steward-prose-gate

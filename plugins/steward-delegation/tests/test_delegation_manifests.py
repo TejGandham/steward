@@ -1,14 +1,14 @@
 """Packaging tests for steward-delegation: its three manifests, the Claude
-Code hooks.json, and its entries in the two root marketplace catalogs."""
+Code hooks.json. The plugin ships from the Engen-Tech marketplace, so the
+root catalogs here no longer list it (tests/test_catalogs.py)."""
 
 import json
 import unittest
 
 from helpers import PLUGIN_ROOT
 
-REPO_ROOT = PLUGIN_ROOT.parent.parent
 NAME = "steward-delegation"
-VERSION = "0.15.0"
+VERSION = "1.0.0"
 MANIFESTS = (
     ".claude-plugin/plugin.json",
     ".codex-plugin/plugin.json",
@@ -19,14 +19,6 @@ MANIFESTS = (
 def load(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
-
-
-def catalog_entry(rel_path):
-    catalog = load(REPO_ROOT / rel_path)
-    entries = [p for p in catalog["plugins"] if p["name"] == NAME]
-    if len(entries) != 1:
-        raise AssertionError("%s has %d %s entries" % (rel_path, len(entries), NAME))
-    return catalog, entries[0]
 
 
 class ManifestTests(unittest.TestCase):
@@ -106,26 +98,6 @@ class HooksJsonTests(unittest.TestCase):
         self.assertEqual(len(post), 1)
         self.assertEqual(post[0]["matcher"], "^(Task|Agent)$")
         self.assertEqual(post[0]["hooks"], [self._hook("delegated", 10)])
-
-
-class CatalogTests(unittest.TestCase):
-    def test_claude_catalog_entry(self):
-        _, entry = catalog_entry(".claude-plugin/marketplace.json")
-        self.assertEqual(entry["source"], "./plugins/steward-delegation")
-        self._assert_resolves(entry["source"], ".claude-plugin/plugin.json")
-
-    def test_codex_catalog_entry(self):
-        catalog, entry = catalog_entry(".agents/plugins/marketplace.json")
-        self.assertEqual(entry["source"], {"source": "local", "path": "./plugins/steward-delegation"})
-        steward = [p for p in catalog["plugins"] if p["name"] == "steward"][0]
-        self.assertEqual(entry["policy"], steward["policy"])
-        self.assertEqual(entry["category"], steward["category"])
-        self._assert_resolves(entry["source"]["path"], ".codex-plugin/plugin.json")
-
-    def _assert_resolves(self, rel_dir, manifest):
-        plugin_dir = (REPO_ROOT / rel_dir).resolve()
-        self.assertEqual(plugin_dir, PLUGIN_ROOT)
-        self.assertEqual(load(plugin_dir / manifest)["name"], NAME)
 
 
 if __name__ == "__main__":

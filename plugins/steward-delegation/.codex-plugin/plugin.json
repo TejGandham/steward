@@ -1,12 +1,12 @@
 {
   "name": "steward-delegation",
-  "version": "0.15.0",
+  "version": "1.0.0",
   "description": "Delegate work to seven OpenAI role profiles in Codex CLI and the ChatGPT desktop app.",
   "author": {
     "name": "Tej Gandham"
   },
   "repository": "https://github.com/tejgandham/steward",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "keywords": [
     "delegation",
     "subagents"
