@@ -36,7 +36,12 @@ class ManifestTests(unittest.TestCase):
 
     def test_name_and_version(self):
         self.assertEqual(self.manifest["name"], "steward-orchestration")
-        self.assertEqual(self.manifest["version"], "1.0.0")
+        self.assertEqual(self.manifest["version"], "1.0.1")
+
+    def test_branding(self):
+        self.assertEqual(self.manifest["displayName"], "Steward Orchestration")
+        self.assertEqual(self.manifest["author"], {"name": "Engen Inc.", "url": "https://engen.tech"})
+        self.assertEqual(self.manifest["homepage"], "https://engen.tech")
 
     def test_no_dependencies_field(self):
         self.assertNotIn("dependencies", self.manifest)
