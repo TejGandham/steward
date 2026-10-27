@@ -8,7 +8,7 @@ import unittest
 from helpers import PLUGIN_ROOT
 
 NAME = "steward-delegation"
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 DISPLAY_NAME = "Steward Delegation"
 MANIFESTS = (
     ".claude-plugin/plugin.json",
