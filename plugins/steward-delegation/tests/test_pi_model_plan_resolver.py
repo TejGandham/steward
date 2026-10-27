@@ -24,15 +24,15 @@ from pathlib import Path
 
 from test_pi_model_plan import mp
 
-PI_SUBAGENTS_MIRRORED = "0.78.0"
+PI_SUBAGENTS_MIRRORED = "0.83.0"
 HELPER = Path(__file__).resolve().parent / "pi" / "resolve_model.mjs"
 
 # The mirrors that are not differential-tested here; re-read them on a version change.
 NON_DIFFERENTIAL_MIRRORS = (
-    "PS/src/agents/agents.js:1073-1132,1237-1257,1374-1387 (override layering, defaults, false clears)",
-    "PS/src/agents/agents.js:573-652 (findConfiguredProjectRoot)",
-    "PS/src/agents/agents.js:1611-1758,1891-1910,2253-2414 (agent discovery, runtime names, scan dirs)",
-    "PS/src/agents/agents.js:2563 (modelScope project ?? user)",
+    "PS/src/agents/agents.js:1089-1148,1253-1273,1390-1403 (override layering, defaults, false clears)",
+    "PS/src/agents/agents.js:582-661 (findConfiguredProjectRoot)",
+    "PS/src/agents/agents.js:1627-1774,1907-1926,2269-2430 (agent discovery, runtime names, scan dirs)",
+    "PS/src/agents/agents.js:2579 (modelScope project ?? user)",
     "PS/src/agents/agent-selection.js:1-21 (later sources replace earlier ones)",
     "PS/src/runs/shared/model-scope.js:22-64,115-145 (modelScope globs and checks)",
     "PS/src/runs/shared/child-tool-plan.js:48-57 (:level suffix)",
@@ -165,6 +165,18 @@ FRONTMATTER = [
     "---\nkey_with-dash: v\nempty:\nlast: |\n",
     "---\nname:   steward.coder   \ndescription:\tx\t\n---\n",
     "---\nname: a\u2028b\ndescription: x\n---\n",
+    # Comment lines are skipped outside | and > blocks (pi-subagents 0.83.0 frontmatter.js:96-99).
+    "---\n# leading comment\nname: x\n  # indented comment\nmodel: y\n---\n",
+    "---\ntools:\n  - read\n  # not an item\n  - bash\nmodel: x/y\n---\n",
+    "---\ndescription:\n  one\n# column-0 comment\n  two\nmodel: x/y\n---\n",
+    "---\nname: |\n  line one\n  # kept in a literal block\nmodel: x/y\n---\n",
+    "---\nname: >\n  one\n  # kept in a folded block\nthinking: high\n---\n",
+    "---\nname:\n#only a comment\nmodel: x/y\n---\n",
+    # Quoted name lists keep their item quotes (frontmatter.js:128-132).
+    "---\ntools: \"read\", \"bash\"\nexcludeTools: 'a','b'\nextensions: \"x\" ,\"y\"\n---\n",
+    "---\ntools: \"read\"\nmutationTools: \"write, edit\"\nsubagentOnlyExtensions: 'p', 'q'\n---\n",
+    "---\nname: \"a\", \"b\"\nmodel: 'x', 'y'\ndescription: \"\n---\n",
+    "---\ntools: \"\nmodel: '\n---\n",
 ]
 
 

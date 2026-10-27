@@ -3,7 +3,7 @@ docs/roadmap/pi-model-plan.md).
 
 Every test builds its own temp HOME and PI_CODING_AGENT_DIR. Nothing here
 reads or writes the real ~/.pi/agent. The profile-file tests drive the
-installed pi-subagents 0.77.0 profile code through tests/pi/profile_check.mjs
+installed pi-subagents 0.83.0 profile code through tests/pi/profile_check.mjs
 and skip, with the reason, when node or the package is missing.
 """
 
@@ -562,7 +562,7 @@ class ProfileFileTests(ApplyTestCase):
 
 @unittest.skipIf(skip_reason(), skip_reason() or "")
 class PiSubagentsProfileTests(ApplyTestCase):
-    """The written profile goes through pi-subagents 0.78.0's own code."""
+    """The written profile goes through pi-subagents 0.83.0's own code."""
 
     def node(self, action, stdin=None):
         env = dict(os.environ, PI_CODING_AGENT_DIR=str(self.agent_dir), HOME=str(self.home))
@@ -572,7 +572,7 @@ class PiSubagentsProfileTests(ApplyTestCase):
         return json.loads(proc.stdout.strip().splitlines()[-1])
 
     def test_version_is_pinned(self):
-        self.assertEqual(self.node("format", "{}")["version"], "0.78.0",
+        self.assertEqual(self.node("format", "{}")["version"], "0.83.0",
                          "pi-subagents changed version: re-verify the profile format (src/profiles/profiles.js)")
 
     def test_profile_passes_validation_and_load_restores_mapping(self):

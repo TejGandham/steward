@@ -177,7 +177,7 @@ CASES = [
 
 @unittest.skipIf(base.skip_reason(), base.skip_reason() or "")
 class ProfileValidatorMirrorTests(base.ApplyTestCase):
-    """The Python mirror agrees with pi-subagents 0.77.0's validator, case by case."""
+    """The Python mirror agrees with pi-subagents 0.83.0's validator, case by case."""
 
     def test_mirror_matches_installed_validator(self):
         directory = self.agent_dir / "profiles" / "pi-subagents"

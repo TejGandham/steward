@@ -92,7 +92,7 @@ class UnchangedRoleTests(base.ApplyTestCase):
 
 
 class LeaseTokenTests(base.ApplyTestCase):
-    """pi-subagents 0.77.0 file-lease.js:64-65: after moving a dead owner's
+    """pi-subagents 0.83.0 file-lease.js:64-65: after moving a dead owner's
     lease aside, the retired directory must still carry that owner's token."""
 
     def test_token_changed_during_recovery_refuses(self):
