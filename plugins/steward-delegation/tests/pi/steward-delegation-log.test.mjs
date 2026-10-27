@@ -420,10 +420,10 @@ test("rotation never overwrites an earlier rotated file", async () => {
 });
 
 // 0.14.2: `cwd` is where the child ran, `sessionCwd` where the session ran; line schema v2.
-// pi-subagents 0.78.0 reports the run directory as `cwd` on `subagent:async-started`
-// (src/runs/background/async-execution.js:1520,2105; workflows src/runs/foreground/
-// subagent-executor.js:5219) and in the async result file the completion spreads
-// (src/runs/background/subagent-runner.js:4783, src/runs/foreground/subagent-executor.js:5830).
+// pi-subagents 0.83.0 reports the run directory as `cwd` on `subagent:async-started`
+// (src/runs/background/async-execution.js:1524,2115; workflows src/runs/foreground/
+// subagent-executor.js:5379) and in the async result file the completion spreads
+// (src/runs/background/subagent-runner.js:4800, src/runs/foreground/subagent-executor.js:6014).
 // Sync results and workflow child records carry no cwd, so those fall back to the launch input.
 
 test("a sync launch without a cwd logs the session directory as both fields, v2", async () => {
